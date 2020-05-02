@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next gemini use-motion" lang="zh_CN">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.png?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="教程,博客," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="利用Hexo+GitHub搭建免费的个人博客这是一篇关于搭建个人博客的文章，图文详解搭建过程，本文使用Windows10 x64 2004(19041.207)系统演示。穷得只能在虚拟机里玩玩Macintosh">
+<meta property="og:type" content="article">
+<meta property="og:title" content="利用Hexo+GitHub搭建免费的个人博客">
+<meta property="og:url" content="http://yoursite.com/2020/04/27/buildBlog/index.html">
+<meta property="og:site_name" content="Problem_killer的部落阁">
+<meta property="og:description" content="利用Hexo+GitHub搭建免费的个人博客这是一篇关于搭建个人博客的文章，图文详解搭建过程，本文使用Windows10 x64 2004(19041.207)系统演示。穷得只能在虚拟机里玩玩Macintosh">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200427212655.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425101952.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425101958.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425121437.jpg">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425143409.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425151705.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425152034.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425174831.png">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200427213144.png">
+<meta property="article:published_time" content="2020-04-27T14:14:35.000Z">
+<meta property="article:modified_time" content="2020-04-30T15:16:22.582Z">
+<meta property="article:author" content="Problem_killer">
+<meta property="article:tag" content="教程">
+<meta property="article:tag" content="博客">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200427212655.png">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Gemini',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"post","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: 'Author'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yoursite.com/2020/04/27/buildBlog/"/>
+
+
+
+
+
+  <title>利用Hexo+GitHub搭建免费的个人博客 | Problem_killer的部落阁</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh_CN">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Problem_killer的部落阁</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle">幸好我是一个小胖子，难过的时候还可以摸摸小肚子:)</p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            Home
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-about">
+          <a href="/about/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-user"></i> <br />
+            
+            About
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            Tags
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            Archives
+          </a>
+        </li>
+      
+
+      
+    </ul>
+  
+
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/04/27/buildBlog/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="Problem_killer">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="/images/avatar.png">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Problem_killer的部落阁">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">利用Hexo+GitHub搭建免费的个人博客</h1>
+        
+
+        <div class="post-meta">
+          <span class="post-time">
+            
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              
+                <span class="post-meta-item-text">Posted on</span>
+              
+              <time title="Post created" itemprop="dateCreated datePublished" datetime="2020-04-27T22:14:35+08:00">
+                2020-04-27
+              </time>
+            
+
+            
+
+            
+          </span>
+
+          
+
+          
+            
+          
+
+          
+          
+
+          
+
+          
+
+          
+
+        </div>
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+      
+
+      
+        <h1 id="利用Hexo-GitHub搭建免费的个人博客"><a href="#利用Hexo-GitHub搭建免费的个人博客" class="headerlink" title="利用Hexo+GitHub搭建免费的个人博客"></a>利用Hexo+GitHub搭建免费的个人博客</h1><p>这是一篇关于搭建个人博客的文章，图文详解搭建过程，本文使用Windows10 x64 2004(19041.207)系统演示。<del>穷得只能在虚拟机里玩玩Macintosh</del></p>
+<a id="more"></a>
+
+<h2 id="1-众多疑问"><a href="#1-众多疑问" class="headerlink" title="1. 众多疑问"></a>1. 众多疑问</h2><h3 id="1-1-为什么要搭建个人博客"><a href="#1-1-为什么要搭建个人博客" class="headerlink" title="1.1 为什么要搭建个人博客"></a>1.1 为什么要搭建个人博客</h3><p>​        ——个人博客可以随心所欲地写你想写的东西，不受第三方网站所限制，此外，自由度高，可以个性化成你想要的样子。</p>
+<h3 id="1-2-Github是什么？"><a href="#1-2-Github是什么？" class="headerlink" title="1.2 Github是什么？"></a>1.2 <a href="https://github.com/" target="_blank" rel="noopener">Github</a>是什么？</h3><p>​        ——<a href="https://github.com/" target="_blank" rel="noopener">GitHub</a> 是一个面向开源及私有软件项目的托管平台，因为只支持 <a href="https://git-scm.com/" target="_blank" rel="noopener">Git</a> 作为唯一的版本库格式进行托管，故名 <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>。</p>
+<h3 id="1-3-Hexo是什么？"><a href="#1-3-Hexo是什么？" class="headerlink" title="1.3 Hexo是什么？"></a>1.3 <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a>是什么？</h3><p>​        ——<a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a>是当下主流的、简洁的、功能强大的博客框架。</p>
+<h2 id="2-扯回正题"><a href="#2-扯回正题" class="headerlink" title="2. 扯回正题"></a>2. 扯回正题</h2><h3 id="2-1-准备工作"><a href="#2-1-准备工作" class="headerlink" title="2.1 准备工作"></a>2.1 准备工作</h3><h4 id="2-1-1-所需软件："><a href="#2-1-1-所需软件：" class="headerlink" title="2.1.1 所需软件："></a>2.1.1 所需软件：</h4><p>​            1.<a href="http://nodejs.cn/download/" target="_blank" rel="noopener">Node.js</a>  <strong>安装时必须要勾选add to PATH</strong></p>
+<p>​            2.<a href="https://git-scm.com/downloads" target="_blank" rel="noopener">Git</a></p>
+<p>​            以上软件如果嫌下载慢的话可以用我的用某度网盘的分享链接</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">64位：https:&#x2F;&#x2F;pan.baidu.com&#x2F;s&#x2F;1Xul1JGRQTvOMHVKl2L4YMg提取码: 1tr7</span><br><span class="line">32位：https:&#x2F;&#x2F;pan.baidu.com&#x2F;s&#x2F;1TLyglLjX4rDtKbWE4xNkKA提取码: 2t9m</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-1-2-注册GitHub账号-有请忽略"><a href="#2-1-2-注册GitHub账号-有请忽略" class="headerlink" title="2.1.2 注册GitHub账号(有请忽略)"></a>2.1.2 注册GitHub账号(有请忽略)</h4><p>​            1.打开GitHub官网，会看到如下所示的界面：</p>
+<p><img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200427212655.png" alt=""></p>
+<p>​            2.直接输入你的用户名、电子邮箱和密码，注意起用户名时最好慎重，因为你的博客的地址将是username.github.io</p>
+<p>​            3.注册之后，你会看到如下界面，点击Join a free plan<img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425101952.png" alt=""></p>
+<p>​            4.接下来它会进行验证你是不是人 <del>这话咋有点不对呢？</del> </p>
+<p>​            5.接着，选择一下你平时写不写程序bulabula，<del>瞎填也不碍事儿</del></p>
+<p>​            6.现在，你的邮箱<del>不出意外的话</del>会收到一封类似验证码的东西，人肉提取那条重要的链接/按钮，访问/点击它。</p>
+<p>​            7.如果你成功地走到了这一步，那么恭喜你，你从此拥有了一个GitHub账号！</p>
+<h4 id="2-1-3-创建存储库"><a href="#2-1-3-创建存储库" class="headerlink" title="2.1.3 创建存储库"></a>2.1.3 创建存储库</h4><p>​            1.进入GitHub官网，登录，点击右上方你头像右边的那个向下的三角形，选择<em>Your repositories</em>点击<em>内个绿绿</em>的New，会跳出来一个配置界面，这么选:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425101958.png" alt=""></p>
+<p>​    注意：请务必勾选Initialize this repository with a README，并且仓库名<del>就是我画两个红杠杠的那一行</del>要用如下格式：username.github.io<em>注：username是你的用户名。</em></p>
+<p>​    因为我事先注册过一遍，所以会出现错误提示。最后点击<em>内个绿绿的</em>Create repository。至此，你的存储库就创建完成了！</p>
+<h3 id="2-2-开始工作"><a href="#2-2-开始工作" class="headerlink" title="2.2 开始工作"></a>2.2 开始工作</h3><p>​        注意，进入此步骤时我默认你之前的步骤（包括软件安装、账号注册、存储库常见）都做完了！</p>
+<p>​        <strong>此外，本教程的命令最好使用Git Bash，虽然CMD也可以执行但如果你出问题了不怪我。</strong></p>
+<h4 id="2-2-1-安装Hexo"><a href="#2-2-1-安装Hexo" class="headerlink" title="2.2.1 安装Hexo"></a>2.2.1 安装Hexo</h4><p>​                在Git安装目录下的bin目录下打开bash.exe，输入</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">npm install -g hexo-cli</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-2-2-初始化项目"><a href="#2-2-2-初始化项目" class="headerlink" title="2.2.2 初始化项目"></a>2.2.2 初始化项目</h4><p>​                在任意一个你喜欢的地方新建一个文件夹，名字随你便，我取的是blog。</p>
+<p>​                接着，进入那个文件夹，单击右键，选择Git Bash Here，等待一会，输入hexo init</p>
+<p>​                跑完代码后，恭喜你，你刚刚成功地初始化了你的项目。</p>
+<h4 id="2-2-3-本地测试"><a href="#2-2-3-本地测试" class="headerlink" title="2.2.3 本地测试"></a>2.2.3 本地测试</h4><p>​                输入hexo s,接着打开你的浏览器，输入localhost:4000，回车访问，如果不出意外的话，你会看到如下的界面：<del>搜狗输入法忽略了啊喂</del><img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425121437.jpg" alt=""></p>
+<h4 id="2-2-4-部署到远程GitHub仓库"><a href="#2-2-4-部署到远程GitHub仓库" class="headerlink" title="2.2.4 部署到远程GitHub仓库"></a>2.2.4 部署到远程GitHub仓库</h4><p>​                进入你的博客文件夹，找到_config.xml，如图：<img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425143409.png" alt=""></p>
+<p>​                选择用记事本打开，滑到底部，将它填写完整：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"># Deployment</span><br><span class="line">## Docs: https:&#x2F;&#x2F;hexo.io&#x2F;docs&#x2F;deployment.html</span><br><span class="line">deploy:</span><br><span class="line">  type: git</span><br><span class="line">  repo: </span><br><span class="line">  branch: master</span><br></pre></td></tr></table></figure>
+
+<p>​                补充完整不是直接跟着复制我相信你懂的</p>
+<h5 id="2-2-4-1-上面的repo地址获取方法"><a href="#2-2-4-1-上面的repo地址获取方法" class="headerlink" title="2.2.4.1 上面的repo地址获取方法"></a>2.2.4.1 上面的repo地址获取方法</h5><p>​                        如图所示，点击Your repositories，<img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425151705.png" alt=""></p>
+<p>​                        点击你的用来存放博客的那个仓库，点击从上到下数第二个<em>绿绿的</em>按钮，也就是Clone or Download，如图，选择Use SSH</p>
+<p><img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425152034.png" alt=""></p>
+<p>然后点击那个剪贴板图标，就能获取地址了。</p>
+<p>最后，把你的地址贴进_config.yml的末尾的repo里完成配置。</p>
+<h4 id="2-2-5-设置用户信息"><a href="#2-2-5-设置用户信息" class="headerlink" title="2.2.5 设置用户信息"></a>2.2.5 设置用户信息</h4><p>​                回到本地Hexo文件夹，右键菜单Git Bash Here，分别输入如下命令:</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">git config --global user.name &quot;哩滴GitHub丧滴名字&quot;</span><br><span class="line">git config --global user.email &quot;哩注册GitHub时使用滴邮箱&quot;</span><br></pre></td></tr></table></figure>
+
+<p>​                完成之后可以使用git config –list 来检验设置成功了否，如果列表里有user.name&amp;user.email并且值是正确的那么说明成功了。</p>
+<h4 id="2-2-6-配置SSH密钥"><a href="#2-2-6-配置SSH密钥" class="headerlink" title="2.2.6 配置SSH密钥"></a>2.2.6 配置SSH密钥</h4><p>​                首先删除.ssh文件夹（如果有的话）</p>
+<p>​                打开Git安装位置，进入bin文件夹，打开bash.exe</p>
+<p>​                输入：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ssh-keygen -t rsa -C 哩滴用户名</span><br></pre></td></tr></table></figure>
+
+<p>​                一路回车直到出现一个框框里面装着一些奇怪的东西。</p>
+<p>​                进入C:\用户\你的用户名\.ssh 文件夹,用记事本打开id_rsa.pub，里面的东西Ctrl+A &amp; Ctrl + C</p>
+<p>​                访问GitHub官网，点击右上角头像右边的倒三角，选择Settings，接着在左侧列表中点击SSH and GPG keys    ，如图所示，点击第一个<em>绿绿的</em>按钮<img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200425174831.png" alt=""></p>
+<p>​                跳出来的页面tittle随便填，下一个框子里把剪贴板里的那一大串复制进去，最后完成创建。</p>
+<h4 id="2-2-7-部署到GitHub仓库"><a href="#2-2-7-部署到GitHub仓库" class="headerlink" title="2.2.7 部署到GitHub仓库"></a>2.2.7 部署到GitHub仓库</h4><p>​                首先，在本地仓库文件夹内右键Git Bash Here，输入如下命令，安装一个帮我们部署的小玩意儿:</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">npm install hexo-deployer-git --save</span><br></pre></td></tr></table></figure>
+
+<p>​                接着，执行hexo clean与hexo deploy，出现如下图所示就是部署成功了。<img src="https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200427213144.png" alt=""></p>
+<h2 id="3-美化博客"><a href="#3-美化博客" class="headerlink" title="3.美化博客"></a>3.美化博客</h2><h3 id="3-1博客美化教程链接"><a href="#3-1博客美化教程链接" class="headerlink" title="3.1博客美化教程链接"></a>3.1博客美化教程链接</h3><p>​                        本文提供一个NexT主题，也是当下最流行的博客主题</p>
+<p>​                        进入你的本地hexo仓库，右键Git Bash Here，输入</p>
+<p>​                        <em>（吐槽Git Bash居然不能粘贴太气人了2333）</em></p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">git clone https:&#x2F;&#x2F;github.com&#x2F;iissnan&#x2F;hexo-theme-next themes&#x2F;next</span><br></pre></td></tr></table></figure>
+
+<p>​                        执行完上面的命令你会发现themes文件夹里多了一个next文件夹，说明克隆成功。</p>
+<p>​                        随后记事本打开站点配置文件(你的仓库目录\config.yml)，拉到最底，你会看到如下所示的内容：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"># Extensions</span><br><span class="line">## Plugins: https:&#x2F;&#x2F;hexo.io&#x2F;plugins&#x2F;</span><br><span class="line">## Themes: https:&#x2F;&#x2F;hexo.io&#x2F;themes&#x2F;</span><br><span class="line">theme: next(这里默认的是landspace，把它改成next)</span><br></pre></td></tr></table></figure>
+
+<p>​                        然后发布，过一分钟左右即可看到效果。</p>
+<p>​                        关于主题美化，可以参考如下链接：</p>
+<p>​                        墙裂推荐：<a href="https://blog.csdn.net/nightmare_dimple/article/details/86661502" target="_blank" rel="noopener">https://blog.csdn.net/nightmare_dimple/article/details/86661502</a></p>
+<p>​                        其余还有两篇本人认为比较好的:</p>
+<p>​                        <a href="https://blog.csdn.net/nightmare_dimple/article/details/86661502" target="_blank" rel="noopener">https://blog.csdn.net/nightmare_dimple/article/details/86661502</a></p>
+<p>​                        <a href="https://www.jianshu.com/p/6051077119d1" target="_blank" rel="noopener">https://www.jianshu.com/p/6051077119d1</a></p>
+<h1 id="完结撒花-★-°-☆-￣▽￣-°★-。"><a href="#完结撒花-★-°-☆-￣▽￣-°★-。" class="headerlink" title="完结撒花*★,°*:.☆(￣▽￣)/$:*.°★* 。"></a>完结撒花*★,°*:.☆(￣▽￣)/$:*.°★* 。</h1>
+      
+    </div>
+    
+    
+    
+
+    
+
+    
+
+    
+
+    <footer class="post-footer">
+      
+        <div class="post-tags">
+          
+            <a href="/tags/%E6%95%99%E7%A8%8B/" rel="tag"># 教程</a>
+          
+            <a href="/tags/%E5%8D%9A%E5%AE%A2/" rel="tag"># 博客</a>
+          
+        </div>
+      
+
+      
+      
+      
+
+      
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+            
+              <a href="/2020/04/23/welcomeVisit/" rel="next" title="欢迎来到小站">
+                <i class="fa fa-chevron-left"></i> 欢迎来到小站
+              </a>
+            
+          </div>
+
+          <span class="post-nav-divider"></span>
+
+          <div class="post-nav-prev post-nav-item">
+            
+              <a href="/2020/04/29/githubPicgo/" rel="prev" title="使用PicGo+GitHub搭建个人图床，让图片上传更随心所欲">
+                使用PicGo+GitHub搭建个人图床，让图片上传更随心所欲 <i class="fa fa-chevron-right"></i>
+              </a>
+            
+          </div>
+        </div>
+      
+
+      
+      
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            Table of Contents
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            Overview
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="/images/avatar.png"
+                alt="Problem_killer" />
+            
+              <p class="site-author-name" itemprop="name">Problem_killer</p>
+              <p class="site-description motion-element" itemprop="description"></p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7C%20archive">
+              
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">posts</span>
+                </a>
+              </div>
+            
+
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">4</span>
+                  <span class="site-state-item-name">tags</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#利用Hexo-GitHub搭建免费的个人博客"><span class="nav-number">1.</span> <span class="nav-text">利用Hexo+GitHub搭建免费的个人博客</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-众多疑问"><span class="nav-number">1.1.</span> <span class="nav-text">1. 众多疑问</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-1-为什么要搭建个人博客"><span class="nav-number">1.1.1.</span> <span class="nav-text">1.1 为什么要搭建个人博客</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-Github是什么？"><span class="nav-number">1.1.2.</span> <span class="nav-text">1.2 Github是什么？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-3-Hexo是什么？"><span class="nav-number">1.1.3.</span> <span class="nav-text">1.3 Hexo是什么？</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-扯回正题"><span class="nav-number">1.2.</span> <span class="nav-text">2. 扯回正题</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#2-1-准备工作"><span class="nav-number">1.2.1.</span> <span class="nav-text">2.1 准备工作</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#2-1-1-所需软件："><span class="nav-number">1.2.1.1.</span> <span class="nav-text">2.1.1 所需软件：</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-1-2-注册GitHub账号-有请忽略"><span class="nav-number">1.2.1.2.</span> <span class="nav-text">2.1.2 注册GitHub账号(有请忽略)</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-1-3-创建存储库"><span class="nav-number">1.2.1.3.</span> <span class="nav-text">2.1.3 创建存储库</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-2-开始工作"><span class="nav-number">1.2.2.</span> <span class="nav-text">2.2 开始工作</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-1-安装Hexo"><span class="nav-number">1.2.2.1.</span> <span class="nav-text">2.2.1 安装Hexo</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-2-初始化项目"><span class="nav-number">1.2.2.2.</span> <span class="nav-text">2.2.2 初始化项目</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-3-本地测试"><span class="nav-number">1.2.2.3.</span> <span class="nav-text">2.2.3 本地测试</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-4-部署到远程GitHub仓库"><span class="nav-number">1.2.2.4.</span> <span class="nav-text">2.2.4 部署到远程GitHub仓库</span></a><ol class="nav-child"><li class="nav-item nav-level-5"><a class="nav-link" href="#2-2-4-1-上面的repo地址获取方法"><span class="nav-number">1.2.2.4.1.</span> <span class="nav-text">2.2.4.1 上面的repo地址获取方法</span></a></li></ol></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-5-设置用户信息"><span class="nav-number">1.2.2.5.</span> <span class="nav-text">2.2.5 设置用户信息</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-6-配置SSH密钥"><span class="nav-number">1.2.2.6.</span> <span class="nav-text">2.2.6 配置SSH密钥</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-7-部署到GitHub仓库"><span class="nav-number">1.2.2.7.</span> <span class="nav-text">2.2.7 部署到GitHub仓库</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-美化博客"><span class="nav-number">1.3.</span> <span class="nav-text">3.美化博客</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#3-1博客美化教程链接"><span class="nav-number">1.3.1.</span> <span class="nav-text">3.1博客美化教程链接</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#完结撒花-★-°-☆-￣▽￣-°★-。"><span class="nav-number">2.</span> <span class="nav-text">完结撒花*★,°*:.☆(￣▽￣)&#x2F;$:*.°★* 。</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">Problem_killer</span>
+
+  
+</div>
+
+
+  <div class="powered-by">Powered by <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a></div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">Theme &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Gemini</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+
+  <script type="text/javascript" src="/js/src/affix.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/schemes/pisces.js?v=5.1.4"></script>
+
+
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
