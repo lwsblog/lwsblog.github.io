@@ -23,7 +23,7 @@ const ap = new APlayer({
 	},
 	{
 		name: "Fragments",
-		artist: 'ǧ��',
+		artist: '千坂',
 		url: 'http://music.163.com/song/media/outer/url?id=453130276.mp3',
 		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512213235.jpg',
 	},
