@@ -1,23 +1,37 @@
 const ap = new APlayer({
     container: document.getElementById('aplayer'),
     fixed: true,
-    autoplay: false,
+    autoplay: true,
     audio: [
 	{
-        		name: "Lifeline",
-        		artist: 'Zeraphym 六翼使徒',
-        		url: 'http://tool.liumingye.cn/music/dl/yqd/id/4da2uMTw3fEp1hyLM6kHUdhduoi5l4TSborUF1cVsyQ8lCg4vg/format/320000',
-        		cover: 'https://p1.music.126.net/rukrV8tgLCltzzT7ZJJ6Yw==/109951163861234431.jpg',
-      },{
-    		name: "Fences",
-        		artist: 'Vicetone,Matt Wertz',
-        		url: 'http://tool.liumingye.cn/music/dl/yqd/id/c29c-tUTq6qs7OZIXVcef5hL-YOJh71TgZlV9v97TixjwKKUCJOL/format/320000',
-        		cover: 'https://p2.music.126.net/vyFZN3UxyLCv0cAbQPwV2w==/109951163789368049.jpg',
-      },{
-        		name: "Something Strange",
-        		artist: 'Vicetone,Haley Reinhart',
-        		url: 'http://tool.liumingye.cn/music/dl/yqd/id/28314bIyeOA4eA89KnwOjY2HjV-vHfN8k_nqzFb9QPEhKUxg9jjv/format/320000',
-        		cover: 'https://p2.music.126.net/PtXdUP_SauZtgNoORRAX0A==/109951163628119319.jpg',
-      },
-    ]
+		name: "Summertime",
+		artist: 'K-391',
+		url: 'http://music.163.com/song/media/outer/url?id=32166628.mp3',
+		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512211912.jpg',
+	},
+	{
+		name: "Sunburst",
+		artist: 'Tobu,Itro',
+		url: 'http://music.163.com/song/media/outer/url?id=28830411.mp3',
+		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512212036.jpg',
+	},
+	{
+		name: "Blue Lights",
+		artist: 'Fumos',
+		url: 'http://music.163.com/song/media/outer/url?id=1376760895.mp3',
+		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512212222.jpg',
+	},
+	{
+		name: "Fragments",
+		artist: 'ǧ��',
+		url: 'http://music.163.com/song/media/outer/url?id=453130276.mp3',
+		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512213235.jpg',
+	},
+	{
+		name: "All In",
+		artist: 'L3V3LS',
+		url: 'http://music.163.com/song/media/outer/url?id=425684642.mp3',
+		cover: 'https://cdn.jsdelivr.net/gh/lwsblog/images@master/img/20200512213458.jpg',
+	},
+]
 });
