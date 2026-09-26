@@ -3,13 +3,13 @@
 ## Source: https://github.com/hexojs/hexo/
 
 # Site
-title: Hexo
-subtitle: ''
-description: ''
+title: WillowXI的小站
+subtitle: 'さぁ下剋上、自分を越えていけ！'
+description: '用镜头留住时间，用代码向未知靠近。这里记录光影、AI 与编程，也收录仍在生长的日常。'
 keywords:
-author: John Doe
-language: en
-timezone: ''
+author: WillowXI
+language: zh-CN
+timezone: Asia/Shanghai
 
 # URL
 ## Set your site url here. For example, if you use GitHub Page, set url as 'https://username.github.io/project'
