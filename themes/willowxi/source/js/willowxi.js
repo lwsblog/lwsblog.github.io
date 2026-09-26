@@ -7,6 +7,8 @@
   var intro = document.getElementById('willowxi-intro');
   var introEnded = false;
   var introTimers = [];
+  var pageObservers = [];
+  var closeNavigation = function () {};
 
   function onReady(callback) {
     if (document.readyState === 'loading') {
@@ -121,6 +123,8 @@
       body.classList.remove('nav-open');
     }
 
+    closeNavigation = closeNav;
+
     if (toggle && nav) {
       toggle.addEventListener('click', function () {
         var willOpen = toggle.getAttribute('aria-expanded') !== 'true';
@@ -202,6 +206,7 @@
         }
       });
     }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    pageObservers.push(observer);
 
     items.forEach(function (item, index) {
       item.style.setProperty('--reveal-delay', Math.min(index * 55, 330) + 'ms');
@@ -250,8 +255,21 @@
         });
       });
     }, { rootMargin: '-12% 0px -72% 0px', threshold: 0 });
+    pageObservers.push(observer);
 
     sections.forEach(function (section) { observer.observe(section); });
+  }
+
+  function teardownPageContent() {
+    pageObservers.forEach(function (observer) { observer.disconnect(); });
+    pageObservers = [];
+  }
+
+  function setupPageContent() {
+    setupReveal();
+    setupDetails();
+    setupToc();
+    setupCopyButtons();
   }
 
   function setupCopyButtons() {
@@ -288,78 +306,460 @@
     });
   }
 
+  function wait(duration) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, duration);
+    });
+  }
+
+  function forceReflow(element) {
+    return element.offsetWidth;
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function isHomeUrl(url) {
+    var target = new URL(url, window.location.href);
+    var homePath = new URL(config.homePath || '/', window.location.origin).pathname;
+    return target.pathname.replace(/\/+$/, '') === homePath.replace(/\/+$/, '');
+  }
+
+  function runCurtainTransition(transition) {
+    if (prefersReducedMotion()) {
+      transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home');
+      transition.classList.add('is-complete');
+      body.classList.remove('route-animating');
+      body.classList.add('route-ready');
+      return Promise.resolve();
+    }
+
+    var needsContentReveal = !body.classList.contains('route-ready');
+    transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home', 'is-complete');
+    forceReflow(transition);
+    body.classList.add('route-animating');
+    transition.classList.add('is-running');
+
+    if (needsContentReveal) {
+      window.setTimeout(function () {
+        body.classList.add('route-ready');
+      }, 960);
+    }
+
+    return wait(2430).then(function () {
+      transition.classList.remove('is-running', 'is-held', 'is-home');
+      transition.classList.add('is-complete');
+      body.classList.remove('route-animating');
+      body.classList.add('route-ready');
+    });
+  }
+
+  function holdCurtain(transition) {
+    transition.classList.remove('is-running', 'is-pending', 'is-home', 'is-complete');
+    forceReflow(transition);
+    transition.classList.add('is-held');
+    body.classList.add('route-animating');
+  }
+
+  function runHomeReturnTransition(transition, homeReturn) {
+    if (prefersReducedMotion()) {
+      transition.classList.add('is-complete');
+      homeReturn.classList.remove('is-held', 'is-running');
+      homeReturn.classList.add('is-complete');
+      body.classList.remove('route-animating');
+      body.classList.add('route-ready');
+      return Promise.resolve();
+    }
+
+    homeReturn.classList.remove('is-running', 'is-complete');
+    homeReturn.classList.add('is-held');
+    forceReflow(homeReturn);
+
+    transition.classList.remove('is-held', 'is-running', 'is-home');
+    transition.classList.add('is-complete');
+
+    body.classList.add('route-animating');
+    homeReturn.classList.remove('is-held');
+    homeReturn.classList.add('is-running');
+
+    return wait(1710).then(function () {
+      homeReturn.classList.remove('is-running', 'is-held');
+      homeReturn.classList.add('is-complete');
+      transition.classList.remove('is-held', 'is-running');
+      transition.classList.add('is-complete');
+      body.classList.remove('route-animating');
+      body.classList.add('route-ready');
+    });
+  }
+
   function setupRouteTransition() {
     var transition = document.querySelector('[data-route-transition]');
     if (!transition) return;
 
-    var duration = 2350;
-    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (reducedMotion) {
+    if (
+      prefersReducedMotion() ||
+      !body.classList.contains('is-post') ||
+      transition.classList.contains('is-complete')
+    ) {
+      transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home');
       transition.classList.add('is-complete');
+      body.classList.remove('route-animating');
       body.classList.add('route-ready');
       return;
     }
 
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        transition.classList.remove('is-pending');
-        transition.classList.add('is-running');
-        body.classList.add('route-animating');
-      });
-    });
-
-    window.setTimeout(function () {
-      body.classList.add('route-ready');
-    }, 960);
-
-    window.setTimeout(function () {
-      transition.classList.add('is-complete');
-      body.classList.remove('route-animating');
-      body.classList.add('route-ready');
-    }, duration + 80);
+    runCurtainTransition(transition);
   }
 
-  function setupLinks() {
-    if (!('requestAnimationFrame' in window)) return;
-    var loader = document.querySelector('.route-loader');
+  function setupPjax() {
+    var transition = document.querySelector('[data-route-transition]');
     var exit = document.querySelector('[data-route-exit]');
-    if (!loader || !exit) return;
-    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var navigating = false;
+    var homeReturn = document.querySelector('[data-home-return-transition]');
+    var loader = document.querySelector('.route-loader');
 
-    function resetNavigationState(event) {
-      if (!event.persisted) return;
+    if (
+      !transition ||
+      !exit ||
+      !homeReturn ||
+      !loader ||
+      !window.fetch ||
+      !window.history ||
+      !window.DOMParser
+    ) {
+      return;
+    }
+
+    var navigating = false;
+    var queuedNavigation = null;
+    var renderedUrl = new URL(window.location.href);
+    var scrollFrame = 0;
+
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+
+    try {
+      var initialState = window.history.state || {};
+      if (typeof initialState.willowxiScrollY !== 'number') {
+        initialState.willowxiScrollY = window.scrollY;
+        window.history.replaceState(initialState, '', window.location.href);
+      }
+    } catch (error) {
+      // PJAX still works when the browser restricts history state.
+    }
+
+    function persistScroll() {
+      try {
+        var state = window.history.state || {};
+        state.willowxiScrollY = window.scrollY;
+        window.history.replaceState(state, '', window.location.href);
+      } catch (error) {
+        // A failed scroll checkpoint should not interrupt navigation.
+      }
+    }
+
+    function sameDocument(left, right) {
+      return (
+        left.origin === right.origin &&
+        left.pathname === right.pathname &&
+        left.search === right.search
+      );
+    }
+
+    function finishNavigation() {
       navigating = false;
-      body.classList.remove('route-leaving');
-      body.classList.remove('route-animating');
       loader.classList.remove('is-active');
     }
 
-    window.addEventListener('pageshow', resetNavigationState);
+    function failNavigation(destination, error) {
+      if (window.console && window.console.error) {
+        window.console.error('WillowXI PJAX navigation failed.', error);
+      }
 
-    document.addEventListener('click', function (event) {
-      var link = event.target.closest('a[href]');
-      if (!link) return;
-      var href = link.getAttribute('href');
-      if (!href || href.charAt(0) === '#' || link.target === '_blank') return;
-      if (link.origin !== window.location.origin) return;
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      if (link.hasAttribute('download') || navigating || link.href === window.location.href) return;
+      navigating = false;
+      body.classList.remove('route-leaving', 'route-animating');
+      body.classList.add('route-ready');
+      transition.classList.remove('is-held', 'is-running', 'is-home');
+      transition.classList.add('is-complete');
+      homeReturn.classList.remove('is-held', 'is-running');
+      homeReturn.classList.add('is-complete');
+      loader.classList.remove('is-active');
+      window.location.assign(destination.href);
+    }
 
-      event.preventDefault();
-      navigating = true;
-      loader.classList.add('is-active');
+    function fetchPage(destination) {
+      return window.fetch(destination.href, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        return response.text();
+      }).then(function (html) {
+        var documentCopy = new window.DOMParser().parseFromString(html, 'text/html');
+        var nextMain = documentCopy.querySelector('[data-pjax-container]');
 
-      if (reducedMotion) {
-        window.location.href = link.href;
+        if (!nextMain) {
+          throw new Error('PJAX container missing');
+        }
+
+        return {
+          document: documentCopy,
+          main: nextMain
+        };
+      });
+    }
+
+    function syncMeta(documentCopy) {
+      [
+        'meta[name="description"]',
+        'meta[property="og:title"]',
+        'meta[property="og:description"]',
+        'meta[property="og:url"]'
+      ].forEach(function (selector) {
+        var source = documentCopy.querySelector(selector);
+        var target = document.querySelector(selector);
+        if (source && target) {
+          target.setAttribute('content', source.getAttribute('content') || '');
+        }
+      });
+
+      var canonical = documentCopy.querySelector('link[rel="canonical"]');
+      var currentCanonical = document.querySelector('link[rel="canonical"]');
+      if (canonical && currentCanonical) {
+        currentCanonical.setAttribute('href', canonical.getAttribute('href') || '');
+      }
+    }
+
+    function syncNavigation(destination) {
+      var currentPath = destination.pathname;
+      var homePath = new URL(config.homePath || '/', window.location.origin).pathname;
+
+      document.querySelectorAll('.site-nav__link').forEach(function (link) {
+        var linkUrl = new URL(link.getAttribute('href'), window.location.href);
+        var linkPath = linkUrl.pathname;
+        var isActive = linkPath === currentPath || (
+          linkPath !== homePath &&
+          linkPath !== '/' &&
+          currentPath.indexOf(linkPath) === 0
+        );
+
+        link.classList.toggle('is-active', isActive);
+        if (isActive) {
+          link.setAttribute('aria-current', 'page');
+        } else {
+          link.removeAttribute('aria-current');
+        }
+      });
+    }
+
+    function scrollToDestination(destination, restoreScroll) {
+      if (destination.hash) {
+        var targetId = destination.hash.slice(1);
+        try {
+          targetId = decodeURIComponent(targetId);
+        } catch (error) {
+          // Keep the encoded fragment when it is not valid URI text.
+        }
+
+        var target = document.getElementById(targetId);
+        if (target) {
+          target.scrollIntoView({ block: 'start' });
+          return;
+        }
+      }
+
+      var top = typeof restoreScroll === 'number' ? restoreScroll : 0;
+      window.scrollTo({ top: top, left: 0, behavior: 'auto' });
+    }
+
+    function applyPage(result, destination) {
+      var currentMain = document.querySelector('[data-pjax-container]');
+      if (!currentMain) {
+        throw new Error('Current PJAX container missing');
+      }
+
+      teardownPageContent();
+      currentMain.replaceWith(result.main);
+
+      if (result.document.title) {
+        document.title = result.document.title;
+      }
+
+      syncMeta(result.document);
+      ['is-home', 'is-inner', 'is-post'].forEach(function (className) {
+        body.classList.toggle(className, result.document.body.classList.contains(className));
+      });
+
+      config.home = isHomeUrl(destination);
+      config.introEnabled = false;
+      syncNavigation(destination);
+      setupPageContent();
+      renderedUrl = new URL(destination.href);
+    }
+
+    function navigate(destination, options) {
+      if (navigating) {
+        queuedNavigation = {
+          destination: new URL(destination.href),
+          options: options || {}
+        };
         return;
       }
 
-      body.classList.add('route-leaving');
-      window.setTimeout(function () {
-        window.location.href = link.href;
-      }, 680);
+      var target = new URL(destination.href);
+      var reducedMotion = prefersReducedMotion();
+      var restoreScroll = typeof options.restoreScroll === 'number'
+        ? options.restoreScroll
+        : 0;
+
+      persistScroll();
+      navigating = true;
+      closeNavigation();
+
+      loader.classList.remove('is-active');
+      forceReflow(loader);
+      loader.classList.add('is-active');
+
+      if (!reducedMotion) {
+        body.classList.add('route-leaving');
+      }
+
+      var navigationPromise = Promise.all([
+        fetchPage(target),
+        reducedMotion ? Promise.resolve() : wait(680)
+      ]).then(function (results) {
+        if (options.mode === 'push') {
+          var nextIndex = Number(window.history.state && window.history.state.willowxiIndex) || 0;
+          window.history.pushState(
+            {
+              willowxiIndex: nextIndex + 1,
+              willowxiScrollY: restoreScroll
+            },
+            '',
+            target.href
+          );
+        }
+
+        if (!reducedMotion) {
+          holdCurtain(transition);
+        }
+
+        applyPage(results[0], target);
+        body.classList.remove('route-leaving');
+        scrollToDestination(target, restoreScroll);
+
+        if (reducedMotion) {
+          transition.classList.add('is-complete');
+          body.classList.remove('route-animating');
+          body.classList.add('route-ready');
+          return null;
+        }
+
+        if (isHomeUrl(target)) {
+          return runHomeReturnTransition(transition, homeReturn);
+        }
+
+        return runCurtainTransition(transition);
+      }).then(function () {
+        finishNavigation();
+      }).catch(function (error) {
+        failNavigation(target, error);
+      });
+
+      navigationPromise.then(function () {
+        if (!queuedNavigation) return;
+
+        var pending = queuedNavigation;
+        queuedNavigation = null;
+
+        if (!sameDocument(new URL(window.location.href), renderedUrl)) {
+          navigate(pending.destination, pending.options);
+        }
+      });
+    }
+
+    function getPjaxUrl(link, event) {
+      if (
+        !link ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return null;
+      }
+
+      if (link.target && link.target.toLowerCase() !== '_self') return null;
+      if (link.hasAttribute('download') || link.dataset.pjax === 'false') return null;
+
+      var rawHref = link.getAttribute('href');
+      if (!rawHref || rawHref.charAt(0) === '#') return null;
+
+      var destination;
+      try {
+        destination = new URL(rawHref, window.location.href);
+      } catch (error) {
+        return null;
+      }
+
+      if (destination.origin !== window.location.origin) return null;
+      if (destination.protocol !== 'http:' && destination.protocol !== 'https:') return null;
+      if (/\.(?:avif|css|gif|jpe?g|js|json|mp3|mp4|pdf|png|svg|webp|xml|zip)$/i.test(destination.pathname)) {
+        return null;
+      }
+      if (sameDocument(destination, new URL(window.location.href))) return null;
+
+      return destination;
+    }
+
+    document.addEventListener('click', function (event) {
+      var link = event.target.closest('a[href]');
+      var destination = getPjaxUrl(link, event);
+      if (!destination) return;
+
+      event.preventDefault();
+      navigate(destination, { mode: 'push', restoreScroll: 0 });
+    });
+
+    window.addEventListener('popstate', function (event) {
+      var destination = new URL(window.location.href);
+
+      if (sameDocument(destination, renderedUrl)) {
+        return;
+      }
+
+      var restoreScroll = event.state && typeof event.state.willowxiScrollY === 'number'
+        ? event.state.willowxiScrollY
+        : 0;
+
+      navigate(destination, { mode: 'pop', restoreScroll: restoreScroll });
+    });
+
+    window.addEventListener('scroll', function () {
+      if (navigating || scrollFrame) return;
+      scrollFrame = window.requestAnimationFrame(function () {
+        scrollFrame = 0;
+        persistScroll();
+      });
+    }, { passive: true });
+
+    window.addEventListener('pageshow', function (event) {
+      if (!event.persisted) return;
+
+      navigating = false;
+      renderedUrl = new URL(window.location.href);
+      body.classList.remove('route-leaving', 'route-animating');
+      body.classList.add('route-ready');
+      transition.classList.remove('is-held', 'is-running', 'is-home');
+      transition.classList.add('is-complete');
+      homeReturn.classList.remove('is-held', 'is-running');
+      homeReturn.classList.add('is-complete');
+      loader.classList.remove('is-active');
     });
   }
 
@@ -368,10 +768,7 @@
     setupRouteTransition();
     startIntro();
     setupHeader();
-    setupReveal();
-    setupDetails();
-    setupToc();
-    setupCopyButtons();
-    setupLinks();
+    setupPageContent();
+    setupPjax();
   });
 })();

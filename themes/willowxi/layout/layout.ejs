@@ -9,7 +9,7 @@
 
       <%- partial('_partial/header') %>
 
-      <main id="main" class="main-content">
+      <main id="main" class="main-content" data-pjax-container>
         <%- body %>
       </main>
 
@@ -22,24 +22,25 @@
 
     <div class="route-exit" data-route-exit aria-hidden="true"></div>
 
-    <% if (is_post()) { %>
-      <div class="route-transition is-pending" data-route-transition aria-hidden="true">
-        <div class="route-transition__veil route-transition__veil--top"></div>
-        <div class="route-transition__veil route-transition__veil--bottom"></div>
-        <div class="route-transition__seam">
-          <span class="route-transition__dot"></span>
-          <span class="route-transition__line"></span>
-          <span class="route-transition__split route-transition__split--top"></span>
-          <span class="route-transition__split route-transition__split--bottom"></span>
-        </div>
+    <div class="home-return" data-home-return-transition aria-hidden="true"></div>
+
+    <div class="route-transition <%= is_post() ? 'is-pending' : 'is-complete' %>" data-route-transition aria-hidden="true">
+      <div class="route-transition__veil route-transition__veil--top"></div>
+      <div class="route-transition__veil route-transition__veil--bottom"></div>
+      <div class="route-transition__seam">
+        <span class="route-transition__dot"></span>
+        <span class="route-transition__line"></span>
+        <span class="route-transition__split route-transition__split--top"></span>
+        <span class="route-transition__split route-transition__split--bottom"></span>
       </div>
-    <% } %>
+    </div>
 
     <script>
       window.WILLOWXI_THEME = <%- JSON.stringify({
         introDuration: theme.intro && theme.intro.duration ? theme.intro.duration : 5900,
         introEnabled: is_home() && !!(theme.intro && theme.intro.enabled !== false),
-        home: is_home()
+        home: is_home(),
+        homePath: url_for('/')
       }) %>;
     </script>
     <script src="<%- url_for('/js/willowxi.js') %>" defer></script>

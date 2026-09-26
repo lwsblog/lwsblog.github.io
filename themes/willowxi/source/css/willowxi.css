@@ -2280,7 +2280,7 @@ a.archive-row:hover {
 }
 
 html.js body.is-post:not(.route-ready),
-html.js body.is-post.route-animating {
+html.js body.route-animating {
   overflow: hidden;
 }
 
@@ -2418,6 +2418,10 @@ html.js .route-transition.is-complete {
   display: none;
 }
 
+html.js .route-transition.is-held {
+  display: block;
+}
+
 @keyframes route-dot {
   0%, 4% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
   8% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.68); }
@@ -2454,6 +2458,73 @@ html.js .route-transition.is-complete {
   0%, 46% { opacity: 1; transform: translateY(0); }
   48% { opacity: 1; transform: translateY(0); }
   100% { opacity: 1; transform: translateY(100%); }
+}
+
+.home-return {
+  position: fixed;
+  z-index: 245;
+  inset: 0;
+  display: none;
+  overflow: hidden;
+  background: var(--route-veil);
+  opacity: 1;
+  pointer-events: none;
+}
+
+html.js .home-return {
+  display: block;
+}
+
+.home-return::before,
+.home-return::after {
+  position: absolute;
+  top: -50%;
+  bottom: -50%;
+  left: 0;
+  width: 76vw;
+  background: linear-gradient(118deg, transparent 0 43%, #fff 43% 49%, transparent 49%);
+  content: "";
+  opacity: 0;
+  filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.42));
+  transform: translateX(-135%) skewX(-7deg);
+  will-change: opacity, transform;
+}
+
+.home-return::after {
+  width: 54vw;
+  background: linear-gradient(118deg, transparent 0 53%, #fff 53% 56%, transparent 56%);
+}
+
+.home-return.is-held {
+  opacity: 1;
+}
+
+html.js .home-return.is-complete {
+  display: none;
+}
+
+.home-return.is-running {
+  animation: home-return-veil 1.71s var(--ease-sharp) both;
+}
+
+.home-return.is-running::before {
+  animation: home-return-slash 1.08s var(--ease-sharp) 70ms both;
+}
+
+.home-return.is-running::after {
+  animation: home-return-slash 1.08s var(--ease-sharp) 180ms both;
+}
+
+@keyframes home-return-veil {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes home-return-slash {
+  0% { opacity: 0; transform: translateX(-135%) skewX(-7deg); }
+  14% { opacity: 1; }
+  76% { opacity: 0.94; }
+  100% { opacity: 0; transform: translateX(165%) skewX(-7deg); }
 }
 
 .route-exit {
