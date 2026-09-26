@@ -1,0 +1,20 @@
+<section class="listing page-enter">
+  <header class="listing__header">
+    <span class="micro-label">SIGNAL / TAXONOMY</span>
+    <h1><%= page.category || page.tag || page.title %></h1>
+    <p><%= page.posts.length %> 条相关记录。</p>
+  </header>
+
+  <div class="taxonomy-list">
+    <% page.posts.each(function(post) { %>
+      <a class="archive-row" href="<%- url_for(post.path) %>">
+        <time><%= date(post.date, 'YYYY.MM.DD') %></time>
+        <strong><%= post.title %></strong>
+        <span><%= post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED' %></span>
+        <%- partial('_partial/icons', {name: 'arrow-up-right', size: 16}) %>
+      </a>
+    <% }); %>
+  </div>
+
+  <%- partial('_partial/pagination') %>
+</section>

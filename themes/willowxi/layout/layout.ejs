@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="<%= config.language || 'zh-CN' %>">
+  <%- partial('_partial/head') %>
+  <body class="<%= is_home() ? 'is-home' : 'is-inner' %>">
+    <div class="app-shell">
+      <% if (is_home() && theme.intro && theme.intro.enabled !== false) { %>
+        <%- partial('_partial/intro') %>
+      <% } %>
+
+      <%- partial('_partial/header') %>
+
+      <main id="main" class="main-content">
+        <%- body %>
+      </main>
+
+      <%- partial('_partial/footer') %>
+    </div>
+
+    <div class="route-loader" aria-hidden="true">
+      <span></span>
+    </div>
+
+    <script>
+      window.WILLOWXI_THEME = <%- JSON.stringify({
+        introDuration: theme.intro && theme.intro.duration ? theme.intro.duration : 5900,
+        introEnabled: is_home() && !!(theme.intro && theme.intro.enabled !== false),
+        home: is_home()
+      }) %>;
+    </script>
+    <script src="<%- url_for('/js/willowxi.js') %>" defer></script>
+  </body>
+</html>

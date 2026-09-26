@@ -1,0 +1,82 @@
+<article class="article page-enter">
+  <header class="article__header">
+    <div class="article__crumbs">
+      <a href="<%- url_for('/') %>">INDEX</a>
+      <span>/</span>
+      <% if (page.categories && page.categories.length) { %>
+        <a href="<%- url_for(page.categories.first().path) %>"><%= page.categories.first().name %></a>
+      <% } else { %>
+        <span>UNSORTED</span>
+      <% } %>
+    </div>
+
+    <div class="article__heading">
+      <span class="micro-label">ARTICLE / <%= date(page.date, 'YYYY.MM.DD') %></span>
+      <h1><%= page.title %></h1>
+      <% if (page.description) { %><p><%= page.description %></p><% } %>
+    </div>
+
+    <div class="article__meta">
+      <span><%- partial('_partial/icons', {name: 'calendar', size: 15}) %> <%= date(page.date, 'YYYY.MM.DD') %></span>
+      <% if (page.categories && page.categories.length) { %>
+        <span><%= page.categories.toArray().map(function(cat) { return cat.name; }).join(' / ') %></span>
+      <% } %>
+      <span><%= Math.max(1, Math.ceil(strip_html(page.content).length / 500)) %> MIN READ</span>
+    </div>
+  </header>
+
+  <% if (page.cover) { %>
+    <figure class="article__cover">
+      <img src="<%- url_for(page.cover) %>" alt="<%= page.title %>">
+      <figcaption>WILLOWXI / VISUAL NOTE</figcaption>
+    </figure>
+  <% } else { %>
+    <div class="article__visual" aria-hidden="true">
+      <span class="article__visual-mark"><%= theme.identity.mark || 'W' %></span>
+      <span class="article__visual-line"></span>
+      <span class="article__visual-code">FRAME-<%= page.date.format('YYYYMMDD') %></span>
+    </div>
+  <% } %>
+
+  <div class="article__layout">
+    <% if (theme.post.toc !== false) { %>
+      <aside class="article__toc" data-toc>
+        <span class="micro-label">CONTENTS</span>
+        <%- toc(page.content) %>
+      </aside>
+    <% } %>
+
+    <div class="article__body prose">
+      <%- page.content %>
+    </div>
+  </div>
+
+  <footer class="article__footer">
+    <% if (page.tags && page.tags.length) { %>
+      <div class="article__tags">
+        <% page.tags.each(function(tag) { %>
+          <a href="<%- url_for(tag.path) %>">#<%= tag.name %></a>
+        <% }); %>
+      </div>
+    <% } %>
+    <a class="article__back" href="<%- url_for('/') %>">
+      <%- partial('_partial/icons', {name: 'arrow-left', size: 17}) %>
+      <span>BACK TO INDEX</span>
+    </a>
+  </footer>
+</article>
+
+<nav class="article-nav" aria-label="上一篇和下一篇">
+  <% if (page.prev) { %>
+    <a href="<%- url_for(page.prev.path) %>">
+      <span class="micro-label">PREVIOUS</span>
+      <strong><%= page.prev.title %></strong>
+    </a>
+  <% } else { %><span></span><% } %>
+  <% if (page.next) { %>
+    <a href="<%- url_for(page.next.path) %>">
+      <span class="micro-label">NEXT</span>
+      <strong><%= page.next.title %></strong>
+    </a>
+  <% } %>
+</nav>

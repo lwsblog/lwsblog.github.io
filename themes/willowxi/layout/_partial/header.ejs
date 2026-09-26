@@ -1,0 +1,31 @@
+<header class="site-header" data-header>
+  <a class="brand" href="<%- url_for('/') %>" aria-label="WillowXI 首页">
+    <span class="brand__mark" aria-hidden="true"><%= theme.identity.mark || 'W' %></span>
+    <span class="brand__text">
+      <strong><%= theme.identity.name || config.author %></strong>
+      <small><%= theme.identity.eyebrow || 'PERSONAL ARCHIVE' %></small>
+    </span>
+  </a>
+
+  <nav class="site-nav" aria-label="主导航" data-nav>
+    <% Object.keys(theme.menu || {}).forEach(function(label) { %>
+      <% const target = theme.menu[label]; %>
+      <% const current = is_current(target); %>
+      <a class="site-nav__link<%= current ? ' is-active' : '' %>" href="<%- url_for(target) %>"<%= current ? ' aria-current="page"' : '' %>>
+        <span><%= label %></span>
+        <small><%= String(Object.keys(theme.menu).indexOf(label) + 1).padStart(2, '0') %></small>
+      </a>
+    <% }); %>
+
+    <% if (theme.social && theme.social.github) { %>
+      <a class="site-nav__icon" href="<%= theme.social.github %>" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        <%- partial('_partial/icons', {name: 'github', size: 17}) %>
+      </a>
+    <% } %>
+  </nav>
+
+  <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>
+    <span data-nav-icon="open"><%- partial('_partial/icons', {name: 'menu', size: 20}) %></span>
+    <span data-nav-icon="close"><%- partial('_partial/icons', {name: 'x', size: 20}) %></span>
+  </button>
+</header>

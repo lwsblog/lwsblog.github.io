@@ -1,0 +1,19 @@
+<% if (page.total > 1) { %>
+  <nav class="pagination" aria-label="分页">
+    <% if (page.prev) { %>
+      <a href="<%- url_for(page.prev_link) %>">
+        <%- partial('_partial/icons', {name: 'arrow-left', size: 17}) %>
+        <span>PREV</span>
+      </a>
+    <% } else { %>
+      <span></span>
+    <% } %>
+    <span class="pagination__count"><%= page.current %> / <%= page.total %></span>
+    <% if (page.next) { %>
+      <a href="<%- url_for(page.next_link) %>">
+        <span>NEXT</span>
+        <%- partial('_partial/icons', {name: 'arrow-right', size: 17}) %>
+      </a>
+    <% } %>
+  </nav>
+<% } %>

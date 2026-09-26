@@ -1,0 +1,55 @@
+<div class="intro" id="willowxi-intro" role="dialog" aria-modal="true" aria-label="WillowXI 进场动画">
+  <div class="intro__grid" aria-hidden="true"></div>
+  <div class="intro__scan" aria-hidden="true"></div>
+  <div class="intro__shards" aria-hidden="true">
+    <span></span><span></span><span></span><span></span>
+  </div>
+
+  <button class="intro__skip" type="button" data-intro-skip>
+    <span>SKIP</span>
+    <small>点击任意处跳过</small>
+  </button>
+
+  <div class="intro__stage">
+    <div class="intro__frame" aria-hidden="true">
+      <span class="intro__corner intro__corner--tl"></span>
+      <span class="intro__corner intro__corner--tr"></span>
+      <span class="intro__corner intro__corner--bl"></span>
+      <span class="intro__corner intro__corner--br"></span>
+      <div class="intro__diamond"></div>
+      <div class="intro__core"><%= theme.identity.mark || 'W' %></div>
+    </div>
+
+    <div class="intro__eyebrow" data-intro-copy>PERSONAL ARCHIVE / SYSTEM 01</div>
+    <h1 class="intro__title" aria-label="<%= theme.identity.name || 'WillowXI' %>">
+      <% (theme.identity.name || 'WillowXI').split('').forEach(function(letter) { %>
+        <span><%= letter %></span>
+      <% }); %>
+    </h1>
+    <p class="intro__subtitle" data-intro-copy><%= theme.identity.tagline || '' %></p>
+
+    <div class="intro__progress" data-intro-copy>
+      <div class="intro__progress-head">
+        <span>LOADING ARCHIVE</span>
+        <strong><span data-intro-count>000</span>%</strong>
+      </div>
+      <div class="intro__track"><span data-intro-bar></span></div>
+      <div class="intro__ticks" aria-hidden="true">
+        <% for (let i = 0; i < 19; i++) { %><i></i><% } %>
+      </div>
+    </div>
+
+    <div class="intro__actions" data-intro-copy>
+      <button class="button button--solid" type="button" data-intro-enter>
+        <span><%= theme.home.direct_entry || '直接进入文章' %></span>
+        <%- partial('_partial/icons', {name: 'arrow-up-right', size: 17}) %>
+      </button>
+      <span class="intro__hint">CLICK ANYWHERE TO SKIP</span>
+    </div>
+  </div>
+
+  <div class="intro__footer" aria-hidden="true">
+    <span>WILLOWXI // <span data-intro-year></span></span>
+    <span>PHOTOGRAPHY · AI · CODE</span>
+  </div>
+</div>

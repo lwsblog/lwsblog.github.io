@@ -1,0 +1,38 @@
+# WillowXI theme
+# All display text is intentionally short because the UI uses an editorial,
+# terminal-like visual language.
+
+menu:
+  INDEX: /
+  ARCHIVE: /archives/
+
+identity:
+  name: WillowXI
+  mark: W
+  eyebrow: PHOTOGRAPHY / AI / CODE
+  tagline: 'さぁ下剋上、自分を越えていけ！'
+  description: '记录光影、AI 与编程，也收录仍在生长的日常。'
+  location: CN / SHANGHAI
+  status: ONLINE
+
+# The full-screen sequence is shown on the home page. Visitors can skip it
+# anywhere, and the home page also keeps a direct entry control.
+intro:
+  enabled: true
+  duration: 5900
+
+home:
+  direct_entry: '直接进入文章'
+  stream_title: 'SIGNAL GROUPS'
+  stream_description: '按主题折叠整理。选择一组，展开阅读。'
+
+post:
+  excerpt_length: 118
+  toc: true
+
+footer:
+  since: 2026
+  notice: 'WILLOWXI / PERSONAL ARCHIVE'
+
+social:
+  github: https://github.com/lwsblog

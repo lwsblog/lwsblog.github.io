@@ -1,0 +1,120 @@
+<%
+  const groups = new Map();
+  page.posts.each(function(post) {
+    const category = post.categories && post.categories.length
+      ? post.categories.first().name
+      : 'UNSORTED';
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(post);
+  });
+  const orderedGroups = Array.from(groups.entries()).sort(function(a, b) {
+    return b[1][0].date.valueOf() - a[1][0].date.valueOf();
+  });
+%>
+
+<section class="home-hero">
+  <div class="home-hero__noise" aria-hidden="true"></div>
+  <div class="home-hero__geometry" aria-hidden="true">
+    <span class="geometry__diamond"></span>
+    <span class="geometry__line geometry__line--one"></span>
+    <span class="geometry__line geometry__line--two"></span>
+    <span class="geometry__code">0101<br>WX</span>
+  </div>
+
+  <div class="home-hero__content">
+    <div class="home-hero__eyebrow">
+      <span class="status-dot"></span>
+      <span><%= theme.identity.status || 'ONLINE' %></span>
+      <i></i>
+      <span>FRAME 00 / PERSONAL ARCHIVE</span>
+    </div>
+
+    <h1>
+      <span class="home-hero__name"><%= theme.identity.name || 'WillowXI' %></span>
+      <span class="home-hero__cn">的小站</span>
+    </h1>
+
+    <p class="home-hero__tagline"><%= theme.identity.tagline || '' %></p>
+    <p class="home-hero__description"><%= theme.identity.description || config.description %></p>
+
+    <div class="home-hero__actions">
+      <a class="button button--solid" href="#stream">
+        <span><%= theme.home.direct_entry || '直接进入文章' %></span>
+        <%- partial('_partial/icons', {name: 'arrow-up-right', size: 17}) %>
+      </a>
+      <% if (theme.social && theme.social.github) { %>
+        <a class="button button--ghost" href="<%= theme.social.github %>" target="_blank" rel="noopener noreferrer">
+          <%- partial('_partial/icons', {name: 'github', size: 17}) %>
+          <span>GITHUB</span>
+        </a>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="home-hero__side">
+    <div class="home-hero__metric">
+      <span>POSTS</span>
+      <strong><%= site.posts.length.toString().padStart(2, '0') %></strong>
+    </div>
+    <div class="home-hero__metric">
+      <span>GROUPS</span>
+      <strong><%= site.categories.length.toString().padStart(2, '0') %></strong>
+    </div>
+    <div class="home-hero__metric">
+      <span>BASE</span>
+      <strong><%= theme.identity.location || 'CN' %></strong>
+    </div>
+  </div>
+
+  <div class="home-hero__scroll" aria-hidden="true">
+    <span>SCROLL / EXPLORE</span>
+    <i></i>
+  </div>
+</section>
+
+<section class="stream-section" id="stream">
+  <header class="section-heading">
+    <div>
+      <span class="micro-label">01 / CONTENT INDEX</span>
+      <h2><%= theme.home.stream_title || 'SIGNAL GROUPS' %></h2>
+    </div>
+    <p><%= theme.home.stream_description || '' %></p>
+  </header>
+
+  <% if (orderedGroups.length) { %>
+    <div class="stream-groups">
+      <% orderedGroups.forEach(function(entry, index) { %>
+        <% const category = entry[0]; const posts = entry[1]; %>
+        <details class="stream-group reveal"<%= index === 0 ? ' open' : '' %>>
+          <summary>
+            <span class="stream-group__number"><%= String(index + 1).padStart(2, '0') %></span>
+            <span class="stream-group__title">
+              <small>GROUP / <%= category %></small>
+              <strong><%= category %></strong>
+            </span>
+            <span class="stream-group__count"><%= String(posts.length).padStart(2, '0') %></span>
+            <span class="stream-group__toggle" aria-hidden="true">
+              <i></i>
+              <%- partial('_partial/icons', {name: 'chevron-down', size: 19}) %>
+            </span>
+          </summary>
+          <div class="stream-group__body">
+            <div class="stream-group__inner">
+              <% posts.forEach(function(post) { %>
+                <%- partial('_partial/post-card', {post: post}) %>
+              <% }); %>
+            </div>
+          </div>
+        </details>
+      <% }); %>
+    </div>
+  <% } else { %>
+    <div class="empty-state">
+      <span>NO SIGNAL YET</span>
+      <h3>第一篇记录还在路上。</h3>
+      <p>运行 <code>hexo new "文章标题"</code> 后，这里会自动出现。</p>
+    </div>
+  <% } %>
+</section>
+
+<%- partial('_partial/pagination') %>

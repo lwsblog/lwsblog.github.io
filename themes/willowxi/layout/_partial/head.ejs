@@ -1,0 +1,26 @@
+<%
+  const pageTitle = page.title
+    ? page.title + ' | ' + config.title
+    : config.title;
+  const description = page.description || config.description || '';
+  const favicon = config.favicon || url_for('/favicon.svg');
+%>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b0f">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="<%= description %>">
+  <meta name="author" content="<%= config.author || theme.identity.name %>">
+  <meta property="og:type" content="<%= is_post() ? 'article' : 'website' %>">
+  <meta property="og:title" content="<%= pageTitle %>">
+  <meta property="og:description" content="<%= description %>">
+  <meta property="og:url" content="<%- full_url_for(page.path) %>">
+  <meta property="og:site_name" content="<%= config.title %>">
+  <meta name="twitter:card" content="summary">
+  <title><%= pageTitle %></title>
+
+  <link rel="icon" type="image/svg+xml" href="<%- url_for(favicon) %>">
+  <link rel="preconnect" href="https://github.com">
+  <link rel="stylesheet" href="<%- url_for('/css/willowxi.css') %>">
+</head>

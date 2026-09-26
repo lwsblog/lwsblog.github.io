@@ -1,0 +1,39 @@
+<%
+  const archives = new Map();
+  page.posts.each(function(post) {
+    const year = date(post.date, 'YYYY');
+    if (!archives.has(year)) archives.set(year, []);
+    archives.get(year).push(post);
+  });
+%>
+<section class="listing page-enter">
+  <header class="listing__header">
+    <span class="micro-label">02 / ARCHIVE INDEX</span>
+    <h1>ARCHIVE</h1>
+    <p><%= page.posts.length %> 条记录，按年份归档。</p>
+  </header>
+
+  <div class="archive-years">
+    <% Array.from(archives.entries()).forEach(function(entry, index) { %>
+      <details class="archive-year"<%= index === 0 ? ' open' : '' %>>
+        <summary>
+          <strong><%= entry[0] %></strong>
+          <span><%= String(entry[1].length).padStart(2, '0') %> POSTS</span>
+          <%- partial('_partial/icons', {name: 'chevron-down', size: 19}) %>
+        </summary>
+        <div class="archive-year__body">
+          <% entry[1].forEach(function(post) { %>
+            <a class="archive-row" href="<%- url_for(post.path) %>">
+              <time><%= date(post.date, 'MM.DD') %></time>
+              <strong><%= post.title %></strong>
+              <span><%= post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED' %></span>
+              <%- partial('_partial/icons', {name: 'arrow-up-right', size: 16}) %>
+            </a>
+          <% }); %>
+        </div>
+      </details>
+    <% }); %>
+  </div>
+
+  <%- partial('_partial/pagination') %>
+</section>
