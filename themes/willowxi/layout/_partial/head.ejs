@@ -9,7 +9,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#090b0f">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <meta name="description" content="<%= description %>">
   <meta name="author" content="<%= config.author || theme.identity.name %>">
   <meta property="og:type" content="<%= is_post() ? 'article' : 'website' %>">
@@ -19,6 +19,29 @@
   <meta property="og:site_name" content="<%= config.title %>">
   <meta name="twitter:card" content="summary">
   <title><%= pageTitle %></title>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var theme = 'dark';
+      root.classList.add('js');
+
+      try {
+        var stored = window.localStorage.getItem('willowxi-theme');
+        if (stored === 'light' || stored === 'dark') theme = stored;
+      } catch (error) {
+        theme = 'dark';
+      }
+
+      root.setAttribute('data-theme', theme);
+      root.style.colorScheme = theme;
+
+      var themeColor = document.querySelector('meta[name="theme-color"]');
+      if (themeColor) {
+        themeColor.setAttribute('content', theme === 'light' ? '#f4f5f2' : '#090b0f');
+      }
+    })();
+  </script>
 
   <link rel="icon" type="image/svg+xml" href="<%- url_for(favicon) %>">
   <link rel="preconnect" href="https://github.com">

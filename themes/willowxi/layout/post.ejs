@@ -30,12 +30,6 @@
       <img src="<%- url_for(page.cover) %>" alt="<%= page.title %>">
       <figcaption>WILLOWXI / VISUAL NOTE</figcaption>
     </figure>
-  <% } else { %>
-    <div class="article__visual" aria-hidden="true">
-      <span class="article__visual-mark"><%= theme.identity.mark || 'W' %></span>
-      <span class="article__visual-line"></span>
-      <span class="article__visual-code">FRAME-<%= page.date.format('YYYYMMDD') %></span>
-    </div>
   <% } %>
 
   <div class="article__layout">

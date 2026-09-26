@@ -22,6 +22,11 @@
         <%- partial('_partial/icons', {name: 'github', size: 17}) %>
       </a>
     <% } %>
+
+    <button class="theme-toggle" type="button" aria-label="切换到浅色主题" aria-pressed="false" title="切换明暗主题" data-theme-toggle>
+      <span class="theme-toggle__icon" data-theme-icon="sun"><%- partial('_partial/icons', {name: 'sun', size: 16}) %></span>
+      <span class="theme-toggle__icon" data-theme-icon="moon"><%- partial('_partial/icons', {name: 'moon', size: 16}) %></span>
+    </button>
   </nav>
 
   <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>

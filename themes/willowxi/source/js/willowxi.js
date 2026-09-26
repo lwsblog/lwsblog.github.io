@@ -143,6 +143,48 @@
     window.addEventListener('scroll', onScroll, { passive: true });
   }
 
+  function setupTheme() {
+    var toggle = document.querySelector('[data-theme-toggle]');
+    var themeColor = document.querySelector('meta[name="theme-color"]');
+    var storageKey = 'willowxi-theme';
+    var currentTheme = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+
+    function applyTheme(theme, persist) {
+      var nextTheme = theme === 'light' ? 'light' : 'dark';
+      var isLight = nextTheme === 'light';
+
+      root.setAttribute('data-theme', nextTheme);
+      root.style.colorScheme = nextTheme;
+
+      if (themeColor) {
+        themeColor.setAttribute('content', isLight ? '#f4f5f2' : '#090b0f');
+      }
+
+      if (toggle) {
+        toggle.setAttribute('aria-pressed', String(isLight));
+        toggle.setAttribute('aria-label', isLight ? '切换到深色主题' : '切换到浅色主题');
+        toggle.setAttribute('title', isLight ? '切换到深色主题' : '切换到浅色主题');
+      }
+
+      if (persist) {
+        try {
+          window.localStorage.setItem(storageKey, nextTheme);
+        } catch (error) {
+          // Theme switching still works when storage is unavailable.
+        }
+      }
+    }
+
+    applyTheme(currentTheme, false);
+
+    if (!toggle) return;
+
+    toggle.addEventListener('click', function () {
+      var nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      applyTheme(nextTheme, true);
+    });
+  }
+
   function setupReveal() {
     var items = Array.from(document.querySelectorAll('.reveal'));
     if (!items.length) return;
@@ -213,15 +255,17 @@
   }
 
   function setupCopyButtons() {
-    document.querySelectorAll('.prose pre').forEach(function (block) {
-      if (block.querySelector('.code-copy')) return;
+    function addCopyButton(container, source) {
+      if (!container || container.querySelector(':scope > .code-copy')) return;
+
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'code-copy';
       button.textContent = 'COPY';
+      button.setAttribute('aria-label', '复制代码');
+
       button.addEventListener('click', function () {
-        var code = block.querySelector('code');
-        var text = code ? code.innerText : block.innerText;
+        var text = source ? source.innerText : '';
         if (navigator.clipboard) {
           navigator.clipboard.writeText(text).then(function () {
             button.textContent = 'COPIED';
@@ -229,8 +273,47 @@
           });
         }
       });
-      block.appendChild(button);
+
+      container.appendChild(button);
+    }
+
+    document.querySelectorAll('.prose figure.highlight').forEach(function (figure) {
+      var code = figure.querySelector('.code pre code') || figure.querySelector('pre code');
+      addCopyButton(figure, code);
     });
+
+    document.querySelectorAll('.prose > pre').forEach(function (block) {
+      var code = block.querySelector('code');
+      addCopyButton(block, code || block);
+    });
+  }
+
+  function setupRouteTransition() {
+    var transition = document.querySelector('[data-route-transition]');
+    if (!transition) return;
+
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reducedMotion) {
+      transition.classList.add('is-complete');
+      body.classList.add('route-ready');
+      return;
+    }
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        transition.classList.remove('is-pending');
+        transition.classList.add('is-running');
+      });
+    });
+
+    window.setTimeout(function () {
+      body.classList.add('route-ready');
+    }, 1080);
+
+    window.setTimeout(function () {
+      transition.classList.add('is-complete');
+    }, 1780);
   }
 
   function setupLinks() {
@@ -250,6 +333,8 @@
   }
 
   onReady(function () {
+    setupTheme();
+    setupRouteTransition();
     startIntro();
     setupHeader();
     setupReveal();
