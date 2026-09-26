@@ -9,6 +9,7 @@
   var introTimers = [];
   var pageObservers = [];
   var closeNavigation = function () {};
+  var sceneBackground = null;
 
   function onReady(callback) {
     if (document.readyState === 'loading') {
@@ -27,6 +28,437 @@
     introTimers = [];
   }
 
+  function willRunIntro() {
+    if (!intro) return false;
+    if (prefersReducedMotion()) return false;
+    return new URLSearchParams(window.location.search).get('nointro') !== '1';
+  }
+
+  // Wallpaper, acrylic veil and the canvas grid all live in one fixed scene.
+  // The scene fades in after the page transition, then starts its sweep.
+  function createSceneBackground() {
+    var scene = document.querySelector('[data-scene-background]');
+    var layer = document.querySelector('[data-scene-wallpaper]');
+    var canvas = document.querySelector('[data-scene-canvas]');
+
+    if (!scene || !layer || !canvas || !canvas.getContext) return null;
+
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    var defaultWallpaper = body.getAttribute('data-default-wallpaper') || '';
+    var currentWallpaper = '';
+    var width = 0;
+    var height = 0;
+    var ratio = 1;
+    var desktop = false;
+    var verticals = [];
+    var horizontals = [];
+    var gridInk = 'rgba(196, 224, 236, 0.145)';
+    var sweepInk = { r: 214, g: 240, b: 255, a: 0.5, composite: 'lighter' };
+    var sweepDuration = Math.max(1, Number(config.sweepDuration) || 4) * 1000;
+    var revealDelay = Math.max(0, Number(config.revealDelay));
+    var revealDuration = Math.max(0, Number(config.revealDuration));
+    var sweepStart = 0;
+    var visible = false;
+    var sweepReady = false;
+    var sweepActive = false;
+    var revealTimer = 0;
+    var rafId = 0;
+    var resizeFrame = 0;
+    var pointer = { x: 0, y: 0, tx: 0, ty: 0 };
+
+    if (!isFinite(revealDelay)) revealDelay = 500;
+    else revealDelay *= 1000;
+
+    if (!isFinite(revealDuration)) revealDuration = 1000;
+    else revealDuration *= 1000;
+
+    scene.style.setProperty('--scene-reveal-delay', revealDelay + 'ms');
+    scene.style.setProperty('--scene-reveal-duration', revealDuration + 'ms');
+
+    var WALLPAPER_RANGE = 22;
+    var WALLPAPER_RANGE_Y = 14;
+    var GRID_RANGE = 7;
+
+    function parseColor(value) {
+      var match = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)/i.exec(value || '');
+      if (!match) return null;
+
+      var alpha = match[4];
+      if (!alpha) {
+        alpha = 1;
+      } else if (alpha.indexOf('%') > -1) {
+        alpha = parseFloat(alpha) / 100;
+      } else {
+        alpha = parseFloat(alpha);
+      }
+
+      return {
+        r: Math.round(parseFloat(match[1])),
+        g: Math.round(parseFloat(match[2])),
+        b: Math.round(parseFloat(match[3])),
+        a: Math.max(0, Math.min(1, alpha))
+      };
+    }
+
+    function readTheme() {
+      var styles = window.getComputedStyle(root);
+      var light = root.getAttribute('data-theme') === 'light';
+      var grid = styles.getPropertyValue('--scene-grid').trim();
+      var sweep = parseColor(styles.getPropertyValue('--scene-sweep').trim());
+
+      gridInk = grid || (light ? 'rgba(22, 26, 31, 0.13)' : 'rgba(196, 224, 236, 0.145)');
+
+      if (sweep) {
+        sweepInk = {
+          r: sweep.r,
+          g: sweep.g,
+          b: sweep.b,
+          a: sweep.a,
+          composite: light ? 'source-over' : 'lighter'
+        };
+      }
+    }
+
+    function buildGrid() {
+      desktop = window.innerWidth >= (Number(config.desktopMinWidth) || 769);
+
+      var spacing = desktop
+        ? Math.max(64, Number(config.gridSpacing) || 168)
+        : Math.max(24, Number(config.mobileGridSpacing) || 42);
+      var cx = width / 2;
+      var cy = height / 2;
+      var halfWidth = Math.max(1, width / 2);
+      var halfHeight = Math.max(1, height / 2);
+      var margin = spacing * 1.4;
+      var bow = desktop ? 0.17 : 0;
+      var hoop = desktop ? 0.13 : 0;
+      var samples = 26;
+      var x;
+      var y;
+      var i;
+      var line;
+
+      // A node shared by two grid lines must land on the same pixel, so both
+      // families are sampled in flat space and then warped by one shared map.
+      function warpX(nodeX, nodeY) {
+        if (!bow) return nodeX;
+        var t = (nodeY - cy) / halfHeight;
+        var waist = 1 - bow * Math.max(0, 1 - t * t);
+        return cx + (nodeX - cx) * waist;
+      }
+
+      function warpY(nodeX, nodeY) {
+        if (!hoop) return nodeY;
+        var u = (nodeX - cx) / halfWidth;
+        return nodeY + hoop * u * u * (nodeY - cy);
+      }
+
+      verticals = [];
+      horizontals = [];
+
+      for (x = -margin; x <= width + margin; x += spacing) {
+        line = [];
+        for (i = 0; i <= samples; i++) {
+          y = -margin + ((height + margin * 2) * i) / samples;
+          line.push([warpX(x, y), warpY(x, y)]);
+        }
+        verticals.push(line);
+      }
+
+      for (y = -margin; y <= height + margin; y += spacing) {
+        line = [];
+        for (i = 0; i <= samples; i++) {
+          x = -margin + ((width + margin * 2) * i) / samples;
+          line.push([warpX(x, y), warpY(x, y)]);
+        }
+        horizontals.push(line);
+      }
+    }
+
+    function layout() {
+      width = Math.max(1, canvas.clientWidth || window.innerWidth);
+      height = Math.max(1, canvas.clientHeight || window.innerHeight);
+      ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+      canvas.width = Math.max(1, Math.round(width * ratio));
+      canvas.height = Math.max(1, Math.round(height * ratio));
+      buildGrid();
+    }
+
+    function tracePath() {
+      var i;
+      var j;
+      var line;
+
+      ctx.beginPath();
+
+      for (i = 0; i < horizontals.length; i++) {
+        line = horizontals[i];
+        ctx.moveTo(line[0][0], line[0][1]);
+        for (j = 1; j < line.length; j++) ctx.lineTo(line[j][0], line[j][1]);
+      }
+
+      for (i = 0; i < verticals.length; i++) {
+        line = verticals[i];
+        ctx.moveTo(line[0][0], line[0][1]);
+        for (j = 1; j < line.length; j++) ctx.lineTo(line[j][0], line[j][1]);
+      }
+    }
+
+    function phaseAt(now) {
+      var value = ((now - sweepStart) / sweepDuration) % 1;
+      return value < 0 ? value + 1 : value;
+    }
+
+    function render(phase) {
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      tracePath();
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = gridInk;
+      ctx.stroke();
+      ctx.restore();
+
+      if (typeof phase !== 'number') return;
+
+      var thickness = height * 0.55;
+      var center = height + thickness * 0.5 - phase * (height + thickness);
+      var top = center - thickness * 0.5;
+      var bottom = center + thickness * 0.5;
+      var ink = sweepInk;
+
+      function tint(scale) {
+        return 'rgba(' + ink.r + ',' + ink.g + ',' + ink.b + ',' + (ink.a * scale).toFixed(3) + ')';
+      }
+
+      var gradient = ctx.createLinearGradient(0, top, 0, bottom);
+      gradient.addColorStop(0, tint(0));
+      gradient.addColorStop(0.18, tint(0.38));
+      gradient.addColorStop(0.5, tint(1));
+      gradient.addColorStop(0.82, tint(0.38));
+      gradient.addColorStop(1, tint(0));
+
+      ctx.save();
+      ctx.globalCompositeOperation = ink.composite;
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 1;
+      tracePath();
+      ctx.stroke();
+
+      if (ink.composite === 'lighter') {
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 3.4;
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    function paint() {
+      if (!desktop || !sweepActive) {
+        render(null);
+        return;
+      }
+      render(prefersReducedMotion() ? 0.62 : phaseAt(performance.now()));
+    }
+
+    function updateParallax() {
+      if (!desktop) return;
+
+      pointer.x += (pointer.tx - pointer.x) * 0.075;
+      pointer.y += (pointer.ty - pointer.y) * 0.075;
+
+      var gridX = pointer.x * (GRID_RANGE / WALLPAPER_RANGE);
+      var gridY = pointer.y * (GRID_RANGE / WALLPAPER_RANGE);
+
+      layer.style.transform =
+        'translate3d(' + pointer.x.toFixed(2) + 'px,' + pointer.y.toFixed(2) + 'px,0) scale(1.02)';
+      canvas.style.transform =
+        'translate3d(' + gridX.toFixed(2) + 'px,' + gridY.toFixed(2) + 'px,0)';
+    }
+
+    function frame(now) {
+      rafId = 0;
+      updateParallax();
+      render(desktop && sweepActive ? phaseAt(now) : null);
+
+      if (visible && !document.hidden && !prefersReducedMotion()) {
+        rafId = window.requestAnimationFrame(frame);
+      }
+    }
+
+    function play() {
+      if (!visible || document.hidden) return;
+
+      if (prefersReducedMotion()) {
+        paint();
+        return;
+      }
+
+      if (!rafId) rafId = window.requestAnimationFrame(frame);
+    }
+
+    function pause() {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+
+    function clearRevealTimer() {
+      if (revealTimer) window.clearTimeout(revealTimer);
+      revealTimer = 0;
+    }
+
+    function beginSweep() {
+      if (!visible || !sweepReady) return;
+
+      sweepActive = true;
+
+      if (prefersReducedMotion()) {
+        pause();
+        paint();
+        return;
+      }
+
+      sweepStart = performance.now();
+      play();
+    }
+
+    function reveal() {
+      if (visible) return;
+
+      clearRevealTimer();
+      visible = true;
+      sweepReady = false;
+      sweepActive = false;
+      sweepStart = 0;
+      scene.classList.add('is-visible');
+      paint();
+
+      if (prefersReducedMotion()) {
+        sweepReady = true;
+        beginSweep();
+        return;
+      }
+
+      revealTimer = window.setTimeout(function () {
+        revealTimer = 0;
+        sweepReady = true;
+        beginSweep();
+      }, revealDelay + revealDuration);
+    }
+
+    function hide() {
+      clearRevealTimer();
+      visible = false;
+      sweepReady = false;
+      sweepActive = false;
+      scene.classList.remove('is-visible');
+      pause();
+    }
+
+    function setWallpaper(url) {
+      var next = url || defaultWallpaper;
+      if (!next || next === currentWallpaper) return;
+
+      currentWallpaper = next;
+      layer.classList.remove('is-loaded');
+
+      layer.onerror = function () {
+        layer.onerror = null;
+        if (currentWallpaper === next && defaultWallpaper && next !== defaultWallpaper) {
+          currentWallpaper = defaultWallpaper;
+          layer.src = defaultWallpaper;
+        }
+      };
+
+      layer.src = next;
+    }
+
+    function scheduleLayout() {
+      if (resizeFrame) return;
+
+      resizeFrame = window.requestAnimationFrame(function () {
+        resizeFrame = 0;
+        layout();
+        paint();
+      });
+    }
+
+    function onPointerMove(event) {
+      if (!desktop) return;
+
+      var nx = (event.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
+      var ny = (event.clientY / Math.max(1, window.innerHeight)) * 2 - 1;
+
+      pointer.tx = nx * WALLPAPER_RANGE;
+      pointer.ty = ny * WALLPAPER_RANGE_Y;
+    }
+
+    function refresh() {
+      readTheme();
+      paint();
+    }
+
+    function init() {
+      readTheme();
+      layout();
+      paint();
+      setWallpaper(body.getAttribute('data-wallpaper'));
+
+      layer.addEventListener('load', function () {
+        layer.classList.add('is-loaded');
+      });
+
+      window.addEventListener('resize', scheduleLayout, { passive: true });
+      window.addEventListener('pointermove', onPointerMove, { passive: true });
+      window.addEventListener('orientationchange', scheduleLayout, { passive: true });
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+          pause();
+          return;
+        }
+        if (visible && sweepReady) {
+          sweepActive = true;
+          sweepStart = performance.now();
+          play();
+        } else if (visible) {
+          paint();
+        }
+      });
+
+      var motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var onMotionChange = function () {
+        if (prefersReducedMotion()) {
+          pause();
+          sweepActive = sweepReady;
+          paint();
+          return;
+        }
+        if (visible && sweepReady) {
+          sweepActive = true;
+          sweepStart = performance.now();
+          play();
+        }
+      };
+
+      if (motionQuery.addEventListener) motionQuery.addEventListener('change', onMotionChange);
+      else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
+    }
+
+    return {
+      init: init,
+      reveal: reveal,
+      hide: hide,
+      refresh: refresh,
+      setWallpaper: setWallpaper
+    };
+  }
+
   function revealPage(options) {
     if (introEnded) return;
     introEnded = true;
@@ -35,12 +467,24 @@
     body.classList.remove('intro-running');
     body.classList.add('intro-ready');
 
+    var introLeaveDuration = options && options.instant ? 120 : 680;
+
     if (intro) {
       intro.classList.add('is-leaving');
       window.setTimeout(function () {
         intro.classList.add('is-hidden');
         intro.setAttribute('aria-hidden', 'true');
-      }, options && options.instant ? 120 : 680);
+      }, introLeaveDuration);
+    }
+
+    if (sceneBackground) {
+      if (intro && !prefersReducedMotion()) {
+        setTimer(function () {
+          sceneBackground.reveal();
+        }, introLeaveDuration);
+      } else {
+        sceneBackground.reveal();
+      }
     }
 
     if (options && options.scrollToStream) {
@@ -150,8 +594,10 @@
   function setupTheme() {
     var toggle = document.querySelector('[data-theme-toggle]');
     var themeColor = document.querySelector('meta[name="theme-color"]');
+    var cover = document.querySelector('[data-theme-transition]');
     var storageKey = 'willowxi-theme';
     var currentTheme = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    var switching = false;
 
     function applyTheme(theme, persist) {
       var nextTheme = theme === 'light' ? 'light' : 'dark';
@@ -183,9 +629,40 @@
 
     if (!toggle) return;
 
-    toggle.addEventListener('click', function () {
-      var nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    function swapTheme(nextTheme) {
       applyTheme(nextTheme, true);
+      if (sceneBackground) sceneBackground.refresh();
+    }
+
+    toggle.addEventListener('click', function () {
+      if (switching) return;
+
+      var nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+
+      if (!cover || prefersReducedMotion()) {
+        swapTheme(nextTheme);
+        return;
+      }
+
+      switching = true;
+      if (sceneBackground) sceneBackground.hide();
+
+      cover.classList.remove('is-leaving');
+      cover.classList.add('is-running');
+
+      window.setTimeout(function () {
+        swapTheme(nextTheme);
+
+        cover.classList.remove('is-running');
+        forceReflow(cover);
+        cover.classList.add('is-leaving');
+
+        window.setTimeout(function () {
+          cover.classList.remove('is-leaving');
+          switching = false;
+          if (sceneBackground) sceneBackground.reveal();
+        }, 520);
+      }, 360);
     });
   }
 
@@ -332,6 +809,7 @@
       transition.classList.add('is-complete');
       body.classList.remove('route-animating');
       body.classList.add('route-ready');
+      if (sceneBackground) sceneBackground.reveal();
       return Promise.resolve();
     }
 
@@ -352,6 +830,7 @@
       transition.classList.add('is-complete');
       body.classList.remove('route-animating');
       body.classList.add('route-ready');
+      if (sceneBackground) sceneBackground.reveal();
     });
   }
 
@@ -369,6 +848,7 @@
       homeReturn.classList.add('is-complete');
       body.classList.remove('route-animating');
       body.classList.add('route-ready');
+      if (sceneBackground) sceneBackground.reveal();
       return Promise.resolve();
     }
 
@@ -390,6 +870,7 @@
       transition.classList.add('is-complete');
       body.classList.remove('route-animating');
       body.classList.add('route-ready');
+      if (sceneBackground) sceneBackground.reveal();
     });
   }
 
@@ -406,6 +887,7 @@
       transition.classList.add('is-complete');
       body.classList.remove('route-animating');
       body.classList.add('route-ready');
+      if (!willRunIntro() && sceneBackground) sceneBackground.reveal();
       return;
     }
 
@@ -485,6 +967,7 @@
       homeReturn.classList.remove('is-held', 'is-running');
       homeReturn.classList.add('is-complete');
       loader.classList.remove('is-active');
+      if (sceneBackground) sceneBackground.reveal();
       window.location.assign(destination.href);
     }
 
@@ -593,6 +1076,10 @@
         body.classList.toggle(className, result.document.body.classList.contains(className));
       });
 
+      if (sceneBackground) {
+        sceneBackground.setWallpaper(result.document.body.getAttribute('data-wallpaper'));
+      }
+
       config.home = isHomeUrl(destination);
       config.introEnabled = false;
       syncNavigation(destination);
@@ -625,6 +1112,7 @@
 
       if (!reducedMotion) {
         body.classList.add('route-leaving');
+        if (sceneBackground) sceneBackground.hide();
       }
 
       var navigationPromise = Promise.all([
@@ -760,10 +1248,16 @@
       homeReturn.classList.remove('is-held', 'is-running');
       homeReturn.classList.add('is-complete');
       loader.classList.remove('is-active');
+      if (sceneBackground) {
+        sceneBackground.setWallpaper(body.getAttribute('data-wallpaper'));
+        sceneBackground.reveal();
+      }
     });
   }
 
   onReady(function () {
+    sceneBackground = createSceneBackground();
+    if (sceneBackground) sceneBackground.init();
     setupTheme();
     setupRouteTransition();
     startIntro();

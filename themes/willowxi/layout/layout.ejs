@@ -1,7 +1,30 @@
+<%
+  const background = theme.background || {};
+  const defaultWallpaper = background.wallpaper || '/images/wallpaper/anime-placeholder.jpg';
+  const pageWallpaper = is_post() && page.wallpaper ? page.wallpaper : defaultWallpaper;
+
+  function resolveBackgroundUrl(value) {
+    if (/^(?:[a-z]+:)?\/\//i.test(value) || /^data:/i.test(value)) return value;
+    return url_for(value);
+  }
+
+  const wallpaperUrl = resolveBackgroundUrl(pageWallpaper);
+  const defaultWallpaperUrl = resolveBackgroundUrl(defaultWallpaper);
+%>
 <!doctype html>
 <html lang="<%= config.language || 'zh-CN' %>">
   <%- partial('_partial/head') %>
-  <body class="<%= is_home() ? 'is-home' : 'is-inner' %><%= is_post() ? ' is-post' : '' %>">
+  <body
+    class="<%= is_home() ? 'is-home' : 'is-inner' %><%= is_post() ? ' is-post' : '' %>"
+    data-wallpaper="<%= wallpaperUrl %>"
+    data-default-wallpaper="<%= defaultWallpaperUrl %>"
+  >
+    <div class="scene-background" data-scene-background aria-hidden="true">
+      <img class="scene-background__wallpaper" data-scene-wallpaper alt="">
+      <div class="scene-background__acrylic"></div>
+      <canvas class="scene-background__canvas" data-scene-canvas></canvas>
+    </div>
+
     <div class="app-shell">
       <% if (is_home() && theme.intro && theme.intro.enabled !== false) { %>
         <%- partial('_partial/intro') %>
@@ -24,6 +47,8 @@
 
     <div class="home-return" data-home-return-transition aria-hidden="true"></div>
 
+    <div class="theme-transition" data-theme-transition aria-hidden="true"></div>
+
     <div class="route-transition <%= is_post() ? 'is-pending' : 'is-complete' %>" data-route-transition aria-hidden="true">
       <div class="route-transition__veil route-transition__veil--top"></div>
       <div class="route-transition__veil route-transition__veil--bottom"></div>
@@ -39,6 +64,13 @@
       window.WILLOWXI_THEME = <%- JSON.stringify({
         introDuration: theme.intro && theme.intro.duration ? theme.intro.duration : 5900,
         introEnabled: is_home() && !!(theme.intro && theme.intro.enabled !== false),
+        defaultWallpaper: defaultWallpaperUrl,
+        desktopMinWidth: Number(background.desktop_min_width) || 769,
+        gridSpacing: Number(background.grid_spacing) || 168,
+        mobileGridSpacing: Number(background.mobile_grid_spacing) || 42,
+        revealDelay: Number(background.reveal_delay) >= 0 ? Number(background.reveal_delay) : 0.5,
+        revealDuration: Number(background.reveal_duration) >= 0 ? Number(background.reveal_duration) : 1,
+        sweepDuration: Number(background.sweep_duration) || 4,
         home: is_home(),
         homePath: url_for('/')
       }) %>;

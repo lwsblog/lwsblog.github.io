@@ -39,6 +39,14 @@
   --route-veil: #080a0d;
   --route-line: #ffffff;
   --route-glow: rgba(255, 255, 255, 0.88);
+  --theme-veil: #080a0d;
+  --scene-acrylic: rgba(9, 11, 15, 0.64);
+  --scene-grid: rgba(196, 224, 236, 0.145);
+  --scene-sweep: rgba(214, 240, 255, 0.5);
+  --scene-wallpaper-blur: 24px;
+  --article-surface: #0f141c;
+  --article-edge: rgba(180, 222, 236, 0.42);
+  --article-glow: rgba(143, 214, 223, 0.16);
   --header-height: 76px;
   --content: 1160px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -86,6 +94,13 @@ html[data-theme="light"] {
   --code-function: #086d7d;
   --code-variable: #7853a6;
   --code-operator: #58616b;
+  --theme-veil: #f2f3ef;
+  --scene-acrylic: rgba(244, 245, 242, 0.76);
+  --scene-grid: rgba(22, 26, 31, 0.13);
+  --scene-sweep: rgba(0, 0, 0, 0.42);
+  --article-surface: #eef0ea;
+  --article-edge: rgba(8, 121, 138, 0.42);
+  --article-glow: rgba(8, 121, 138, 0.12);
 }
 
 * {
@@ -154,8 +169,101 @@ img {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   overflow: clip;
+}
+
+.scene-background {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 320ms var(--ease-out);
+  will-change: opacity;
+}
+
+html:not(.js) .scene-background {
+  display: none;
+}
+
+.scene-background.is-visible {
+  opacity: 1;
+  transition:
+    opacity var(--scene-reveal-duration, 1000ms) var(--ease-out)
+    var(--scene-reveal-delay, 500ms);
+}
+
+.scene-background__wallpaper {
+  position: absolute;
+  top: -6%;
+  left: -6%;
+  width: 112%;
+  height: 112%;
+  object-fit: cover;
+  opacity: 0;
+  filter: blur(var(--scene-wallpaper-blur)) saturate(1.08) brightness(0.86);
+  transform: translate3d(0, 0, 0) scale(1.02);
+  transition: opacity 900ms var(--ease-out);
+  will-change: transform;
+}
+
+.scene-background__wallpaper.is-loaded {
+  opacity: 1;
+}
+
+.scene-background__acrylic {
+  position: absolute;
+  inset: 0;
+  background: var(--scene-acrylic);
+  -webkit-backdrop-filter: blur(64px) saturate(120%);
+  backdrop-filter: blur(64px) saturate(120%);
+}
+
+.scene-background__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+}
+
+.theme-transition {
+  position: fixed;
+  z-index: 256;
+  inset: 0;
+  display: none;
+  background: var(--theme-veil);
+  pointer-events: none;
+  transform: translateY(100%);
+}
+
+html.js .theme-transition.is-running,
+html.js .theme-transition.is-leaving {
+  display: block;
+}
+
+.theme-transition.is-running {
+  animation: theme-veil-cover 360ms var(--ease-curtain) both;
+}
+
+.theme-transition.is-leaving {
+  animation: theme-veil-reveal 520ms var(--ease-curtain) both;
+}
+
+@keyframes theme-veil-cover {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes theme-veil-reveal {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
 }
 
 .main-content {
@@ -1949,6 +2057,15 @@ a.archive-row:hover {
   line-height: 2;
 }
 
+.article__body.prose {
+  padding: clamp(26px, 4.2vw, 58px);
+  border: 1px solid var(--article-edge);
+  background: var(--article-surface);
+  box-shadow:
+    0 0 26px var(--article-glow),
+    0 34px 80px rgba(0, 0, 0, 0.28);
+}
+
 .prose > *:first-child {
   margin-top: 0;
 }
@@ -2645,6 +2762,16 @@ html.js body.route-leaving .app-shell {
 @media (max-width: 760px) {
   :root {
     --header-height: 66px;
+    --scene-wallpaper-blur: 20px;
+  }
+
+  .scene-background__acrylic {
+    -webkit-backdrop-filter: blur(40px) saturate(116%);
+    backdrop-filter: blur(40px) saturate(116%);
+  }
+
+  .article__body.prose {
+    padding: 24px 20px;
   }
 
   .site-header {
@@ -2912,5 +3039,13 @@ html.js body.route-leaving .app-shell {
 
   .route-transition {
     display: none !important;
+  }
+
+  .theme-transition {
+    display: none !important;
+  }
+
+  .scene-background.is-visible {
+    transition-delay: 0ms !important;
   }
 }
