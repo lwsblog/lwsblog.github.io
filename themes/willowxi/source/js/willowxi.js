@@ -292,6 +292,7 @@
     var transition = document.querySelector('[data-route-transition]');
     if (!transition) return;
 
+    var duration = 2350;
     var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (reducedMotion) {
@@ -304,22 +305,28 @@
       requestAnimationFrame(function () {
         transition.classList.remove('is-pending');
         transition.classList.add('is-running');
+        body.classList.add('route-animating');
       });
     });
 
     window.setTimeout(function () {
       body.classList.add('route-ready');
-    }, 1080);
+    }, 960);
 
     window.setTimeout(function () {
       transition.classList.add('is-complete');
-    }, 1780);
+      body.classList.remove('route-animating');
+      body.classList.add('route-ready');
+    }, duration + 80);
   }
 
   function setupLinks() {
     if (!('requestAnimationFrame' in window)) return;
     var loader = document.querySelector('.route-loader');
-    if (!loader) return;
+    var exit = document.querySelector('[data-route-exit]');
+    if (!loader || !exit) return;
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var navigating = false;
 
     document.addEventListener('click', function (event) {
       var link = event.target.closest('a[href]');
@@ -328,7 +335,21 @@
       if (!href || href.charAt(0) === '#' || link.target === '_blank') return;
       if (link.origin !== window.location.origin) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (link.hasAttribute('download') || navigating || link.href === window.location.href) return;
+
+      event.preventDefault();
+      navigating = true;
       loader.classList.add('is-active');
+
+      if (reducedMotion) {
+        window.location.href = link.href;
+        return;
+      }
+
+      body.classList.add('route-leaving');
+      window.setTimeout(function () {
+        window.location.href = link.href;
+      }, 680);
     });
   }
 
