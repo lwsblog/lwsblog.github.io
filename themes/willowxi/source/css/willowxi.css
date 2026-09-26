@@ -2471,7 +2471,8 @@ html.js .route-transition.is-held {
   pointer-events: none;
 }
 
-html.js .home-return {
+html.js .home-return.is-held,
+html.js .home-return.is-running {
   display: block;
 }
 
