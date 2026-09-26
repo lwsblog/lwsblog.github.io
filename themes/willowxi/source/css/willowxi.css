@@ -43,6 +43,7 @@
   --content: 1160px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-sharp: cubic-bezier(0.77, 0, 0.18, 1);
+  --ease-curtain: cubic-bezier(0.74, 0, 0.18, 1);
   --font-sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
 }
@@ -2398,19 +2399,19 @@ html.js .route-transition {
 }
 
 .route-transition.is-running .route-transition__split--top {
-  animation: route-split-top 2.35s cubic-bezier(0.72, 0, 0.2, 1) both;
+  animation: route-split-top 2.35s var(--ease-curtain) both;
 }
 
 .route-transition.is-running .route-transition__split--bottom {
-  animation: route-split-bottom 2.35s cubic-bezier(0.66, -0.02, 0.18, 1.04) both;
+  animation: route-split-bottom 2.35s var(--ease-curtain) both;
 }
 
 .route-transition.is-running .route-transition__veil--top {
-  animation: route-veil-top 2.35s var(--ease-sharp) both;
+  animation: route-veil-top 2.35s var(--ease-curtain) both;
 }
 
 .route-transition.is-running .route-transition__veil--bottom {
-  animation: route-veil-bottom 2.35s var(--ease-sharp) both;
+  animation: route-veil-bottom 2.35s var(--ease-curtain) both;
 }
 
 html.js .route-transition.is-complete {
@@ -2432,27 +2433,27 @@ html.js .route-transition.is-complete {
 }
 
 @keyframes route-split-top {
-  0%, 40% { opacity: 0; transform: translate(-50%, -50%); }
-  44% { opacity: 1; transform: translate(-50%, -50%); }
-  62% { opacity: 0.82; transform: translate(-50%, calc(-50% - 4vh)); }
+  0%, 46% { opacity: 0; transform: translate(-50%, -50%); }
+  48% { opacity: 1; transform: translate(-50%, -50%); }
   100% { opacity: 0; transform: translate(-50%, calc(-50% - 50vh)); }
 }
 
 @keyframes route-split-bottom {
-  0%, 40% { opacity: 0; transform: translate(-50%, -50%); }
-  44% { opacity: 1; transform: translate(-50%, -50%); }
-  62% { opacity: 0.82; transform: translate(-50%, calc(-50% + 4vh)); }
+  0%, 46% { opacity: 0; transform: translate(-50%, -50%); }
+  48% { opacity: 1; transform: translate(-50%, -50%); }
   100% { opacity: 0; transform: translate(-50%, calc(-50% + 50vh)); }
 }
 
 @keyframes route-veil-top {
-  0%, 40% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 1; transform: translateY(-101%); }
+  0%, 46% { opacity: 1; transform: translateY(0); }
+  48% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(-100%); }
 }
 
 @keyframes route-veil-bottom {
-  0%, 40% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 1; transform: translateY(101%); }
+  0%, 46% { opacity: 1; transform: translateY(0); }
+  48% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(100%); }
 }
 
 .route-exit {

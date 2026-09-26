@@ -328,6 +328,16 @@
     var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var navigating = false;
 
+    function resetNavigationState(event) {
+      if (!event.persisted) return;
+      navigating = false;
+      body.classList.remove('route-leaving');
+      body.classList.remove('route-animating');
+      loader.classList.remove('is-active');
+    }
+
+    window.addEventListener('pageshow', resetNavigationState);
+
     document.addEventListener('click', function (event) {
       var link = event.target.closest('a[href]');
       if (!link) return;
