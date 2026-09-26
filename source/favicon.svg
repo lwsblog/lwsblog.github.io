@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="WillowXI">
+  <title>WillowXI</title>
+  <rect width="512" height="512" rx="96" fill="#14343b"/>
+  <path d="M118 151 L186 360 L256 229 L326 360 L394 151" fill="none" stroke="#f3eee6" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="394" cy="151" r="15" fill="#e8ad5c"/>
+</svg>
