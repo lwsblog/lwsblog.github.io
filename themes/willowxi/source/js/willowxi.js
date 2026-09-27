@@ -54,11 +54,14 @@
     var desktop = false;
     var verticals = [];
     var horizontals = [];
+    var canCachePath = typeof window.Path2D === 'function';
+    var gridPath = null;
     var gridInk = 'rgba(196, 224, 236, 0.145)';
     var sweepInk = { r: 214, g: 240, b: 255, a: 0.5, composite: 'lighter' };
     var sweepDuration = Math.max(1, Number(config.sweepDuration) || 4) * 1000;
     var revealDelay = Math.max(0, Number(config.revealDelay));
     var revealDuration = Math.max(0, Number(config.revealDuration));
+    var sweepDelay = Math.max(0, Number(config.sweepDelay));
     var sweepStart = 0;
     var visible = false;
     var sweepReady = false;
@@ -67,6 +70,7 @@
     var rafId = 0;
     var resizeFrame = 0;
     var pointer = { x: 0, y: 0, tx: 0, ty: 0 };
+    var parallaxDirty = false;
 
     if (!isFinite(revealDelay)) revealDelay = 500;
     else revealDelay *= 1000;
@@ -74,12 +78,22 @@
     if (!isFinite(revealDuration)) revealDuration = 1000;
     else revealDuration *= 1000;
 
+    if (!isFinite(sweepDelay)) sweepDelay = 1000;
+    else sweepDelay *= 1000;
+
     scene.style.setProperty('--scene-reveal-delay', revealDelay + 'ms');
     scene.style.setProperty('--scene-reveal-duration', revealDuration + 'ms');
 
-    var WALLPAPER_RANGE = 22;
-    var WALLPAPER_RANGE_Y = 14;
-    var GRID_RANGE = 7;
+    // Parallax amplitudes in px. The wallpaper travels much farther than the
+    // grid, and that gap is what reads as depth between the two layers.
+    var wallpaperRangeX = Number(config.parallaxWallpaper);
+    if (!isFinite(wallpaperRangeX) || wallpaperRangeX <= 0) wallpaperRangeX = 14;
+
+    var wallpaperRangeY = Number(config.parallaxWallpaperY);
+    if (!isFinite(wallpaperRangeY) || wallpaperRangeY <= 0) wallpaperRangeY = 14;
+
+    var gridRange = Number(config.parallaxGrid);
+    if (!isFinite(gridRange) || gridRange <= 0) gridRange = 7;
 
     function parseColor(value) {
       var match = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)/i.exec(value || '');
@@ -175,6 +189,23 @@
         }
         horizontals.push(line);
       }
+
+      // Cache the whole grid as one Path2D so frames no longer rebuild a few
+      // hundred segments before every stroke.
+      if (canCachePath) {
+        gridPath = new window.Path2D();
+        appendLines(gridPath, horizontals);
+        appendLines(gridPath, verticals);
+      }
+    }
+
+    function appendLines(path, lines) {
+      for (var n = 0; n < lines.length; n++) {
+        path.moveTo(lines[n][0][0], lines[n][0][1]);
+        for (var k = 1; k < lines[n].length; k++) {
+          path.lineTo(lines[n][k][0], lines[n][k][1]);
+        }
+      }
     }
 
     function layout() {
@@ -206,6 +237,17 @@
       }
     }
 
+    function strokeGrid() {
+      // Cached Path2D skips rebuilding every segment on every frame.
+      if (gridPath) {
+        ctx.stroke(gridPath);
+        return;
+      }
+
+      tracePath();
+      ctx.stroke();
+    }
+
     function phaseAt(now) {
       var value = ((now - sweepStart) / sweepDuration) % 1;
       return value < 0 ? value + 1 : value;
@@ -215,12 +257,11 @@
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      tracePath();
       ctx.save();
       ctx.globalCompositeOperation = 'source-over';
       ctx.lineWidth = 1;
       ctx.strokeStyle = gridInk;
-      ctx.stroke();
+      strokeGrid();
       ctx.restore();
 
       if (typeof phase !== 'number') return;
@@ -246,13 +287,24 @@
       ctx.globalCompositeOperation = ink.composite;
       ctx.strokeStyle = gradient;
       ctx.lineWidth = 1;
-      tracePath();
-      ctx.stroke();
+      strokeGrid();
 
-      if (ink.composite === 'lighter') {
-        ctx.globalAlpha = 0.3;
-        ctx.lineWidth = 3.4;
-        ctx.stroke();
+      // Halo passes: progressively wider, fainter strokes so the band leaves
+      // a soft glow trail on the grid instead of a single bright line. Wide
+      // strokes are far cheaper than a shadowBlur over the same path, which
+      // forces a full-path blur every frame.
+      //
+      // NOTE: these must go through strokeGrid(). When the grid is cached as
+      // a Path2D, ctx.stroke(path) does not touch the context's current path,
+      // so a bare ctx.stroke() here would silently draw nothing.
+      var glowPasses = ink.composite === 'lighter'
+        ? [[2.6, 0.6], [5.5, 0.42], [10, 0.26], [17, 0.14], [27, 0.07]]
+        : [[2.6, 0.4], [5.5, 0.26], [10, 0.15], [17, 0.08]];
+
+      for (var g = 0; g < glowPasses.length; g++) {
+        ctx.globalAlpha = glowPasses[g][1];
+        ctx.lineWidth = glowPasses[g][0];
+        strokeGrid();
       }
 
       ctx.restore();
@@ -267,24 +319,45 @@
     }
 
     function updateParallax() {
-      if (!desktop) return;
+      if (!desktop) return false;
 
-      pointer.x += (pointer.tx - pointer.x) * 0.075;
-      pointer.y += (pointer.ty - pointer.y) * 0.075;
+      var dx = pointer.tx - pointer.x;
+      var dy = pointer.ty - pointer.y;
 
-      var gridX = pointer.x * (GRID_RANGE / WALLPAPER_RANGE);
-      var gridY = pointer.y * (GRID_RANGE / WALLPAPER_RANGE);
+      // Once the pointer target is reached there is nothing to redraw.
+      if (Math.abs(dx) < 0.02 && Math.abs(dy) < 0.02) {
+        if (!parallaxDirty) return false;
+        pointer.x = pointer.tx;
+        pointer.y = pointer.ty;
+        parallaxDirty = false;
+      } else {
+        pointer.x += dx * 0.075;
+        pointer.y += dy * 0.075;
+        parallaxDirty = true;
+      }
+
+      var gridX = pointer.x * (gridRange / wallpaperRangeX);
+      var gridY = pointer.y * (gridRange / wallpaperRangeY);
 
       layer.style.transform =
         'translate3d(' + pointer.x.toFixed(2) + 'px,' + pointer.y.toFixed(2) + 'px,0) scale(1.02)';
       canvas.style.transform =
         'translate3d(' + gridX.toFixed(2) + 'px,' + gridY.toFixed(2) + 'px,0)';
+
+      return true;
     }
 
     function frame(now) {
       rafId = 0;
-      updateParallax();
-      render(desktop && sweepActive ? phaseAt(now) : null);
+
+      var moved = updateParallax();
+      var sweeping = desktop && sweepActive && !prefersReducedMotion();
+
+      // Stay idle while nothing moves; otherwise draw at the display's
+      // native refresh rate.
+      if (sweeping || moved) {
+        render(sweeping ? phaseAt(now) : null);
+      }
 
       if (visible && !document.hidden && !prefersReducedMotion()) {
         rafId = window.requestAnimationFrame(frame);
@@ -348,7 +421,7 @@
         revealTimer = 0;
         sweepReady = true;
         beginSweep();
-      }, revealDelay + revealDuration);
+      }, revealDelay + revealDuration + sweepDelay);
     }
 
     function hide() {
@@ -365,7 +438,6 @@
       if (!next || next === currentWallpaper) return;
 
       currentWallpaper = next;
-      layer.classList.remove('is-loaded');
 
       layer.onerror = function () {
         layer.onerror = null;
@@ -394,8 +466,9 @@
       var nx = (event.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
       var ny = (event.clientY / Math.max(1, window.innerHeight)) * 2 - 1;
 
-      pointer.tx = nx * WALLPAPER_RANGE;
-      pointer.ty = ny * WALLPAPER_RANGE_Y;
+      pointer.tx = nx * wallpaperRangeX;
+      pointer.ty = ny * wallpaperRangeY;
+      parallaxDirty = true;
     }
 
     function refresh() {
@@ -409,10 +482,8 @@
       paint();
       setWallpaper(body.getAttribute('data-wallpaper'));
 
-      layer.addEventListener('load', function () {
-        layer.classList.add('is-loaded');
-      });
-
+      // No load listener: the wallpaper is always opaque, so the image simply
+      // appears under the plate and is revealed when the plate dissolves.
       window.addEventListener('resize', scheduleLayout, { passive: true });
       window.addEventListener('pointermove', onPointerMove, { passive: true });
       window.addEventListener('orientationchange', scheduleLayout, { passive: true });
@@ -645,12 +716,15 @@
       }
 
       switching = true;
-      if (sceneBackground) sceneBackground.hide();
 
       cover.classList.remove('is-leaving');
       cover.classList.add('is-running');
 
       window.setTimeout(function () {
+        // Hide only once the cover has closed over the scene. Doing it on
+        // click showed the background dissolving behind a curtain that was
+        // still rising, which read as the scene being yanked away.
+        if (sceneBackground) sceneBackground.hide();
         swapTheme(nextTheme);
 
         cover.classList.remove('is-running');
@@ -803,39 +877,98 @@
     return target.pathname.replace(/\/+$/, '') === homePath.replace(/\/+$/, '');
   }
 
-  function runCurtainTransition(transition) {
+  // Reads one of the --post-* timings so JS clean-up stays in step with CSS.
+  function cssDuration(name, fallback) {
+    var raw = String(
+      window.getComputedStyle(document.documentElement).getPropertyValue(name) || ''
+    ).trim();
+    var value = parseFloat(raw);
+
+    if (!isFinite(value)) return fallback;
+    return raw.indexOf('ms') > -1 ? value : value * 1000;
+  }
+
+  // Entry for every page but home, in three phases. Phase one is a flat plate
+  // with only the seam: the line extends and travels up to the bar. The bar
+  // drops in a beat before the line lands, then the content blocks fly in —
+  // and the scene (wallpaper + grid + sweep) is the very last thing to load.
+  var POST_ENTER_GRACE = 700;
+  var postEnterTimers = [];
+
+  function clearPostEnterTimers() {
+    for (var i = 0; i < postEnterTimers.length; i++) {
+      window.clearTimeout(postEnterTimers[i]);
+    }
+
+    postEnterTimers.length = 0;
+  }
+
+  function postEnterTimeout(fn, delay) {
+    var id = window.setTimeout(fn, Math.max(0, delay));
+    postEnterTimers.push(id);
+    return id;
+  }
+
+  function runLineEnterTransition(transition) {
     if (prefersReducedMotion()) {
       transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home');
-      transition.classList.add('is-complete');
-      body.classList.remove('route-animating');
+      transition.classList.add('is-line', 'is-complete');
+      body.classList.remove('route-animating', 'route-blackout');
       body.classList.add('route-ready');
       if (sceneBackground) sceneBackground.reveal();
       return Promise.resolve();
     }
 
-    var needsContentReveal = !body.classList.contains('route-ready');
     transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home', 'is-complete');
-    forceReflow(transition);
-    body.classList.add('route-animating');
+    transition.classList.add('is-line');
+
+    clearPostEnterTimers();
+
+    // Dropping route-ready for one frame restarts the CSS entry animations
+    // when arriving from another page that already had it.
+    body.classList.remove('route-ready');
+    forceReflow(body);
+    body.classList.add('route-animating', 'route-blackout');
+    body.classList.add('route-ready');
     transition.classList.add('is-running');
 
-    if (needsContentReveal) {
-      window.setTimeout(function () {
-        body.classList.add('route-ready');
-      }, 960);
-    }
+    // Summed from the parts rather than read from --post-line-landing: an
+    // unregistered custom property holding calc() is returned unresolved.
+    var landing =
+      cssDuration('--post-line-extend-delay', 500) +
+      cssDuration('--post-line-extend-duration', 900) +
+      cssDuration('--post-line-travel-duration', 1400);
+    var barLead = cssDuration('--post-bar-lead', 400);
 
-    return wait(2430).then(function () {
-      transition.classList.remove('is-running', 'is-held', 'is-home');
-      transition.classList.add('is-complete');
-      body.classList.remove('route-animating');
-      body.classList.add('route-ready');
+    // Last block of the cascade: four stagger steps after the body, and it is
+    // the short tail animation that closes the sequence.
+    var flyEnd =
+      cssDuration('--post-fly-delay', 2950) +
+      cssDuration('--post-fly-stagger', 140) * 4 +
+      cssDuration('--post-fly-duration-tail', 850);
+
+    // The bar is allowed out before the line is done.
+    postEnterTimeout(function () {
+      body.classList.remove('route-blackout');
+    }, landing - barLead);
+
+    // The scene only loads once the whole article is on screen. Until then the
+    // page sits on the flat plate painted in the panel colour.
+    postEnterTimeout(function () {
       if (sceneBackground) sceneBackground.reveal();
+    }, flyEnd);
+
+    return wait(flyEnd + POST_ENTER_GRACE).then(function () {
+      transition.classList.remove('is-running', 'is-held');
+      transition.classList.add('is-complete');
+      body.classList.remove('route-animating', 'route-blackout');
+      body.classList.add('route-ready');
     });
   }
 
-  function holdCurtain(transition) {
+  function holdCurtain(transition, isLine) {
     transition.classList.remove('is-running', 'is-pending', 'is-home', 'is-complete');
+    transition.classList.toggle('is-line', !!isLine);
     forceReflow(transition);
     transition.classList.add('is-held');
     body.classList.add('route-animating');
@@ -843,6 +976,9 @@
 
   function runHomeReturnTransition(transition, homeReturn) {
     if (prefersReducedMotion()) {
+      // Drop is-held too: it outranks is-complete in the cascade and would
+      // otherwise leave the plate parked over the page.
+      transition.classList.remove('is-held', 'is-running', 'is-pending', 'is-home', 'is-line');
       transition.classList.add('is-complete');
       homeReturn.classList.remove('is-held', 'is-running');
       homeReturn.classList.add('is-complete');
@@ -856,7 +992,7 @@
     homeReturn.classList.add('is-held');
     forceReflow(homeReturn);
 
-    transition.classList.remove('is-held', 'is-running', 'is-home');
+    transition.classList.remove('is-held', 'is-running', 'is-home', 'is-line');
     transition.classList.add('is-complete');
 
     body.classList.add('route-animating');
@@ -876,11 +1012,12 @@
 
   function setupRouteTransition() {
     var transition = document.querySelector('[data-route-transition]');
+    var homeReturn = document.querySelector('[data-home-return-transition]');
     if (!transition) return;
 
     if (
       prefersReducedMotion() ||
-      !body.classList.contains('is-post') ||
+      !body.classList.contains('is-inner') ||
       transition.classList.contains('is-complete')
     ) {
       transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home');
@@ -891,20 +1028,39 @@
       return;
     }
 
-    runCurtainTransition(transition);
+    // Only posts run the seam. Every other inner page — archive, taxonomy,
+    // standalone — is uncovered by the home-return slash.
+    if (body.classList.contains('is-post')) {
+      runLineEnterTransition(transition);
+      return;
+    }
+
+    if (homeReturn) {
+      // First paint: hold the flat plate so the page never flashes before
+      // the slash takes over.
+      transition.classList.remove('is-running', 'is-pending', 'is-home', 'is-line', 'is-complete');
+      transition.classList.add('is-held');
+      runHomeReturnTransition(transition, homeReturn);
+      return;
+    }
+
+    transition.classList.remove('is-running', 'is-held', 'is-pending', 'is-home');
+    transition.classList.add('is-complete');
+    body.classList.remove('route-animating');
+    body.classList.add('route-ready');
+    if (sceneBackground) sceneBackground.reveal();
   }
 
   function setupPjax() {
     var transition = document.querySelector('[data-route-transition]');
     var exit = document.querySelector('[data-route-exit]');
     var homeReturn = document.querySelector('[data-home-return-transition]');
-    var loader = document.querySelector('.route-loader');
 
+    // The top progress bar was removed; nothing here depends on it any more.
     if (
       !transition ||
       !exit ||
       !homeReturn ||
-      !loader ||
       !window.fetch ||
       !window.history ||
       !window.DOMParser
@@ -951,7 +1107,6 @@
 
     function finishNavigation() {
       navigating = false;
-      loader.classList.remove('is-active');
     }
 
     function failNavigation(destination, error) {
@@ -962,11 +1117,10 @@
       navigating = false;
       body.classList.remove('route-leaving', 'route-animating');
       body.classList.add('route-ready');
-      transition.classList.remove('is-held', 'is-running', 'is-home');
+      transition.classList.remove('is-held', 'is-running', 'is-home', 'is-line');
       transition.classList.add('is-complete');
       homeReturn.classList.remove('is-held', 'is-running');
       homeReturn.classList.add('is-complete');
-      loader.classList.remove('is-active');
       if (sceneBackground) sceneBackground.reveal();
       window.location.assign(destination.href);
     }
@@ -1106,12 +1260,11 @@
       navigating = true;
       closeNavigation();
 
-      loader.classList.remove('is-active');
-      forceReflow(loader);
-      loader.classList.add('is-active');
-
       if (!reducedMotion) {
         body.classList.add('route-leaving');
+        // Drop any post-entry timers still pending, so a delayed scene reveal
+        // cannot fire after the scene has just been hidden.
+        clearPostEnterTimers();
         if (sceneBackground) sceneBackground.hide();
       }
 
@@ -1131,11 +1284,16 @@
           );
         }
 
+        var result = results[0];
+        // Posts keep the seam; home and every other listing are uncovered by
+        // the slash.
+        var enteringPost = result.document.body.classList.contains('is-post');
+
         if (!reducedMotion) {
-          holdCurtain(transition);
+          holdCurtain(transition, enteringPost);
         }
 
-        applyPage(results[0], target);
+        applyPage(result, target);
         body.classList.remove('route-leaving');
         scrollToDestination(target, restoreScroll);
 
@@ -1146,11 +1304,11 @@
           return null;
         }
 
-        if (isHomeUrl(target)) {
-          return runHomeReturnTransition(transition, homeReturn);
+        if (enteringPost) {
+          return runLineEnterTransition(transition);
         }
 
-        return runCurtainTransition(transition);
+        return runHomeReturnTransition(transition, homeReturn);
       }).then(function () {
         finishNavigation();
       }).catch(function (error) {
@@ -1243,11 +1401,10 @@
       renderedUrl = new URL(window.location.href);
       body.classList.remove('route-leaving', 'route-animating');
       body.classList.add('route-ready');
-      transition.classList.remove('is-held', 'is-running', 'is-home');
+      transition.classList.remove('is-held', 'is-running', 'is-home', 'is-line');
       transition.classList.add('is-complete');
       homeReturn.classList.remove('is-held', 'is-running');
       homeReturn.classList.add('is-complete');
-      loader.classList.remove('is-active');
       if (sceneBackground) {
         sceneBackground.setWallpaper(body.getAttribute('data-wallpaper'));
         sceneBackground.reveal();

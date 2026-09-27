@@ -1,6 +1,6 @@
 <%
   const background = theme.background || {};
-  const defaultWallpaper = background.wallpaper || '/images/wallpaper/anime-placeholder.jpg';
+  const defaultWallpaper = background.wallpaper || '/images/wallpaper/wallpaper-default.jpg';
   const pageWallpaper = is_post() && page.wallpaper ? page.wallpaper : defaultWallpaper;
 
   function resolveBackgroundUrl(value) {
@@ -23,24 +23,26 @@
       <img class="scene-background__wallpaper" data-scene-wallpaper alt="">
       <div class="scene-background__acrylic"></div>
       <canvas class="scene-background__canvas" data-scene-canvas></canvas>
+      <!-- Reveal is done by dissolving this plate rather than by fading the
+           wallpaper in, so blur() is rasterised once and never re-computed. -->
+      <div class="scene-background__plate"></div>
     </div>
+
+    <!-- The bar lives outside .app-shell on purpose: that wrapper is a
+         stacking context (z-index: 1), which would trap the bar underneath
+         the route overlays no matter how high its own z-index is. -->
+    <%- partial('_partial/header') %>
 
     <div class="app-shell">
       <% if (is_home() && theme.intro && theme.intro.enabled !== false) { %>
         <%- partial('_partial/intro') %>
       <% } %>
 
-      <%- partial('_partial/header') %>
-
       <main id="main" class="main-content" data-pjax-container>
         <%- body %>
       </main>
 
       <%- partial('_partial/footer') %>
-    </div>
-
-    <div class="route-loader" aria-hidden="true">
-      <span></span>
     </div>
 
     <div class="route-exit" data-route-exit aria-hidden="true"></div>
@@ -53,10 +55,7 @@
       <div class="route-transition__veil route-transition__veil--top"></div>
       <div class="route-transition__veil route-transition__veil--bottom"></div>
       <div class="route-transition__seam">
-        <span class="route-transition__dot"></span>
         <span class="route-transition__line"></span>
-        <span class="route-transition__split route-transition__split--top"></span>
-        <span class="route-transition__split route-transition__split--bottom"></span>
       </div>
     </div>
 
@@ -71,6 +70,10 @@
         revealDelay: Number(background.reveal_delay) >= 0 ? Number(background.reveal_delay) : 0.5,
         revealDuration: Number(background.reveal_duration) >= 0 ? Number(background.reveal_duration) : 1,
         sweepDuration: Number(background.sweep_duration) || 4,
+        sweepDelay: Number(background.sweep_delay) >= 0 ? Number(background.sweep_delay) : 1,
+        parallaxWallpaper: Number(background.parallax_wallpaper) > 0 ? Number(background.parallax_wallpaper) : 14,
+        parallaxWallpaperY: Number(background.parallax_wallpaper_y) > 0 ? Number(background.parallax_wallpaper_y) : 14,
+        parallaxGrid: Number(background.parallax_grid) > 0 ? Number(background.parallax_grid) : 7,
         home: is_home(),
         homePath: url_for('/')
       }) %>;

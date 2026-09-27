@@ -36,14 +36,21 @@
   --code-function: #8fd6df;
   --code-variable: #c9b1f2;
   --code-operator: #b8bec8;
+  /* Route transitions take their colours from the active theme: a dark screen
+     with a luminous seam in dark mode, a pale screen with an ink seam in light
+     mode. Nothing here is meant to be theme-independent. */
   --route-veil: #080a0d;
   --route-line: #ffffff;
   --route-glow: rgba(255, 255, 255, 0.88);
+  /* The seam keeps only this soft halo once it settles as a divider. */
+  --route-glow-soft: rgba(255, 255, 255, 0.26);
   --theme-veil: #080a0d;
   --scene-acrylic: rgba(9, 11, 15, 0.64);
   --scene-grid: rgba(196, 224, 236, 0.145);
   --scene-sweep: rgba(214, 240, 255, 0.5);
-  --scene-wallpaper-blur: 24px;
+  /* The wallpaper carries all scene blur itself. A backdrop-filter on the
+     acrylic layer would re-blur the full screen on every parallax frame. */
+  --scene-wallpaper-blur: 46px;
   --article-surface: #0f141c;
   --article-edge: rgba(180, 222, 236, 0.42);
   --article-glow: rgba(143, 214, 223, 0.16);
@@ -52,6 +59,45 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-sharp: cubic-bezier(0.77, 0, 0.18, 1);
   --ease-curtain: cubic-bezier(0.74, 0, 0.18, 1);
+  /* Post entry choreography. Everything is driven by CSS delays so the JS
+     only has to toggle classes; tune these to re-time the sequence.
+
+     Three phases: the seam plays alone on a flat plate in the panel colour,
+     then the bar drops in just before the line lands, then the article
+     blocks fly in — and only after the last one has landed does the scene
+     (wallpaper, grid, sweep) fade up. */
+  --ease-travel: cubic-bezier(0.22, 1, 0.28, 1);
+  --post-veil-duration: 1200ms;
+  --post-line-extend-delay: 500ms;
+  --post-line-extend-duration: 900ms;
+  --post-line-travel-duration: 1400ms;
+  /* Anchor: the moment the seam touches the header's lower edge. */
+  --post-line-landing: calc(
+    var(--post-line-extend-delay)
+    + var(--post-line-extend-duration)
+    + var(--post-line-travel-duration)
+  );
+  /* The bar is allowed to start before the line is done, so the last stretch
+     of the travel is no longer dead time. */
+  --post-bar-lead: 400ms;
+  --post-bar-delay: calc(var(--post-line-landing) - var(--post-bar-lead));
+  --post-bar-duration: 600ms;
+  --post-bar-distance: 64px;
+  --post-header-delay: 2900ms;
+  --post-header-duration: 800ms;
+  /* Leading layer: the body column. */
+  --post-fly-delay: 2950ms;
+  --post-fly-duration: 1200ms;
+  --post-fly-stagger: 140ms;
+  --post-fly-distance: 48px;
+  --post-fly-blur: 6px;
+  /* Second layer: cover and contents panel — shorter travel, softer blur. */
+  --post-fly-distance-soft: 30px;
+  --post-fly-blur-soft: 3px;
+  --post-fly-duration-soft: 1000ms;
+  /* Trailing layer: footer and prev/next — a plain lift, no blur. */
+  --post-fly-distance-tail: 18px;
+  --post-fly-duration-tail: 850ms;
   --font-sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
 }
@@ -101,6 +147,11 @@ html[data-theme="light"] {
   --article-surface: #eef0ea;
   --article-edge: rgba(8, 121, 138, 0.42);
   --article-glow: rgba(8, 121, 138, 0.12);
+  /* Light mode flips the transition screen too: pale plate, ink seam. */
+  --route-veil: #eef1ee;
+  --route-line: #0b0d10;
+  --route-glow: rgba(11, 14, 18, 0.45);
+  --route-glow-soft: rgba(11, 14, 18, 0.24);
 }
 
 * {
@@ -181,21 +232,45 @@ img {
   inset: 0;
   overflow: hidden;
   background: var(--ink);
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 320ms var(--ease-out);
-  will-change: opacity;
 }
 
 html:not(.js) .scene-background {
   display: none;
 }
 
-.scene-background.is-visible {
+/* Reveal is the plate dissolving, never the scene fading in.
+
+   A wallpaper that animates its own opacity gets its blur() rasterised late:
+   the compositor skips the filter while the layer is transparent and only
+   computes it once the fade starts, so the first frames land sharp and then
+   snap to full blur. Keeping the filtered layer permanently opaque means the
+   blur is computed up front, and the fade happens on a flat colour above it —
+   which is also far cheaper to composite. */
+.scene-background__plate {
+  position: absolute;
+  inset: 0;
+  /* Same tiled backdrop as body, so the page looks untouched before reveal. */
+  background:
+    linear-gradient(var(--background-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--background-grid) 1px, transparent 1px),
+    var(--ink);
+  background-size: 42px 42px;
   opacity: 1;
-  transition:
-    opacity var(--scene-reveal-duration, 1000ms) var(--ease-out)
-    var(--scene-reveal-delay, 500ms);
+  /* Hiding is quick; revealing is the slow, visible direction. */
+  transition: opacity 260ms var(--ease-out);
+  will-change: opacity;
+}
+
+.scene-background.is-visible .scene-background__plate {
+  opacity: 0;
+  transition: opacity var(--scene-reveal-duration, 900ms) var(--ease-out);
+}
+
+/* Post pages hold the scene back until the article has landed, and until then
+   the plate is a flat panel tone rather than the tiled body backdrop. */
+body.is-post .scene-background__plate {
+  background: var(--article-surface);
 }
 
 .scene-background__wallpaper {
@@ -203,25 +278,24 @@ html:not(.js) .scene-background {
   top: -6%;
   left: -6%;
   width: 112%;
+  /* The global img rule caps width at 100%, which would shrink the overscan
+     and leave a gap on the right once the layer is offset. */
+  max-width: none;
   height: 112%;
   object-fit: cover;
-  opacity: 0;
+  object-position: center;
+  /* Permanently opaque: the plate above it does the revealing. Fading this
+     layer itself is what made the compositor rasterise blur() mid-animation
+     and flash one sharp frame before the filter landed. */
   filter: blur(var(--scene-wallpaper-blur)) saturate(1.08) brightness(0.86);
   transform: translate3d(0, 0, 0) scale(1.02);
-  transition: opacity 900ms var(--ease-out);
   will-change: transform;
-}
-
-.scene-background__wallpaper.is-loaded {
-  opacity: 1;
 }
 
 .scene-background__acrylic {
   position: absolute;
   inset: 0;
   background: var(--scene-acrylic);
-  -webkit-backdrop-filter: blur(64px) saturate(120%);
-  backdrop-filter: blur(64px) saturate(120%);
 }
 
 .scene-background__canvas {
@@ -230,12 +304,22 @@ html:not(.js) .scene-background {
   display: block;
   width: 100%;
   height: 100%;
+  /* The grid trails the wallpaper, so the scene arrives in two beats instead
+     of as one flat block. Hiding stays quick to match the plate. */
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out);
   will-change: transform;
+}
+
+.scene-background.is-visible .scene-background__canvas {
+  opacity: 1;
+  transition: opacity var(--scene-grid-duration, 700ms) var(--ease-out)
+    var(--scene-grid-delay, 250ms);
 }
 
 .theme-transition {
   position: fixed;
-  z-index: 256;
+  z-index: 265;
   inset: 0;
   display: none;
   background: var(--theme-veil);
@@ -357,7 +441,10 @@ html.js .theme-transition.is-leaving {
 /* Header */
 .site-header {
   position: fixed;
-  z-index: 80;
+  /* Frozen above every route overlay (route-exit 260, home-return 245,
+     route-transition 240) so the bar stays put instead of being veiled,
+     blurred or scaled with the page shell. */
+  z-index: 261;
   top: 0;
   right: 0;
   left: 0;
@@ -372,13 +459,83 @@ html.js .theme-transition.is-leaving {
     height 260ms ease,
     background 260ms ease,
     border-color 260ms ease,
-    backdrop-filter 260ms ease;
+    backdrop-filter 260ms ease,
+    opacity 500ms var(--ease-out),
+    filter 500ms var(--ease-out),
+    transform 500ms var(--ease-out);
+}
+
+/* Post pages keep the seam line as a permanent divider under the bar. It
+   lives on the header so it tracks the bar's height (76px -> 64px) instead
+   of being pinned to a fixed offset. */
+body.is-post .site-header::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: var(--line);
+  box-shadow: 0 0 8px var(--route-glow-soft);
+  content: "";
+  pointer-events: none;
+}
+
+/* Hand over from the travelling seam: the divider only appears once the line
+   has landed (extend + travel), so there is never a second line on screen. */
+html.js body.is-post.route-animating .site-header::after {
+  animation: post-divider-in 260ms var(--ease-out) var(--post-line-landing) both;
+}
+
+@keyframes post-divider-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* One line only: the divider replaces the header's own scrolled border. */
+body.is-post .site-header.is-scrolled {
+  border-color: transparent;
+}
+
+/* Blackout: while the seam plays, nothing else may be on screen — the frozen
+   bar included. The JS drops this class shortly before the line lands. */
+html.js body.route-blackout .site-header {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The bar now outranks the opener too, so it has to step aside while the
+   intro plays — otherwise it floats over the full-screen animation. */
+html.js body.intro-running .site-header {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The bar is frozen, not inert: it drops in from above and fades up a beat
+   before the seam lands, so the tail of the travel is spent on the bar
+   arriving rather than on an empty screen. It settles almost fully by the
+   time the line touches down, which keeps the divider hand-off aligned. */
+html.js body.is-post.route-ready:not(.route-leaving) .site-header {
+  animation: post-bar-in var(--post-bar-duration) var(--ease-out)
+    var(--post-bar-delay) both;
+}
+
+@keyframes post-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--post-bar-distance)));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .site-header.is-scrolled {
   height: 64px;
   border-color: var(--line);
   background: var(--header-solid);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
 }
 
@@ -1081,70 +1238,6 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
     linear-gradient(90deg, transparent 49.5%, rgba(var(--surface-rgb), 0.06) 49.5% 50.5%, transparent 50.5%),
     repeating-linear-gradient(0deg, transparent 0 5px, rgba(var(--surface-rgb), 0.025) 5px 6px);
   pointer-events: none;
-}
-
-.home-hero__geometry {
-  position: absolute;
-  top: 50%;
-  right: clamp(-100px, -2vw, 10px);
-  width: clamp(320px, 43vw, 680px);
-  aspect-ratio: 1;
-  opacity: 0.58;
-  transform: translateY(-50%);
-}
-
-.geometry__diamond {
-  position: absolute;
-  inset: 18%;
-  border: 1px solid rgba(var(--surface-rgb), 0.36);
-  transform: rotate(45deg);
-}
-
-.geometry__diamond::before,
-.geometry__diamond::after {
-  position: absolute;
-  content: "";
-}
-
-.geometry__diamond::before {
-  inset: 12%;
-  border: 1px solid var(--line);
-}
-
-.geometry__diamond::after {
-  inset: 36%;
-  border: 1px solid rgba(var(--surface-rgb), 0.5);
-  background: rgba(143, 214, 223, 0.08);
-}
-
-.geometry__line {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  height: 1px;
-  background: var(--line-strong);
-  transform-origin: left;
-}
-
-.geometry__line--one {
-  width: 64%;
-  transform: rotate(-45deg);
-}
-
-.geometry__line--two {
-  width: 82%;
-  transform: rotate(45deg);
-}
-
-.geometry__code {
-  position: absolute;
-  right: 12%;
-  bottom: 18%;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.15em;
-  text-align: right;
 }
 
 .home-hero__content {
@@ -2387,8 +2480,16 @@ a.archive-row:hover {
   animation: page-enter 700ms var(--ease-out) both;
 }
 
+/* Posts are choreographed block by block, so their wrapper must not fade too. */
 .is-post .page-enter {
   animation: none;
+}
+
+/* Slash pages are uncovered by the sweep, so the wrapper's own entrance waits
+   for the slash instead of playing behind an opaque layer: it starts as the
+   veil begins to dissolve (60% of 1.71s) and lands with it. */
+html.js body.is-inner:not(.is-post) .page-enter {
+  animation-delay: 900ms;
 }
 
 @keyframes page-enter {
@@ -2396,26 +2497,119 @@ a.archive-row:hover {
   to { opacity: 1; transform: translateY(0); }
 }
 
-html.js body.is-post:not(.route-ready),
+html.js body.is-inner:not(.route-ready),
 html.js body.route-animating {
   overflow: hidden;
 }
 
+/* Posts hold the flat plate until the seam lands; the slash pages are covered
+   by the home-return layer instead of by a repainted body. */
 html.js body.is-post:not(.route-ready) {
   background: var(--route-veil);
 }
 
-html.js body.is-post:not(.route-ready) .app-shell {
+/* The header is frozen, so the hold-back and the reveal apply to the content
+   columns only — never to .app-shell, whose filter/transform would also drag
+   the fixed header into a containing block. */
+html.js body.is-post:not(.route-ready) .main-content,
+html.js body.is-post:not(.route-ready) .site-footer {
   opacity: 0;
 }
 
-html.js body.is-post.route-ready .app-shell {
-  animation: route-content-reveal 720ms var(--ease-out) both;
+html.js body.is-post.route-ready:not(.route-leaving) .main-content,
+html.js body.is-post.route-ready:not(.route-leaving) .site-footer {
+  animation: route-content-reveal var(--post-veil-duration) var(--ease-out)
+    var(--post-line-landing) both;
 }
 
 @keyframes route-content-reveal {
   from { opacity: 0; filter: blur(8px); transform: scale(1.006); }
   to { opacity: 1; filter: blur(0); transform: scale(1); }
+}
+
+/* Inner-page entry choreography, shared by every non-home page: the title
+   block fades, the main column leads with the full travel and blur, the
+   supporting panels settle behind it with a shorter, softer move, and the
+   footer / prev-next only lift. Post pages fill every tier; archive, taxonomy
+   and standalone pages fill whichever tiers they actually have, so they land
+   on the same rhythm without needing their own timings. */
+@keyframes post-header-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes post-fly-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--post-fly-blur));
+    transform: translateY(var(--post-fly-distance));
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes post-fly-in-soft {
+  from {
+    opacity: 0;
+    filter: blur(var(--post-fly-blur-soft));
+    transform: translateY(var(--post-fly-distance-soft));
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes post-fly-in-tail {
+  from { opacity: 0; transform: translateY(var(--post-fly-distance-tail)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Tier 0 — titles fade in place rather than fly. */
+html.js body.is-post.route-ready:not(.route-leaving) .article__header,
+html.js body.is-post.route-ready:not(.route-leaving) .listing__header,
+html.js body.is-post.route-ready:not(.route-leaving) .standalone__header {
+  animation: post-header-in var(--post-header-duration) var(--ease-out)
+    var(--post-header-delay) both;
+}
+
+/* Tier 1 — the main column leads the cascade. */
+html.js body.is-post.route-ready:not(.route-leaving) .article__body,
+html.js body.is-post.route-ready:not(.route-leaving) .archive-years,
+html.js body.is-post.route-ready:not(.route-leaving) .taxonomy-list,
+html.js body.is-post.route-ready:not(.route-leaving) .standalone__body {
+  animation: post-fly-in var(--post-fly-duration) var(--ease-out)
+    var(--post-fly-delay) both;
+}
+
+/* Tier 2 — supporting panels: the cover and the standalone divider rule. */
+html.js body.is-post.route-ready:not(.route-leaving) .article__cover,
+html.js body.is-post.route-ready:not(.route-leaving) .standalone__rule {
+  animation: post-fly-in-soft var(--post-fly-duration-soft) var(--ease-out)
+    calc(var(--post-fly-delay) + var(--post-fly-stagger)) both;
+}
+
+/* Tier 3 — the contents panel. */
+html.js body.is-post.route-ready:not(.route-leaving) .article__toc {
+  animation: post-fly-in-soft var(--post-fly-duration-soft) var(--ease-out)
+    calc(var(--post-fly-delay) + var(--post-fly-stagger) * 2) both;
+}
+
+/* Tier 4 — the footer band, and pagination on the listing pages. */
+html.js body.is-post.route-ready:not(.route-leaving) .article__footer,
+html.js body.is-post.route-ready:not(.route-leaving) .pagination {
+  animation: post-fly-in-tail var(--post-fly-duration-tail) var(--ease-out)
+    calc(var(--post-fly-delay) + var(--post-fly-stagger) * 3) both;
+}
+
+/* Tier 5 — prev / next closes the cascade. */
+html.js body.is-post.route-ready:not(.route-leaving) .article-nav {
+  animation: post-fly-in-tail var(--post-fly-duration-tail) var(--ease-out)
+    calc(var(--post-fly-delay) + var(--post-fly-stagger) * 4) both;
 }
 
 .route-transition {
@@ -2461,19 +2655,6 @@ html.js .route-transition {
   transform: translate(-50%, -0.5px);
 }
 
-.route-transition__dot {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: var(--route-line);
-  box-shadow: 0 0 4px var(--route-glow);
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.4);
-}
-
 .route-transition__line {
   position: absolute;
   top: 50%;
@@ -2490,91 +2671,83 @@ html.js .route-transition {
   transform-origin: center;
 }
 
-.route-transition__split {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 100%;
-  height: 1px;
-  background: var(--route-line);
-  box-shadow:
-    0 0 8px var(--route-line),
-    0 0 26px var(--route-glow),
-    0 0 70px var(--route-glow);
-  opacity: 0;
-  transform: translate(-50%, -50%);
-  transform-origin: center;
-  will-change: opacity, transform;
-}
-
-.route-transition.is-running .route-transition__dot {
-  animation: route-dot 2.35s var(--ease-sharp) both;
-}
-
-.route-transition.is-running .route-transition__line {
-  animation: route-line 2.35s var(--ease-sharp) both;
-}
-
-.route-transition.is-running .route-transition__split--top {
-  animation: route-split-top 2.35s var(--ease-curtain) both;
-}
-
-.route-transition.is-running .route-transition__split--bottom {
-  animation: route-split-bottom 2.35s var(--ease-curtain) both;
-}
-
-.route-transition.is-running .route-transition__veil--top {
-  animation: route-veil-top 2.35s var(--ease-curtain) both;
-}
-
-.route-transition.is-running .route-transition__veil--bottom {
-  animation: route-veil-bottom 2.35s var(--ease-curtain) both;
-}
+/* Post entry: no curtain pull. The veils simply dissolve (that is the
+   full-screen fade) while the seam draws over them. */
 
 html.js .route-transition.is-complete {
   display: none;
 }
 
+.route-transition.is-line.is-running .route-transition__veil--top,
+.route-transition.is-line.is-running .route-transition__veil--bottom {
+  /* Hold the black screen for the whole seam sequence; it only lifts once
+     the line has landed. */
+  animation: route-veil-fade var(--post-veil-duration) var(--ease-out)
+    var(--post-line-landing) both;
+}
+
+@keyframes route-veil-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.route-transition.is-line.is-running .route-transition__line {
+  animation: route-line-seam
+    calc(var(--post-line-extend-duration) + var(--post-line-travel-duration))
+    var(--ease-travel) var(--post-line-extend-delay) both;
+}
+
+.route-transition.is-line.is-running .route-transition__seam {
+  animation:
+    route-seam-travel var(--post-line-travel-duration) var(--ease-travel)
+      calc(var(--post-line-extend-delay) + var(--post-line-extend-duration)) both,
+    route-seam-handoff 260ms var(--ease-out)
+      calc(var(--post-line-extend-delay) + var(--post-line-extend-duration) + var(--post-line-travel-duration))
+      both;
+}
+
+/* From the vertical middle to just under the bar. */
+@keyframes route-seam-travel {
+  0% { transform: translate(-50%, -0.5px); }
+  100% { transform: translate(-50%, calc(var(--header-height) - 50vh - 0.5px)); }
+}
+
+/* The travelling line dissolves exactly as the divider fades in. */
+@keyframes route-seam-handoff {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Extend first (0-39%), then ride along and settle into a soft halo. */
+@keyframes route-line-seam {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scaleX(0);
+    box-shadow:
+      0 0 7px var(--route-line),
+      0 0 22px var(--route-glow),
+      0 0 58px var(--route-glow);
+  }
+  39% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleX(1);
+    box-shadow:
+      0 0 7px var(--route-line),
+      0 0 22px var(--route-glow),
+      0 0 58px var(--route-glow);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleX(1);
+    box-shadow:
+      0 0 6px var(--route-line),
+      0 0 12px var(--route-glow-soft),
+      0 0 24px rgba(255, 255, 255, 0);
+  }
+}
+
 html.js .route-transition.is-held {
   display: block;
-}
-
-@keyframes route-dot {
-  0%, 4% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  8% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.68); }
-  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  30%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
-}
-
-@keyframes route-line {
-  0%, 14% { opacity: 0; transform: translate(-50%, -50%) scaleX(0); }
-  34% { opacity: 0.92; transform: translate(-50%, -50%) scaleX(1); }
-  42%, 48% { opacity: 1; transform: translate(-50%, -50%) scaleX(1); }
-  56%, 100% { opacity: 0; transform: translate(-50%, -50%) scaleX(1); }
-}
-
-@keyframes route-split-top {
-  0%, 46% { opacity: 0; transform: translate(-50%, -50%); }
-  48% { opacity: 1; transform: translate(-50%, -50%); }
-  100% { opacity: 0; transform: translate(-50%, calc(-50% - 50vh)); }
-}
-
-@keyframes route-split-bottom {
-  0%, 46% { opacity: 0; transform: translate(-50%, -50%); }
-  48% { opacity: 1; transform: translate(-50%, -50%); }
-  100% { opacity: 0; transform: translate(-50%, calc(-50% + 50vh)); }
-}
-
-@keyframes route-veil-top {
-  0%, 46% { opacity: 1; transform: translateY(0); }
-  48% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 1; transform: translateY(-100%); }
-}
-
-@keyframes route-veil-bottom {
-  0%, 46% { opacity: 1; transform: translateY(0); }
-  48% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 1; transform: translateY(100%); }
 }
 
 .home-return {
@@ -2659,64 +2832,69 @@ html.js .route-exit {
   display: block;
 }
 
+/* Leaving: the page blurs and fades down to a ghost over a white base, and
+   only then does the white plate close over it to hide the swap. Holding the
+   veil back is what keeps the blurred remnant readable instead of burying it. */
+html.js body.route-leaving {
+  background: var(--route-veil);
+}
+
+/* Leaving: the plate repaints itself in the transition colour so the blurred
+   remnant of the old page floats on that base instead of on the live scene.
+   Holding the veil back is what keeps the remnant readable. */
+html.js body.route-leaving .scene-background__plate {
+  background: var(--route-veil);
+  opacity: 1;
+  transition: opacity 200ms linear;
+}
+
+html.js body.route-leaving .scene-background__canvas {
+  opacity: 0;
+  transition: opacity 200ms linear;
+}
+
 html.js body.route-leaving .route-exit {
   animation: route-exit-veil 680ms var(--ease-sharp) forwards;
 }
 
-html.js body.route-leaving .app-shell {
+html.js body.route-leaving .main-content,
+html.js body.route-leaving .site-footer {
   animation: route-exit-shell 680ms var(--ease-sharp) forwards;
   will-change: opacity, filter, transform;
 }
 
+/* The bar leaves with the page. It outranks every overlay, so a bar that
+   stayed razor sharp while the shell blurred and the veil closed read as a
+   hard cut — it now rides the same blur a beat behind the content and fades
+   out over the closing veil. Written as a transition rather than an animation
+   so it also eases back in when the next page takes over, instead of snapping
+   to full opacity the moment route-leaving is dropped. */
+html.js body.route-leaving .site-header {
+  opacity: 0;
+  filter: blur(12px);
+  transform: scale(1.014);
+  transition:
+    opacity 620ms var(--ease-sharp) 60ms,
+    filter 620ms var(--ease-sharp) 60ms,
+    transform 620ms var(--ease-sharp) 60ms;
+  pointer-events: none;
+}
+
 @keyframes route-exit-veil {
   0% { opacity: 0; }
+  58% { opacity: 0; }
   100% { opacity: 1; }
 }
 
 @keyframes route-exit-shell {
   0% { opacity: 1; filter: blur(0); transform: scale(1); }
-  100% { opacity: 0.16; filter: blur(14px); transform: scale(1.012); }
-}
-
-.route-loader {
-  position: fixed;
-  z-index: 250;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  pointer-events: none;
-}
-
-.route-loader span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--paper);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.42);
-  transform: scaleX(0);
-  transform-origin: left;
-}
-
-.route-loader.is-active span {
-  animation: route-load 1.2s var(--ease-sharp) forwards;
-}
-
-@keyframes route-load {
-  0% { transform: scaleX(0); }
-  62% { transform: scaleX(0.82); }
-  100% { transform: scaleX(1); }
+  100% { opacity: 0.2; filter: blur(14px); transform: scale(1.012); }
 }
 
 @media (max-width: 960px) {
   .home-hero {
     min-height: 790px;
     grid-template-columns: 1fr;
-  }
-
-  .home-hero__geometry {
-    right: -170px;
-    opacity: 0.36;
   }
 
   .home-hero__side {
@@ -2762,12 +2940,11 @@ html.js body.route-leaving .app-shell {
 @media (max-width: 760px) {
   :root {
     --header-height: 66px;
-    --scene-wallpaper-blur: 20px;
+    --scene-wallpaper-blur: 32px;
   }
 
   .scene-background__acrylic {
-    -webkit-backdrop-filter: blur(40px) saturate(116%);
-    backdrop-filter: blur(40px) saturate(116%);
+    background: var(--scene-acrylic);
   }
 
   .article__body.prose {
@@ -3027,6 +3204,9 @@ html.js body.route-leaving .app-shell {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    /* Delays matter too: the post entry staggers up to ~1.6s, which would
+       otherwise leave reduced-motion users staring at a blank page. */
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
@@ -3045,7 +3225,8 @@ html.js body.route-leaving .app-shell {
     display: none !important;
   }
 
-  .scene-background.is-visible {
+  .scene-background.is-visible .scene-background__plate,
+  .scene-background.is-visible .scene-background__canvas {
     transition-delay: 0ms !important;
   }
 }

@@ -24,14 +24,23 @@ intro:
 # The desktop scene is a fixed wallpaper, a heavy acrylic layer, and a
 # transparent-grid canvas. Mobile keeps the wallpaper and acrylic, but draws
 # the original flat grid without the tunnel animation.
+# reveal_*: after each page transition the scene fades in over reveal_duration
+# seconds; the light band then waits sweep_delay seconds before sweeping.
+# parallax_*: pointer parallax amplitudes in px — a larger gap between the
+# wallpaper and the grid reads as stronger depth.
 background:
-  wallpaper: /images/wallpaper/anime-placeholder.jpg
+  wallpaper: /images/wallpaper/wallpaper-default.jpg
   desktop_min_width: 769
   grid_spacing: 168
   mobile_grid_spacing: 42
-  reveal_delay: 0.5
+  reveal_delay: 0
   reveal_duration: 1
+  sweep_delay: 1
   sweep_duration: 4
+  # Wallpaper parallax is deliberately twice the grid's amplitude.
+  parallax_wallpaper: 28
+  parallax_wallpaper_y: 28
+  parallax_grid: 7
 
 home:
   direct_entry: '直接进入文章'
