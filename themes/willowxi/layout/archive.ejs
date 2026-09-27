@@ -22,14 +22,16 @@
           <%- partial('_partial/icons', {name: 'chevron-down', size: 19}) %>
         </summary>
         <div class="archive-year__body">
-          <% entry[1].forEach(function(post) { %>
-            <a class="archive-row" href="<%- url_for(post.path) %>">
-              <time><%= date(post.date, 'MM.DD') %></time>
-              <strong><%= post.title %></strong>
-              <span><%= post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED' %></span>
-              <%- partial('_partial/icons', {name: 'arrow-up-right', size: 16}) %>
-            </a>
-          <% }); %>
+          <div class="archive-year__inner">
+            <% entry[1].forEach(function(post) { %>
+              <a class="archive-row" href="<%- url_for(post.path) %>">
+                <time><%= date(post.date, 'MM.DD') %></time>
+                <strong><%= post.title %></strong>
+                <span><%= post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED' %></span>
+                <%- partial('_partial/icons', {name: 'arrow-up-right', size: 16}) %>
+              </a>
+            <% }); %>
+          </div>
         </div>
       </details>
     <% }); %>

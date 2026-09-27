@@ -79,24 +79,72 @@
     <div class="stream-groups">
       <% orderedGroups.forEach(function(entry, index) { %>
         <% const category = entry[0]; const posts = entry[1]; %>
-        <details class="stream-group reveal"<%= index === 0 ? ' open' : '' %>>
+        <details class="stream-group reveal">
           <summary>
             <span class="stream-group__number"><%= String(index + 1).padStart(2, '0') %></span>
             <span class="stream-group__title">
               <small>GROUP / <%= category %></small>
-              <strong><%= category %></strong>
+              <strong><span><%= category %></span></strong>
             </span>
             <span class="stream-group__count"><%= String(posts.length).padStart(2, '0') %></span>
             <span class="stream-group__toggle" aria-hidden="true">
-              <i></i>
-              <%- partial('_partial/icons', {name: 'chevron-down', size: 19}) %>
+              <%- partial('_partial/icons', {name: 'chevron-down', size: 20}) %>
             </span>
           </summary>
           <div class="stream-group__body">
             <div class="stream-group__inner">
-              <% posts.forEach(function(post) { %>
-                <%- partial('_partial/post-card', {post: post}) %>
-              <% }); %>
+              <%/* Phigros track select: ONE -7deg acrylic parallelogram wraps
+                   both columns — every slant in here comes from that single
+                   transform. The inner grid counter-skews so content stays
+                   upright; the right panel flips one notch per selection. */%>
+              <div class="stream-picker" data-stream-picker>
+                <span class="stream-picker__plate" aria-hidden="true"></span>
+                <span class="stream-picker__divider" aria-hidden="true"></span>
+                <div class="stream-picker__inner">
+                  <div class="stream-viewport" data-stream-viewport tabindex="0" aria-label="<%= category %> 文章选择">
+                    <div class="stream-viewport__list" data-stream-list>
+                      <% posts.forEach(function(post) { %>
+                        <a class="stream-row" data-stream-row href="<%- url_for(post.path) %>">
+                          <span class="stream-row__title"><%= post.title %></span>
+                          <span class="stream-row__date"><%= date(post.date, 'YYYY.MM.DD') %></span>
+                        </a>
+                      <% }); %>
+                    </div>
+                  </div>
+                  <div class="stream-detail" data-stream-detail>
+                    <div class="stream-detail__track" data-stream-track>
+                      <% posts.forEach(function(post) {
+                        const excerptText = strip_html(post.excerpt || post.content || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+                        const cover = post.wallpaper ? url_for(post.wallpaper) : '';
+                        const cat = post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED';
+                      %>
+                        <article class="stream-detail__panel">
+                          <div class="stream-detail__cover"<%= cover ? ' style="background-image:url(' + cover + ')"' : '' %>></div>
+                          <div class="stream-detail__body">
+                            <small><%= date(post.date, 'YYYY.MM.DD') %> / <%= cat %></small>
+                            <h4><%= post.title %></h4>
+                            <% if (excerptText) { %>
+                              <p><%= excerptText %><%= excerptText.length >= 140 ? '…' : '' %></p>
+                            <% } %>
+                          </div>
+                          <a class="stream-detail__read" href="<%- url_for(post.path) %>">
+                            <span>READ</span>
+                            <%- partial('_partial/icons', {name: 'arrow-up-right', size: 15}) %>
+                          </a>
+                        </article>
+                      <% }); %>
+                    </div>
+                  </div>
+                </div>
+                <span class="stream-viewport__count"><span data-stream-count>01</span> / <%= String(posts.length).padStart(2, '0') %></span>
+              </div>
+              <%/* Mobile portrait gets the original card list instead of the
+                   picker — both are rendered, orientation media picks one. */%>
+              <div class="stream-cards">
+                <% posts.forEach(function(post) { %>
+                  <%- partial('_partial/post-card', { post: post }) %>
+                <% }); %>
+              </div>
             </div>
           </div>
         </details>

@@ -766,16 +766,82 @@
   }
 
   function setupDetails() {
+    var reduced = prefersReducedMotion();
     document.querySelectorAll('details').forEach(function (details) {
       var bodyElement = details.querySelector('.stream-group__body, .archive-year__body');
       if (!bodyElement) return;
 
-      function sync() {
-        bodyElement.style.gridTemplateRows = details.open ? '1fr' : '0fr';
+      var collapseFinish = null;
+      var suppressToggle = false;
+
+      function cancelCollapse() {
+        if (collapseFinish) {
+          bodyElement.removeEventListener('transitionend', collapseFinish);
+          collapseFinish = null;
+        }
+        details.classList.remove('is-collapsing');
       }
 
-      details.addEventListener('toggle', sync);
-      if (details.open) requestAnimationFrame(sync);
+      // Both directions are scripted: the summary's native toggle shows or
+      // hides the content in a single frame, so neither expand nor collapse
+      // would ever be seen moving. The height still comes from the grid-rows
+      // transition; the attribute flips only once it has landed (close) or
+      // in the same still-hidden frame (open). Row 2 is the bottom tail
+      // (var(--tail)), which must collapse with the content row.
+      var ROWS_OPEN = '1fr var(--tail, 0px)';
+      var ROWS_CLOSED = '0fr 0px';
+
+      details.addEventListener('click', function (event) {
+        var summary = event.target.closest('summary');
+        if (!summary) return;
+        event.preventDefault();
+
+        if (details.open) {
+          if (collapseFinish) return; // already collapsing
+          if (reduced) {
+            details.open = false;
+            return;
+          }
+          details.classList.add('is-collapsing');
+          bodyElement.style.gridTemplateRows = ROWS_CLOSED;
+          collapseFinish = function (e) {
+            if (e && e.propertyName !== 'grid-template-rows') return;
+            bodyElement.removeEventListener('transitionend', collapseFinish);
+            collapseFinish = null;
+            details.classList.remove('is-collapsing');
+            suppressToggle = true;
+            details.open = false;
+          };
+          bodyElement.addEventListener('transitionend', collapseFinish);
+          return;
+        }
+
+        cancelCollapse();
+        bodyElement.style.gridTemplateRows = ROWS_CLOSED;
+        suppressToggle = true;
+        details.open = true;
+        if (reduced) {
+          bodyElement.style.gridTemplateRows = ROWS_OPEN;
+          return;
+        }
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            bodyElement.style.gridTemplateRows = ROWS_OPEN;
+          });
+        });
+      });
+
+      // Programmatic opens still land expanded; programmatic closes snap shut.
+      details.addEventListener('toggle', function () {
+        if (suppressToggle) {
+          suppressToggle = false;
+          return;
+        }
+        if (collapseFinish) return;
+        bodyElement.style.gridTemplateRows = details.open ? ROWS_OPEN : ROWS_CLOSED;
+      });
+
+      if (details.open) bodyElement.style.gridTemplateRows = ROWS_OPEN;
     });
   }
 
@@ -811,9 +877,277 @@
     sections.forEach(function (section) { observer.observe(section); });
   }
 
+  // Home stream pickers. Left column: transparent rows in a native scroll
+  // area (wheel = smooth multi-row, touch = momentum); while it glides the
+  // row nearest the pinned bar is the selection and the right detail panel
+  // flips one notch per change (the gear-ratio pair). When scrolling goes
+  // idle the view snaps onto the nearest row. Clicking an unselected row
+  // glides it to the bar; clicking the selected row (the bar itself) or the
+  // panel's READ opens the post — the rows are real links, so PJAX works.
+  var pickerTeardowns = [];
+
+  function setupStreamPickers() {
+    var viewports = document.querySelectorAll('[data-stream-viewport]');
+    Array.prototype.forEach.call(viewports, function (viewport) {
+      setupStreamPicker(viewport);
+    });
+  }
+
+  function setupStreamPicker(viewport) {
+    var picker = viewport.closest('[data-stream-picker]');
+    var list = viewport.querySelector('[data-stream-list]');
+    var count = picker ? picker.querySelector('[data-stream-count]') : null;
+    var track = picker ? picker.querySelector('[data-stream-track]') : null;
+    var rows = Array.prototype.slice.call(list ? list.children : []);
+
+    if (!list || !rows.length) return;
+
+    var reduced = prefersReducedMotion();
+    var index = -1;
+    var snapTimer = 0;
+    var snapAnim = 0;
+    var glideRaf = 0;
+    var glideTarget = 0;
+    // tan(7deg): the row starts follow the wrapper's left slant edge.
+    var TAN7 = 0.1228;
+    var PAD_BASE = 128;
+    var compact = window.matchMedia('(max-width: 960px)');
+
+    function gap() {
+      var styles = window.getComputedStyle(list);
+      return parseFloat(styles.rowGap || styles.gap) || 12;
+    }
+
+    // Trapezoid typesetting: a row's left inset tracks the wrapper's slant
+    // edge at its CURRENT height, so the row starts form a line parallel to
+    // the -7deg edge while the list glides. Mobile has no slant — clear it.
+    function updateIndents() {
+      var centre = viewport.scrollTop + viewport.clientHeight / 2;
+      rows.forEach(function (row) {
+        if (compact.matches) {
+          row.style.paddingLeft = '';
+          return;
+        }
+        var yRel = row.offsetTop + row.offsetHeight / 2 - centre;
+        row.style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
+      });
+    }
+
+    // Vertical centre of row i, in the scroller's content coordinates.
+    // offsetParent is the (position:relative) viewport, so this is scroll-proof.
+    function rowCentre(i) {
+      return rows[i].offsetTop + rows[i].offsetHeight / 2;
+    }
+
+    function nearestIndex() {
+      var centre = viewport.scrollTop + viewport.clientHeight / 2;
+      var best = 0;
+      var bestDist = Infinity;
+      rows.forEach(function (row, i) {
+        var dist = Math.abs(rowCentre(i) - centre);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      });
+      return best;
+    }
+
+    function setActive(i) {
+      if (i === index) return;
+      index = i;
+      rows.forEach(function (row, k) {
+        row.classList.toggle('is-active', k === i);
+      });
+      if (count) count.textContent = String(i + 1).padStart(2, '0');
+      // The gear ratio lives here: many rows glide past, the panel flips one
+      // notch per row that takes the bar.
+      if (track) track.style.transform = 'translateY(' + -i * 100 + '%)';
+    }
+
+    function centreOn(i) {
+      viewport.scrollTop = rowCentre(i) - viewport.clientHeight / 2;
+    }
+
+    function cancelSnap() {
+      if (snapAnim) {
+        window.cancelAnimationFrame(snapAnim);
+        snapAnim = 0;
+      }
+    }
+
+    function cancelGlide() {
+      if (glideRaf) {
+        window.cancelAnimationFrame(glideRaf);
+        glideRaf = 0;
+      }
+    }
+
+    // The snap is the tail of the glide, not a second move: short, eased,
+    // and as long as the distance actually is. A long debounce + native
+    // smooth scrollTo read as a separate jump once the motion had stopped.
+    function snapToRow(i) {
+      cancelSnap();
+      var target = rowCentre(i) - viewport.clientHeight / 2;
+      var from = viewport.scrollTop;
+      var dist = target - from;
+      if (Math.abs(dist) < 2) return;
+      if (reduced) {
+        viewport.scrollTop = target;
+        return;
+      }
+      var duration = Math.max(150, Math.min(400, Math.abs(dist) * 1.05));
+      var start = 0;
+      var step = function (ts) {
+        if (!start) start = ts;
+        var t = Math.min(1, (ts - start) / duration);
+        var eased = 1 - Math.pow(1 - t, 3);
+        viewport.scrollTop = from + dist * eased;
+        updateIndents();
+        snapAnim = t < 1 ? window.requestAnimationFrame(step) : 0;
+      };
+      snapAnim = window.requestAnimationFrame(step);
+    }
+
+    // Wheel = continuous browsing at half throttle: each notch advances the
+    // target by ~one row, the view eases after it, and the snap still takes
+    // over once the gesture runs out. Touch keeps native momentum untouched.
+    viewport.addEventListener('wheel', function (event) {
+      event.preventDefault();
+      if (glideRaf) {
+        window.cancelAnimationFrame(glideRaf);
+        glideRaf = 0;
+      } else {
+        glideTarget = viewport.scrollTop; // new gesture starts from rest
+      }
+      cancelSnap();
+      window.clearTimeout(snapTimer);
+      var max = viewport.scrollHeight - viewport.clientHeight;
+      glideTarget = Math.max(0, Math.min(max, glideTarget + event.deltaY * 0.5));
+      var stepGlide = function () {
+        var diff = glideTarget - viewport.scrollTop;
+        if (Math.abs(diff) < 1) {
+          glideRaf = 0;
+          viewport.scrollTop = glideTarget;
+          snapTimer = window.setTimeout(function () {
+            snapToRow(index);
+          }, 90);
+          return;
+        }
+        viewport.scrollTop += diff * 0.18;
+        glideRaf = window.requestAnimationFrame(stepGlide);
+      };
+      glideRaf = window.requestAnimationFrame(stepGlide);
+    }, { passive: false });
+
+    viewport.addEventListener('touchstart', function () {
+      cancelSnap();
+      cancelGlide();
+      window.clearTimeout(snapTimer);
+    }, { passive: true });
+
+    viewport.addEventListener('scroll', function () {
+      setActive(nearestIndex());
+      updateIndents();
+      if (snapAnim || glideRaf) return; // our own animation feeds these events
+      window.clearTimeout(snapTimer);
+      // Snap as soon as the gesture runs out, so it blends into the motion.
+      snapTimer = window.setTimeout(function () {
+        snapToRow(index);
+      }, 90);
+    }, { passive: true });
+
+    list.addEventListener('click', function (event) {
+      var row = event.target.closest('[data-stream-row]');
+      if (!row) return;
+      var i = rows.indexOf(row);
+      if (i === -1 || i === index) return; // selected row: let the link open
+      // First tap on an unselected row just glides it under the bar.
+      event.preventDefault();
+      snapToRow(i);
+    });
+
+    viewport.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        snapToRow(Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))));
+      }
+    });
+
+    // The right panel is the small gear: one wheel notch (or one swipe)
+    // advances the selection by exactly one row; the left list glides there.
+    var detail = picker ? picker.querySelector('[data-stream-detail]') : null;
+    if (detail) {
+      var stepLock = 0;
+
+      detail.addEventListener('wheel', function (event) {
+        event.preventDefault(); // this panel never scrolls the page
+        // 240ms: one physical notch fires several wheel events (smooth
+        // scrolling), and they must all count as that single notch.
+        var now = Date.now();
+        if (now - stepLock < 240) return;
+        stepLock = now;
+        var next = index + (event.deltaY > 0 ? 1 : -1);
+        if (next < 0 || next >= rows.length) return;
+        snapToRow(next);
+      }, { passive: false });
+
+      var touchY = 0;
+      detail.addEventListener('touchstart', function (event) {
+        if (event.touches.length === 1) touchY = event.touches[0].clientY;
+      }, { passive: true });
+      detail.addEventListener('touchend', function (event) {
+        var dy = event.changedTouches[0].clientY - touchY;
+        if (Math.abs(dy) < 24) return;
+        var next = index + (dy < 0 ? 1 : -1);
+        if (next < 0 || next >= rows.length) return;
+        snapToRow(next);
+      }, { passive: true });
+    }
+
+    function remeasure() {
+      if (viewport.clientHeight < 10) return; // details collapsed
+      if (index === -1) {
+        setActive(0);
+        centreOn(0);
+        updateIndents();
+        return;
+      }
+      centreOn(index);
+      updateIndents();
+    }
+
+    // The viewport collapses to zero height while its details is closed.
+    // The toggle fires before the expand transition starts, so the real
+    // measure point is the body's grid-rows transition end (the toggle
+    // listener stays as a fallback for programmatic opens).
+    var details = viewport.closest('details');
+    var groupBody = details ? details.querySelector('.stream-group__body') : null;
+    var onBodyTransition = function (event) {
+      if (event.propertyName !== 'grid-template-rows') return;
+      remeasure();
+    };
+    if (details) details.addEventListener('toggle', remeasure);
+    if (groupBody) groupBody.addEventListener('transitionend', onBodyTransition);
+
+    window.addEventListener('resize', remeasure);
+    pickerTeardowns.push(function () {
+      cancelGlide();
+      cancelSnap();
+      window.removeEventListener('resize', remeasure);
+      if (details) details.removeEventListener('toggle', remeasure);
+      if (groupBody) groupBody.removeEventListener('transitionend', onBodyTransition);
+    });
+
+    remeasure();
+  }
+
   function teardownPageContent() {
     pageObservers.forEach(function (observer) { observer.disconnect(); });
     pageObservers = [];
+    while (pickerTeardowns.length) {
+      pickerTeardowns.pop()();
+    }
   }
 
   function setupPageContent() {
@@ -821,6 +1155,7 @@
     setupDetails();
     setupToc();
     setupCopyButtons();
+    setupStreamPickers();
   }
 
   function setupCopyButtons() {

@@ -1446,6 +1446,7 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 }
 
 .stream-group {
+  --tail: 34px;
   position: relative;
   border-bottom: 1px solid var(--line-strong);
 }
@@ -1519,64 +1520,78 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 }
 
 .stream-group__title strong {
-  font-size: clamp(20px, 3vw, 35px);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.15;
+  /* Solid plate instead of bare type on the grid: the group name was
+     illegible over the sweep. Same -7deg skew as the route slash. */
+  display: inline-block;
+  padding: 11px 36px;
+  background: var(--paper);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font-size: clamp(24px, 3.4vw, 42px);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+  transform: skewX(-7deg);
+}
+
+.stream-group__title strong > span {
+  display: inline-block;
+  transform: skewX(7deg);
 }
 
 .stream-group__count {
   justify-self: end;
 }
 
+/* Bare arrow — no plate, no frame. Hover warms it up, open flips it. */
 .stream-group__toggle {
   position: relative;
   display: grid;
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   justify-self: end;
   place-items: center;
-  border: 1px solid var(--line);
-  color: var(--paper);
+  color: var(--muted);
   transition:
     color 220ms ease,
-    background 220ms ease,
-    border-color 220ms ease,
-    transform 360ms var(--ease-out);
+    transform 420ms var(--ease-out);
 }
 
-.stream-group__toggle i {
-  position: absolute;
-  inset: 6px;
-  border: 1px solid transparent;
-  transform: rotate(45deg);
-  transition: border-color 220ms ease;
-}
-
-.stream-group summary:hover .stream-group__toggle,
-.stream-group[open] .stream-group__toggle {
-  color: var(--ink);
-  border-color: var(--paper);
-  background: var(--paper);
+.stream-group summary:hover .stream-group__toggle {
+  color: var(--paper);
 }
 
 .stream-group[open] .stream-group__toggle {
+  color: var(--paper);
   transform: rotate(180deg);
 }
 
-.stream-group[open] .stream-group__toggle i {
-  border-color: rgba(9, 11, 15, 0.3);
-}
-
+/* Collapse = two interpolated tracks: the content row (0fr <-> 1fr) plus a
+   tail row carrying the old bottom padding (0px <-> var(--tail)). Padding on
+   the grid item would floor the 0fr track at its own size and leave a dead
+   34px strip under closed groups; as a track it interpolates to zero. */
 .stream-group__body,
 .archive-year__body {
   display: grid;
-  grid-template-rows: 0fr;
+  grid-template-rows: 0fr 0px;
   transition: grid-template-rows 520ms var(--ease-out);
+  will-change: grid-template-rows;
+}
+
+.stream-group[open] .stream-group__body,
+.archive-year[open] .archive-year__body {
+  grid-template-rows: 1fr var(--tail, 0px);
+}
+
+/* This browser never hides closed details content — clamp it ourselves once
+   the collapse has landed (visibility also drops the links from tab order). */
+.stream-group:not([open]) .stream-group__body,
+.archive-year:not([open]) .archive-year__body {
+  visibility: hidden;
 }
 
 .stream-group__inner,
-.archive-year__body > * {
+.archive-year__inner {
   min-height: 0;
   overflow: hidden;
 }
@@ -1584,7 +1599,47 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 .stream-group__inner {
   display: grid;
   gap: 12px;
-  padding: 0 0 34px 88px;
+  /* The picker's skewed bounding box pokes ~27px past this column on the
+     right; overflow hidden (needed for the collapse) would slice that tip
+     off. Bleed the clip window out instead of cutting the preview. */
+  margin-right: -34px;
+  padding: 0 34px 0 88px;
+}
+
+.stream-group__inner,
+.archive-year__inner {
+  opacity: 0;
+  transform: translateY(-14px);
+  transition:
+    opacity 300ms ease,
+    transform 480ms var(--ease-out);
+}
+
+.stream-group[open] .stream-group__inner,
+.archive-year[open] .archive-year__inner {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 460ms ease 140ms,
+    transform 520ms var(--ease-out) 60ms;
+}
+
+.stream-group.is-collapsing .stream-group__inner,
+.details.is-collapsing .archive-year__inner {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition:
+    opacity 260ms ease,
+    transform 420ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-group__inner,
+  .archive-year__inner {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }
 
 .post-card {
@@ -2106,12 +2161,400 @@ a.archive-row:hover {
   text-align: right;
 }
 
-.taxonomy-list .archive-row:first-child {
-  border-top: 1px solid var(--line-strong);
+/* Stream picker: ONE -7deg acrylic parallelogram wraps both columns — every
+   slant in this region comes from that single transform, so the slopes can't
+   disagree. The inner grid counter-skews (which cancels the wrapper exactly),
+   so all content stays upright. The acrylic blur lives on an overscanned
+   pseudo instead of the wrapper: backdrop-filter on the transformed element
+   itself pushes it into a compositor path that clips edges unantialiased. */
+.stream-picker {
+  position: relative;
+  height: 434px;
+  overflow: hidden;
+  transform: skewX(-7deg);
+  border: 1px solid var(--line-strong);
+  outline: none;
 }
 
-.taxonomy-list .archive-row:last-child {
-  border-bottom: 1px solid var(--line-strong);
+.stream-picker::before {
+  content: '';
+  position: absolute;
+  inset: -90px;
+  background: rgba(7, 9, 12, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.stream-picker:focus-within {
+  border-color: var(--paper);
+}
+
+/* Selection bar, pinned at the vertical centre. It lives in the wrapper's
+   skewed space, so the -7deg slant is free; it spans the left column only. */
+.stream-picker__plate {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: -6%;
+  width: 57%;
+  height: 44px;
+  transform: translateY(-50%);
+  background: var(--paper);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* Upright content plane. skewX(7deg) cancels the wrapper exactly; the 116%/-8%
+   overscan just keeps the parallelogram's clipped corners covered. */
+.stream-picker__inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  height: 100%;
+  transform: skewX(7deg);
+  width: 116%;
+  margin-left: -8%;
+}
+
+/* Column divider: a bare bar in the wrapper's skewed space, so it leans
+   -7deg like every other line here for free. */
+.stream-picker__divider {
+  position: absolute;
+  z-index: 0;
+  top: -8%;
+  bottom: -8%;
+  left: 54.5%;
+  width: 1px;
+  background: var(--line-strong);
+  pointer-events: none;
+}
+
+/* --- left: transparent rows gliding through native momentum scroll --- */
+.stream-viewport {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  outline: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 46px, #000 calc(100% - 46px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 46px, #000 calc(100% - 46px), transparent 100%);
+}
+
+.stream-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.stream-viewport__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* half viewport minus half row, so the first/last row can reach the bar */
+  padding: 195px 0;
+}
+
+.stream-row {
+  flex: 0 0 auto;
+  height: 44px;
+  /* left padding clears the inner plane's -8% overscan plus the wrapper's
+     slanted corner inset, or the slant eats the first letters */
+  padding: 0 56px 0 128px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  color: var(--paper);
+  opacity: 0.45;
+  transition: opacity 240ms var(--ease-out), color 240ms var(--ease-out);
+  cursor: pointer;
+}
+
+.stream-row__title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.stream-row__date {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.stream-row.is-active {
+  opacity: 1;
+  color: var(--ink);
+}
+
+/* Bottom-right of the parallelogram is clipped by the slant, so the counter
+   sits at the safe bottom-left; skewX(7deg) unskews the type. */
+.stream-viewport__count {
+  position: absolute;
+  z-index: 2;
+  left: 30px;
+  bottom: 12px;
+  transform: skewX(7deg);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  pointer-events: none;
+}
+
+/* --- right: upright detail panels, one notch per selection change ---
+   No transforms of their own any more — the inner plane is already upright.
+   The panel's darker ground is clipped to the same -7deg lean (the left edge
+   of the polygon), so the "divider" between the columns leans with all the
+   other edges; right/bottom padding clears the parallelogram's clipped
+   corners.
+
+   Overscan 27px to the left so both ends of the slanted left edge stay inside
+   this element. Without it the lower end falls outside the grid box and
+   overflow clipping turns the last stretch into a vertical edge. */
+.stream-detail {
+  position: relative;
+  margin-left: -27px;
+  overflow: hidden;
+  -webkit-clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
+  clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
+}
+
+.stream-detail__track {
+  height: 100%;
+  transform: translateY(0);
+  transition: transform 380ms var(--ease-out);
+  will-change: transform;
+  counter-reset: detail-panel;
+}
+
+.stream-detail__panel {
+  position: relative;
+  height: 100%;
+  padding: 42px 118px 40px 91px;
+  overflow: hidden;
+  counter-increment: detail-panel;
+}
+
+/* Ghost index fills the quiet top-right corner */
+.stream-detail__panel::before {
+  content: counter(detail-panel, decimal-leading-zero);
+  position: absolute;
+  z-index: 1;
+  top: 30px;
+  right: 118px;
+  color: transparent;
+  font-family: var(--font-mono);
+  font-size: 54px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  -webkit-text-stroke: 1px rgba(241, 243, 245, 0.16);
+  pointer-events: none;
+}
+
+.stream-detail__cover {
+  position: absolute;
+  inset: -24px;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.4;
+  filter: saturate(0.85);
+}
+
+.stream-detail__panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 9, 12, 0.5) 0%, rgba(7, 9, 12, 0.88) 76%);
+  pointer-events: none;
+}
+
+.stream-detail__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+}
+
+.stream-detail__body small {
+  /* Trapezoid typesetting: the blocks' left edges descend along the same
+     -7deg lean as the wrapper (43 - 39 - 28 mirrors the slant across the
+     vertical gaps between the blocks). */
+  margin-left: 43px;
+  color: rgba(241, 243, 245, 0.55);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.stream-detail__body h4 {
+  position: relative;
+  margin: 0 0 0 39px;
+  /* right inset keeps the title's first line clear of the ghost index */
+  padding-right: 64px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(241, 243, 245, 0.16);
+  color: #f1f3f5;
+  font-size: clamp(20px, 1.9vw, 27px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.42;
+}
+
+/* short accent sitting on the hairline, echoing the solid plates */
+.stream-detail__body h4::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 44px;
+  height: 2px;
+  background: #f1f3f5;
+}
+
+.stream-detail__body p {
+  margin: 4px 0 0 28px;
+  max-width: 34em;
+  color: rgba(241, 243, 245, 0.78);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  line-height: 2.05;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+/* READ as a slanted solid plate — the same -7deg block language as the
+   group titles; the label counter-skews so the type sits upright. */
+.stream-detail__read {
+  position: absolute;
+  z-index: 1;
+  right: 118px;
+  bottom: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 24px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  transform: skewX(-7deg);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  transition:
+    background 220ms ease,
+    color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.stream-detail__read span,
+.stream-detail__read svg {
+  transform: skewX(7deg);
+}
+
+.stream-detail__read:hover {
+  background: transparent;
+  color: #f1f3f5;
+  box-shadow: inset 0 0 0 1px rgba(241, 243, 245, 0.85);
+}
+
+/* --- mobile portrait: the original card list, not the picker ---
+   Both markups render; portrait swaps the parallelogram out entirely. */
+.stream-cards {
+  display: none;
+}
+
+@media (max-width: 960px) and (orientation: portrait) {
+  .stream-picker {
+    display: none;
+  }
+
+  .stream-cards {
+    display: grid;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 960px) {
+  .stream-picker {
+    height: auto;
+    transform: none;
+  }
+
+  .stream-picker::before {
+    inset: 0;
+  }
+
+  .stream-picker__inner {
+    transform: none;
+    width: 100%;
+    margin-left: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .stream-picker__plate {
+    display: none;
+  }
+
+  .stream-picker__divider {
+    display: none;
+  }
+
+  .stream-viewport {
+    height: 340px;
+  }
+
+  .stream-viewport__list {
+    padding: 148px 0;
+  }
+
+  .stream-row {
+    padding: 0 28px;
+  }
+
+  .stream-detail {
+    height: 320px;
+    margin-left: 0;
+    border-top: 1px solid var(--line-strong);
+    -webkit-clip-path: none;
+    clip-path: none;
+  }
+
+  .stream-detail__panel {
+    padding: 30px 30px;
+  }
+
+  .stream-detail__body small,
+  .stream-detail__body h4,
+  .stream-detail__body p {
+    margin-left: 0;
+  }
+
+  .stream-detail__panel::before {
+    right: 30px;
+    top: 22px;
+    font-size: 40px;
+  }
+
+  .stream-detail__read {
+    right: 30px;
+    bottom: 26px;
+    padding: 9px 18px;
+  }
 }
 
 .pagination {
@@ -2580,7 +3023,6 @@ html.js body.is-post.route-ready:not(.route-leaving) .standalone__header {
 /* Tier 1 — the main column leads the cascade. */
 html.js body.is-post.route-ready:not(.route-leaving) .article__body,
 html.js body.is-post.route-ready:not(.route-leaving) .archive-years,
-html.js body.is-post.route-ready:not(.route-leaving) .taxonomy-list,
 html.js body.is-post.route-ready:not(.route-leaving) .standalone__body {
   animation: post-fly-in var(--post-fly-duration) var(--ease-out)
     var(--post-fly-delay) both;
@@ -3094,8 +3536,13 @@ html.js body.route-leaving .site-header {
     height: 42px;
   }
 
+  .stream-group {
+    --tail: 20px;
+  }
+
   .stream-group__inner {
-    padding: 0 0 20px;
+    margin-right: 0;
+    padding: 0;
   }
 
   .post-card {
