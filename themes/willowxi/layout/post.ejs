@@ -32,11 +32,12 @@
     </figure>
   <% } %>
 
-  <div class="article__layout">
-    <% if (theme.post.toc !== false) { %>
+  <% var tocHtml = theme.post.toc !== false ? toc(page.content).trim() : ''; %>
+  <div class="article__layout<%= tocHtml ? '' : ' article__layout--no-toc' %>">
+    <% if (tocHtml) { %>
       <aside class="article__toc" data-toc>
         <span class="micro-label">CONTENTS</span>
-        <%- toc(page.content) %>
+        <%- tocHtml %>
       </aside>
     <% } %>
 

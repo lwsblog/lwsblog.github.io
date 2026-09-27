@@ -1619,9 +1619,11 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 .archive-year[open] .archive-year__inner {
   opacity: 1;
   transform: none;
+  /* Content starts fading almost with the height: a long delay used to leave
+     a growing empty hole that read as a flash, worst on touch GPUs. */
   transition:
-    opacity 460ms ease 140ms,
-    transform 520ms var(--ease-out) 60ms;
+    opacity 380ms ease 40ms,
+    transform 520ms var(--ease-out);
 }
 
 .stream-group.is-collapsing .stream-group__inner,
@@ -1941,6 +1943,11 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   grid-template-columns: 210px minmax(0, 760px);
   justify-content: center;
   gap: clamp(40px, 7vw, 100px);
+}
+
+/* No outline: the body takes the reading column on its own. */
+.article__layout--no-toc {
+  grid-template-columns: minmax(0, 760px);
 }
 
 .article__toc {
@@ -2323,6 +2330,8 @@ a.archive-row:hover {
   position: relative;
   margin-left: -27px;
   overflow: hidden;
+  /* Drag-stepping is handled in JS; never let the page pan along. */
+  touch-action: none;
   -webkit-clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
   clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
 }

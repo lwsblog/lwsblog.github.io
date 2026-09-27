@@ -851,6 +851,9 @@
     var list = toc.querySelector('ol, ul');
     if (!list || !list.children.length) {
       toc.hidden = true;
+      // Collapse the grid to the single reading column as well.
+      var layout = toc.closest('.article__layout');
+      if (layout) layout.classList.add('article__layout--no-toc');
       return;
     }
 
@@ -904,6 +907,9 @@
 
     var reduced = prefersReducedMotion();
     var index = -1;
+    // aim leads the animation: rapid steps queue from where we are HEADING,
+    // not from the row the lagging scroll position has reached so far.
+    var aim = -1;
     var snapTimer = 0;
     var snapAnim = 0;
     var glideRaf = 0;
@@ -956,6 +962,9 @@
     function setActive(i) {
       if (i === index) return;
       index = i;
+      // Idle drift (glide browsing) keeps aim in sync; mid-animation the aim
+      // stays where the user sent it so queued steps do not collapse.
+      if (!snapAnim) aim = i;
       rows.forEach(function (row, k) {
         row.classList.toggle('is-active', k === i);
       });
@@ -988,12 +997,18 @@
     // smooth scrollTo read as a separate jump once the motion had stopped.
     function snapToRow(i) {
       cancelSnap();
+      cancelGlide();
+      aim = i;
       var target = rowCentre(i) - viewport.clientHeight / 2;
       var from = viewport.scrollTop;
       var dist = target - from;
-      if (Math.abs(dist) < 2) return;
+      if (Math.abs(dist) < 2) {
+        setActive(i);
+        return;
+      }
       if (reduced) {
         viewport.scrollTop = target;
+        setActive(i);
         return;
       }
       var duration = Math.max(150, Math.min(400, Math.abs(dist) * 1.05));
@@ -1029,15 +1044,18 @@
         if (Math.abs(diff) < 1) {
           glideRaf = 0;
           viewport.scrollTop = glideTarget;
-          snapTimer = window.setTimeout(function () {
-            snapToRow(index);
-          }, 90);
           return;
         }
         viewport.scrollTop += diff * 0.18;
         glideRaf = window.requestAnimationFrame(stepGlide);
       };
       glideRaf = window.requestAnimationFrame(stepGlide);
+      // Gesture end is a silence, not a position: snap 140ms after the last
+      // wheel event even if the glide is still converging. Smooth wheels and
+      // trackpads stream events long after the finger stopped intending.
+      snapTimer = window.setTimeout(function () {
+        snapToRow(nearestIndex());
+      }, 140);
     }, { passive: false });
 
     viewport.addEventListener('touchstart', function () {
@@ -1070,15 +1088,25 @@
     viewport.addEventListener('keydown', function (event) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        snapToRow(Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))));
+        var base = aim >= 0 ? aim : index;
+        snapToRow(Math.max(0, Math.min(rows.length - 1, base + (event.key === 'ArrowDown' ? 1 : -1))));
       }
     });
 
     // The right panel is the small gear: one wheel notch (or one swipe)
     // advances the selection by exactly one row; the left list glides there.
+    // Steps queue from `aim` (where we are heading), so fast notches keep
+    // advancing instead of re-targeting the row still being animated to.
     var detail = picker ? picker.querySelector('[data-stream-detail]') : null;
     if (detail) {
       var stepLock = 0;
+
+      function stepSelection(dir) {
+        var base = aim >= 0 ? aim : index;
+        var next = Math.max(0, Math.min(rows.length - 1, base + dir));
+        if (next === base) return;
+        snapToRow(next);
+      }
 
       detail.addEventListener('wheel', function (event) {
         event.preventDefault(); // this panel never scrolls the page
@@ -1087,22 +1115,23 @@
         var now = Date.now();
         if (now - stepLock < 240) return;
         stepLock = now;
-        var next = index + (event.deltaY > 0 ? 1 : -1);
-        if (next < 0 || next >= rows.length) return;
-        snapToRow(next);
+        stepSelection(event.deltaY > 0 ? 1 : -1);
       }, { passive: false });
 
+      // Touch follows the finger: every 48px of travel steps one row, and the
+      // page itself never scrolls while the panel is being dragged.
       var touchY = 0;
       detail.addEventListener('touchstart', function (event) {
         if (event.touches.length === 1) touchY = event.touches[0].clientY;
       }, { passive: true });
-      detail.addEventListener('touchend', function (event) {
-        var dy = event.changedTouches[0].clientY - touchY;
-        if (Math.abs(dy) < 24) return;
-        var next = index + (dy < 0 ? 1 : -1);
-        if (next < 0 || next >= rows.length) return;
-        snapToRow(next);
-      }, { passive: true });
+      detail.addEventListener('touchmove', function (event) {
+        event.preventDefault();
+        var y = event.touches[0].clientY;
+        var dy = y - touchY;
+        if (Math.abs(dy) < 48) return;
+        touchY = y;
+        stepSelection(dy < 0 ? 1 : -1);
+      }, { passive: false });
     }
 
     function remeasure() {
