@@ -71,6 +71,9 @@
     var resizeFrame = 0;
     var pointer = { x: 0, y: 0, tx: 0, ty: 0 };
     var parallaxDirty = false;
+    var sceneThrottle = false;
+    var throttleTick = 0;
+    var scrollIdleTimer = 0;
 
     if (!isFinite(revealDelay)) revealDelay = 500;
     else revealDelay *= 1000;
@@ -352,14 +355,17 @@
 
       var moved = updateParallax();
       var sweeping = desktop && sweepActive && !prefersReducedMotion();
+      var animating = sweeping || moved;
 
-      // Stay idle while nothing moves; otherwise draw at the display's
-      // native refresh rate.
-      if (sweeping || moved) {
+      if (animating) {
         render(sweeping ? phaseAt(now) : null);
       }
 
-      if (visible && !document.hidden && !prefersReducedMotion()) {
+      // Park the loop once the scene has nothing left to move; pointer input
+      // restarts it. A permanently scheduled rAF kept the compositor awake
+      // for a backdrop that had already settled (the normal case on touch,
+      // where there is no pointer and no sweep).
+      if (animating && visible && !document.hidden && !prefersReducedMotion()) {
         rafId = window.requestAnimationFrame(frame);
       }
     }
@@ -469,6 +475,7 @@
       pointer.tx = nx * wallpaperRangeX;
       pointer.ty = ny * wallpaperRangeY;
       parallaxDirty = true;
+      play(); // the loop parks itself when the scene settles
     }
 
     function refresh() {

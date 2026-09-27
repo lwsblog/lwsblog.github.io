@@ -459,7 +459,11 @@ html.js .theme-transition.is-leaving {
     height 260ms ease,
     background 260ms ease,
     border-color 260ms ease,
-    backdrop-filter 260ms ease,
+    /* backdrop-filter is deliberately not transitioned: interpolating a blur
+       radius re-samples the whole backdrop every frame, and the bar is a
+       full-width fixed element, so that cost lands on every scroll frame.
+       The blur now switches instantly while the background still eases,
+       which reads the same because the two land together. */
     opacity 500ms var(--ease-out),
     filter 500ms var(--ease-out),
     transform 500ms var(--ease-out);
@@ -2976,7 +2980,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-footer {
 
 @keyframes route-content-reveal {
   from { opacity: 0; filter: blur(8px); transform: scale(1.006); }
-  to { opacity: 1; filter: blur(0); transform: scale(1); }
+  to { opacity: 1; filter: none; transform: scale(1); }
 }
 
 /* Inner-page entry choreography, shared by every non-home page: the title
@@ -2998,7 +3002,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-footer {
   }
   to {
     opacity: 1;
-    filter: blur(0);
+    filter: none;
     transform: translateY(0);
   }
 }
@@ -3011,7 +3015,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-footer {
   }
   to {
     opacity: 1;
-    filter: blur(0);
+    filter: none;
     transform: translateY(0);
   }
 }
@@ -3338,7 +3342,7 @@ html.js body.route-leaving .site-header {
 }
 
 @keyframes route-exit-shell {
-  0% { opacity: 1; filter: blur(0); transform: scale(1); }
+  0% { opacity: 1; filter: none; transform: scale(1); }
   100% { opacity: 0.2; filter: blur(14px); transform: scale(1.012); }
 }
 
