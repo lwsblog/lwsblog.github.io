@@ -1053,6 +1053,29 @@
         // right-aligned column and does not ride the title's slant.
         rows[i].style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
       }
+      // Keep the right panel glued to the live scroll position so a finger
+      // drag on either column moves both columns together.
+      updateTrack();
+    }
+
+    // The right preview is the same continuous roll as the left list: its
+    // translate is derived from the viewport's scrollTop, not from the active
+    // index, so it slides frame-by-frame with the gesture. One row of left
+    // scroll advances the track by exactly one panel height.
+    function updateTrack() {
+      if (!track || !detail) return;
+      var panelH = detail.clientHeight;
+      if (!panelH) return;
+      var first = metrics(0);
+      var stride = rows.length > 1
+        ? (metrics(1).top - first.top)
+        : (44 + gap());
+      if (!stride) stride = 44 + gap();
+      var half = viewport.clientHeight / 2;
+      var c = (viewport.scrollTop + half - (first.top + first.height / 2)) / stride;
+      if (c < 0) c = 0;
+      else if (c > rows.length - 1) c = rows.length - 1;
+      track.style.transform = 'translate3d(0,' + (-c * panelH) + 'px,0)';
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.
@@ -1086,9 +1109,10 @@
         row.classList.toggle('is-active', k === i);
       });
       if (count) count.textContent = String(i + 1).padStart(2, '0');
-      // The gear ratio lives here: many rows glide past, the panel flips one
-      // notch per row that takes the bar.
-      if (track) track.style.transform = 'translateY(' + -i * 100 + '%)';
+      // The right panel and the left list share ONE scroll value, so both
+      // slide as a single coupled motion instead of the panel flipping one
+      // discrete notch per row.
+      updateTrack();
     }
 
     function centreOn(i) {
@@ -1185,6 +1209,7 @@
       setActive(nearestIndex());
       updateIndents();
       if (snapAnim || glideRaf) return; // our own animation feeds these events
+      if (dragging) return; // finger is driving it — never auto-snap mid-drag
       window.clearTimeout(snapTimer);
       // Snap as soon as the gesture runs out, so it blends into the motion.
       snapTimer = window.setTimeout(function () {
@@ -1249,7 +1274,6 @@
         cancelSnap();
         cancelGlide();
         window.clearTimeout(snapTimer);
-        picker.classList.add('is-dragging');
       }, { passive: true });
 
       detail.addEventListener('touchmove', function (event) {
@@ -1265,7 +1289,6 @@
       function endDrag() {
         if (!dragging) return;
         dragging = false;
-        picker.classList.remove('is-dragging');
         snapToRow(nearestIndex());
       }
 

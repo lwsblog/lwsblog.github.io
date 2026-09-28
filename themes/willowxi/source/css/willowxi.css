@@ -2322,12 +2322,14 @@ a.archive-row:hover {
   pointer-events: none;
 }
 
-/* --- right: upright detail panels, one notch per selection change ---
-   No transforms of their own any more — the inner plane is already upright.
-   The panel's darker ground is clipped to the same -7deg lean (the left edge
-   of the polygon), so the "divider" between the columns leans with all the
-   other edges; right/bottom padding clears the parallelogram's clipped
-   corners.
+/* --- right: upright detail panels, the whole block rolls with the scroll ---
+   The track's translate is driven continuously from the viewport's scrollTop
+   in JS (see updateTrack), so the cover + text slide together with the finger
+   and drag the left list along. No per-notch transition of its own — the inner
+   plane is already upright. The panel's darker ground is clipped to the same
+   -7deg lean (the left edge of the polygon), so the "divider" between the
+   columns leans with all the other edges; right/bottom padding clears the
+   parallelogram's clipped corners.
 
    Overscan 27px to the left so both ends of the slanted left edge stay inside
    this element. Without it the lower end falls outside the grid box and
@@ -2347,17 +2349,9 @@ a.archive-row:hover {
 
 .stream-detail__track {
   height: 100%;
-  transform: translateY(0);
-  transition: transform 380ms var(--ease-out);
+  transform: translate3d(0, 0, 0);
   will-change: transform;
   counter-reset: detail-panel;
-}
-
-/* While a touch drag is driving the picker from the right panel, kill the
-   panel flip transition so the preview tracks the finger 1:1 (no catch-up
-   lag); the snap on release re-engages it for a smooth settle. */
-.stream-picker.is-dragging .stream-detail__track {
-  transition: none;
 }
 
 .stream-detail__panel {
