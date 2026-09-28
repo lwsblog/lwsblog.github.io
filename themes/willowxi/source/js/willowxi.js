@@ -1615,9 +1615,13 @@
       cssDuration('--post-fly-stagger', 140) * 4 +
       cssDuration('--post-fly-duration-tail', 850);
 
-    // The bar is allowed out before the line is done.
+    // The bar is allowed out before the line is done. The scroll lock rides
+    // on route-animating, so lifting the blackout here also hands scrolling
+    // back: the curtain is gone and the panel colour is on screen, while the
+    // body blocks are still flying in. The header divider keeps its own
+    // schedule — its animation hangs off route-ready, which stays put.
     postEnterTimeout(function () {
-      body.classList.remove('route-blackout');
+      body.classList.remove('route-blackout', 'route-animating');
     }, landing - barLead);
 
     // The scene only loads once the whole article is on screen. Until then the

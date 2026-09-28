@@ -485,8 +485,10 @@ body.is-post .site-header::after {
 }
 
 /* Hand over from the travelling seam: the divider only appears once the line
-   has landed (extend + travel), so there is never a second line on screen. */
-html.js body.is-post.route-animating .site-header::after {
+   has landed (extend + travel), so there is never a second line on screen.
+   Scoped to route-ready — not route-animating — so the animation survives
+   the scroll lock being lifted early (see the enter handler in the JS). */
+html.js body.is-post.route-ready .site-header::after {
   animation: post-divider-in 260ms var(--ease-out) var(--post-line-landing) both;
 }
 
