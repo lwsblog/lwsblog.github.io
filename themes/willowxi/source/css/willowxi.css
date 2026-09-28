@@ -3110,7 +3110,7 @@ html.js body.is-inner .page-enter.is-settled {
   animation: none;
 }
 
-route-transition {
+.route-transition {
   position: fixed;
   z-index: 240;
   inset: 0;
