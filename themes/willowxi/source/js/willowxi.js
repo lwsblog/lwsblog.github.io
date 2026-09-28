@@ -1033,6 +1033,43 @@
       return rowMetrics[i] || { top: 0, height: 0 };
     }
 
+    // Chromium renders clip-path polygon edges aliased (scissored, no AA).
+    // The same parallelogram as a linear-gradient mask feathers the two
+    // slanted edges by ~1px and kills the jaggies. Geometry: both edges lean
+    // 54px over the panel height, so a gradient axis perpendicular to them
+    // puts each whole edge at ONE exact projection — px stops, no guessing.
+    var SLANT_RUN = 54;
+    var MASK_FEATHER = 1.2;
+    var maskDims = '';
+
+    function paintDetailMask() {
+      if (!detail) return;
+      if (compact.matches) {
+        // Mobile drops the slant entirely (CSS: clip-path none).
+        if (maskDims) {
+          detail.style.webkitMaskImage = '';
+          detail.style.maskImage = '';
+          maskDims = '';
+        }
+        return;
+      }
+      var w = detail.clientWidth;
+      var h = detail.clientHeight;
+      if (!w || !h) return;
+      var key = w + 'x' + h;
+      if (key === maskDims) return;
+      maskDims = key;
+      var m = Math.sqrt(h * h + SLANT_RUN * SLANT_RUN);
+      var a = SLANT_RUN * h / m; // left edge projection
+      var b = w * h / m;         // right edge projection
+      var deg = 90 + Math.atan(SLANT_RUN / h) * 180 / Math.PI;
+      var value = 'linear-gradient(' + deg.toFixed(3) + 'deg, transparent ' +
+        (a - MASK_FEATHER).toFixed(2) + 'px, #000 ' + (a + MASK_FEATHER).toFixed(2) + 'px, #000 ' +
+        (b - MASK_FEATHER).toFixed(2) + 'px, transparent ' + (b + MASK_FEATHER).toFixed(2) + 'px)';
+      detail.style.webkitMaskImage = value;
+      detail.style.maskImage = value;
+    }
+
     // Trapezoid typesetting: a row's left inset tracks the wrapper's slant
     // edge at its CURRENT height, so the row starts form a line parallel to
     // the -7deg edge while the list glides. Mobile has no slant — clear it.
@@ -1044,14 +1081,19 @@
       for (var i = 0; i < rows.length; i++) {
         if (compact.matches) {
           rows[i].style.paddingLeft = '';
+          rows[i].style.paddingRight = '';
           continue;
         }
 
         var row = rowMetrics[i];
         var yRel = row.top + row.height / 2 - centre;
-        // Only the left inset carries the -7deg lean; the date stays a clean
-        // right-aligned column and does not ride the title's slant.
-        rows[i].style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
+        // The date column rides the SAME -7deg diagonal as the titles: its
+        // right inset grows as the row sits lower, so both columns lean
+        // together and the whole entry reads as one slanted band. Rounded to
+        // whole pixels — fractional padding puts text on subpixel offsets
+        // and the rasteriser blurs it.
+        rows[i].style.paddingLeft = Math.round(Math.max(56, PAD_BASE - yRel * TAN7)) + 'px';
+        rows[i].style.paddingRight = Math.round(Math.max(24, 56 + yRel * TAN7)) + 'px';
       }
       // Keep the right panel glued to the live scroll position so a finger
       // drag on either column moves both columns together.
@@ -1075,7 +1117,10 @@
       var c = (viewport.scrollTop + half - (first.top + first.height / 2)) / stride;
       if (c < 0) c = 0;
       else if (c > rows.length - 1) c = rows.length - 1;
-      track.style.transform = 'translate3d(0,' + (-c * panelH) + 'px,0)';
+      // Whole pixels only: a fractional translate3d promotes the track to a
+      // layer that the compositor resamples at subpixel offsets, and every
+      // glyph in the panel goes blurry.
+      track.style.transform = 'translate3d(0,' + Math.round(-c * panelH) + 'px,0)';
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.
@@ -1260,10 +1305,11 @@
         stepSelection(event.deltaY > 0 ? 1 : -1);
       }, { passive: false });
 
-      // Touch follows the finger: drag the list 1:1 so the preview panel
-      // flips in lock-step with the gesture (no 48px step-lag), then snap to
-      // the nearest row on release. The is-dragging class drops the panel's
-      // flip transition during the drag so it tracks without catch-up.
+      // Touch follows the finger: drag the list so the preview panel rolls in
+      // lock-step with the gesture, then snap to the nearest row on release.
+      // The list's scroll range is short (44px rows), so a raw 1:1 drag blows
+      // through it in one flick — damp the mapping to keep it controllable.
+      var TOUCH_DAMP = 0.5;
       var dragY = 0;
       var dragging = false;
 
@@ -1283,7 +1329,7 @@
         var dy = dragY - y; // finger up => scroll forward
         dragY = y;
         var max = viewport.scrollHeight - viewport.clientHeight;
-        viewport.scrollTop = Math.max(0, Math.min(max, viewport.scrollTop + dy));
+        viewport.scrollTop = Math.max(0, Math.min(max, viewport.scrollTop + dy * TOUCH_DAMP));
       }, { passive: false });
 
       function endDrag() {
@@ -1298,6 +1344,7 @@
 
     function remeasure() {
       if (viewport.clientHeight < 10) return; // details collapsed
+      paintDetailMask();
       measureRows();
 
       if (index === -1) {

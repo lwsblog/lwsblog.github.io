@@ -2342,7 +2342,10 @@ a.archive-row:hover {
   touch-action: none;
   /* Full -7deg parallelogram: left edge leans like the outer frame,
      right edge leans the same way (inset at the bottom), so the panel
-     reads as the same slanted plate as the left column. */
+     reads as the same slanted plate as the left column.
+     Chromium aliases clip-path polygons; JS paints the identical shape as
+     a feathered gradient mask (see paintDetailMask), which lands on top
+     of this and gives the slanted edges their anti-aliasing. */
   -webkit-clip-path: polygon(54px 0, 140% 0, calc(140% - 54px) 100%, 0 100%);
   clip-path: polygon(54px 0, 140% 0, calc(140% - 54px) 100%, 0 100%);
 }
