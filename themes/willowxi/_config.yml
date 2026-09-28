@@ -61,3 +61,10 @@ friends:
     url: https://northcedar.top
     desc: '随笔、照片，和用 AI 折腾项目的经历'
     avatar: https://northcedar.top/favicon.ico
+
+# Waline comment system (https://waline.js.org). The client is self-hosted in
+# source/vendor/waline/. Leave serverURL empty to hide comments everywhere.
+# Fill in the Vercel server URL after deployment, e.g.
+#   serverURL: https://comment.willowxi.site
+waline:
+  serverURL: ''

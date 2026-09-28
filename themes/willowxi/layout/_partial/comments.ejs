@@ -1,0 +1,10 @@
+<!-- Comments mount. Rendered only when theme.waline.serverURL is set; the
+     actual widget is initialised by willowxi.js (setupComments) so it
+     survives PJAX navigation and loads its assets lazily. -->
+<% if (theme.waline && theme.waline.serverURL) { %>
+  <section class="comments" aria-label="评论">
+    <span class="micro-label">SECTOR / COMMENTS</span>
+    <h2>评论</h2>
+    <div data-waline-mount></div>
+  </section>
+<% } %>

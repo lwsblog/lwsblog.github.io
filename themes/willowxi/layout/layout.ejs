@@ -78,7 +78,12 @@
         parallaxWallpaperY: Number(background.parallax_wallpaper_y) > 0 ? Number(background.parallax_wallpaper_y) : 14,
         parallaxGrid: Number(background.parallax_grid) > 0 ? Number(background.parallax_grid) : 7,
         home: is_home(),
-        homePath: url_for('/')
+        homePath: url_for('/'),
+        waline: (theme.waline && theme.waline.serverURL) ? {
+          serverURL: theme.waline.serverURL,
+          js: url_for('/vendor/waline/waline.js'),
+          css: url_for('/vendor/waline/waline.css')
+        } : null
       }) %>;
     </script>
     <script src="<%- url_for('/js/willowxi.js') %>?v=<%- Date.now() %>" defer></script>

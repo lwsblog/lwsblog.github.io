@@ -1410,6 +1410,7 @@
   function teardownPageContent() {
     pageObservers.forEach(function (observer) { observer.disconnect(); });
     pageObservers = [];
+    teardownComments();
     while (pickerTeardowns.length) {
       pickerTeardowns.pop()();
     }
@@ -1421,6 +1422,71 @@
     setupToc();
     setupCopyButtons();
     setupStreamPickers();
+    setupComments();
+  }
+
+  // Comments (Waline). The widget mounts inside the PJAX container, so it is
+  // created on page setup and destroyed on teardown. Assets are self-hosted
+  // (source/vendor/waline/) and loaded lazily on the first comment page.
+  var walineInstance = null;
+  var walineAssets = null;
+
+  function loadWalineAssets(spec, onload, onerror) {
+    if (walineAssets) {
+      onload();
+      return;
+    }
+    walineAssets = true;
+
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = spec.css;
+    document.head.appendChild(link);
+
+    var script = document.createElement('script');
+    script.src = spec.js;
+    script.onload = onload;
+    script.onerror = function () {
+      walineAssets = false;
+      if (onerror) onerror();
+    };
+    document.head.appendChild(script);
+  }
+
+  function setupComments() {
+    var mount = document.querySelector('[data-waline-mount]');
+    if (!mount || !config.waline || !config.waline.serverURL) return;
+
+    loadWalineAssets(
+      config.waline,
+      function () {
+        // The mount node can be swapped out mid-load by a PJAX navigation;
+        // only mount into a node that is still in the document.
+        if (!window.Waline || !window.Waline.init) return;
+        var liveMount = document.querySelector('[data-waline-mount]');
+        if (!liveMount || walineInstance) return;
+        walineInstance = window.Waline.init({
+          el: liveMount,
+          serverURL: config.waline.serverURL,
+          lang: 'zh-CN'
+        });
+      },
+      function () {
+        var box = document.querySelector('[data-waline-mount]');
+        if (box) box.textContent = '评论加载失败，稍后再试。';
+      }
+    );
+  }
+
+  function teardownComments() {
+    if (walineInstance) {
+      try {
+        walineInstance.destroy();
+      } catch (error) {
+        // A failed destroy must never block the navigation.
+      }
+      walineInstance = null;
+    }
   }
 
   function setupCopyButtons() {

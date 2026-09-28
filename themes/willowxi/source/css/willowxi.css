@@ -2106,6 +2106,74 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   display: none;
 }
 
+/* --- Comments (Waline) ---------------------------------------------------
+   Mounted inside the article panel like the friends section. Waline's own
+   palette is fully re-mapped onto the theme's custom properties so the
+   widget follows the site's dark/light flip without its JS dark mode
+   (which would inject inline colours we cannot tune). */
+.comments {
+  margin: 3em 0 0;
+  --waline-theme-color: var(--paper);
+  --waline-active-color: var(--paper);
+  --waline-color: var(--prose-ink);
+  --waline-bg-color: var(--surface-soft);
+  --waline-bg-color-light: var(--surface-soft);
+  --waline-bg-color-hover: var(--surface);
+  --waline-border-color: var(--line);
+  --waline-disable-bg-color: var(--surface-soft);
+  --waline-disable-color: var(--muted);
+  --waline-info-bg-color: var(--surface-soft);
+  --waline-info-color: var(--muted);
+  --waline-light-grey: var(--muted);
+  --waline-dark-grey: var(--paper-dim);
+  --waline-white: var(--paper);
+  --waline-bq-color: var(--surface-soft);
+  --waline-code-bg-color: var(--code-bg);
+  --waline-badge-color: var(--cyan);
+  --waline-avatar-radius: 2px;
+  --waline-box-shadow: none;
+  font-family: inherit;
+}
+
+.prose .comments h2 {
+  margin: 10px 0 26px;
+  padding-top: 0;
+  border-top: none;
+  font-size: 22px;
+}
+
+.prose .comments h2::before {
+  display: none;
+}
+
+.prose .comments .wl-app {
+  font-family: inherit;
+}
+
+/* Keep the prose link treatment out of the widget chrome; comment bodies
+   keep the cyan affordance so links stay recognisable. */
+.prose .comments a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.prose .comments .wl-content a {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-decoration-color: rgba(143, 214, 223, 0.36);
+  text-underline-offset: 4px;
+}
+
+/* Waline's RSS icon bakes orange fills into individual paths; flatten it
+   into a quiet monochrome badge (square = faint surface, arcs = muted). */
+.prose .comments .wl-rss svg path {
+  fill: var(--surface);
+}
+
+.prose .comments .wl-rss svg path:last-child {
+  fill: var(--muted);
+}
+
 .friends__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
