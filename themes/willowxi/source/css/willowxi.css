@@ -2083,6 +2083,102 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   margin: 0 auto;
 }
 
+/* --- About page: friend links -------------------------------------------
+   Same editorial language as the rest of the standalone pages: hairline
+   card on a flat ground, mono micro-labels, arrow nudges on hover. */
+.friends {
+  max-width: 780px;
+  margin: 78px auto 0;
+}
+
+.friends h2 {
+  margin: 10px 0 30px;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.friends__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.friends__card a {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
+  padding: 16px 18px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+  transition: background 240ms var(--ease-out), border-color 240ms var(--ease-out);
+}
+
+.friends__card a:hover {
+  border-color: var(--paper);
+  background: rgba(241, 243, 245, 0.04);
+}
+
+.friends__card a:hover .icon {
+  transform: translate(2px, -2px);
+}
+
+.friends__card .icon {
+  margin-left: auto;
+  flex: 0 0 auto;
+  opacity: 0.55;
+  transition: transform 240ms var(--ease-out), opacity 240ms var(--ease-out);
+}
+
+.friends__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line-strong);
+  background: rgba(241, 243, 245, 0.06);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.friends__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.friends__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.friends__meta strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.friends__meta small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 /* Listings and archive */
 .listing {
   padding-top: calc(var(--header-height) + 80px);

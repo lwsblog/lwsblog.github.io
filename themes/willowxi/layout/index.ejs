@@ -36,12 +36,10 @@
         <span><%= theme.home.direct_entry || '直接进入文章' %></span>
         <%- partial('_partial/icons', {name: 'arrow-up-right', size: 17}) %>
       </a>
-      <% if (theme.social && theme.social.github) { %>
-        <a class="button button--ghost" href="<%= theme.social.github %>" target="_blank" rel="noopener noreferrer">
-          <%- partial('_partial/icons', {name: 'github', size: 17}) %>
-          <span>GITHUB</span>
-        </a>
-      <% } %>
+      <a class="button button--ghost" href="<%- url_for('/about/') %>">
+        <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+        <span>关于我</span>
+      </a>
     </div>
   </div>
 

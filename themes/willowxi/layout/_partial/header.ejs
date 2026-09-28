@@ -17,11 +17,9 @@
       </a>
     <% }); %>
 
-    <% if (theme.social && theme.social.github) { %>
-      <a class="site-nav__icon" href="<%= theme.social.github %>" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-        <%- partial('_partial/icons', {name: 'github', size: 17}) %>
-      </a>
-    <% } %>
+    <a class="site-nav__icon" href="<%- url_for('/about/') %>" aria-label="关于我" title="关于我">
+      <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+    </a>
 
     <button class="theme-toggle" type="button" aria-label="切换到浅色主题" aria-pressed="false" title="切换明暗主题" data-theme-toggle>
       <span class="theme-toggle__icon" data-theme-icon="sun"><%- partial('_partial/icons', {name: 'sun', size: 16}) %></span>

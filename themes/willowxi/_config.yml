@@ -55,5 +55,9 @@ footer:
   since: 2026
   notice: 'WILLOWXI / PERSONAL ARCHIVE'
 
-social:
-  github: https://github.com/lwsblog
+# Friend links shown on the About page. Copy a block to add one.
+friends:
+  - name: 北杉札记
+    url: https://northcedar.top
+    desc: '随笔、照片，和用 AI 折腾项目的经历'
+    avatar: https://northcedar.top/favicon.ico
