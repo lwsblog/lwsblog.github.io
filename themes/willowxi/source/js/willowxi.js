@@ -1117,15 +1117,25 @@
       var c = (viewport.scrollTop + half - (first.top + first.height / 2)) / stride;
       if (c < 0) c = 0;
       else if (c > rows.length - 1) c = rows.length - 1;
-      // Whole pixels only: a fractional translate3d promotes the track to a
-      // layer that the compositor resamples at subpixel offsets, and every
-      // glyph in the panel goes blurry.
+      // Whole device pixels only. Two different traps here:
+      // 1) a fractional translate3d promotes the track to a layer that the
+      //    compositor resamples at subpixel offsets — every glyph goes blurry;
+      // 2) rounding to whole CSS pixels is NOT enough on fractional display
+      //    scales (Windows 125% = dpr 1.25): an integer CSS offset lands on
+      //    x.25/.5/.75 device pixels, the raster is drawn with a sub-pixel
+      //    draw offset and the whole panel resamples — measured: every rest
+      //    position sat on -0.5 device px and the paragraph read soft, with
+      //    per-line phase differences ("top two lines blur, third clear").
+      // Rounding in DEVICE pixels (round(css * dpr) / dpr) pins the track to
+      // the physical grid at any zoom; at dpr 1 this is bit-identical to the
+      // old integer rounding.
       // 2D translate on purpose: a 3D transform (or will-change) would
       // permanently promote the track to a compositor layer and Chromium
       // then renders its text without ClearType subpixel AA — soft words.
       // Main-frame painting keeps the panel text as sharp as the rest of
       // the site; measured frame cost is unchanged (see track CSS comment).
-      track.style.transform = 'translate(0,' + Math.round(-c * panelH) + 'px)';
+      var dpr = window.devicePixelRatio || 1;
+      track.style.transform = 'translate(0,' + Math.round(-c * panelH * dpr) / dpr + 'px)';
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.
