@@ -1044,17 +1044,14 @@
       for (var i = 0; i < rows.length; i++) {
         if (compact.matches) {
           rows[i].style.paddingLeft = '';
-          rows[i].style.paddingRight = '';
           continue;
         }
 
         var row = rowMetrics[i];
         var yRel = row.top + row.height / 2 - centre;
-        // Left inset matches the title's -7deg lean; the right inset mirrors it
-        // in the opposite direction so the date column rides the SAME diagonal
-        // as the titles — the whole entry slides along the slant as it scrolls.
+        // Only the left inset carries the -7deg lean; the date stays a clean
+        // right-aligned column and does not ride the title's slant.
         rows[i].style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
-        rows[i].style.paddingRight = Math.max(24, 56 + yRel * TAN7) + 'px';
       }
     }
 
@@ -1238,20 +1235,42 @@
         stepSelection(event.deltaY > 0 ? 1 : -1);
       }, { passive: false });
 
-      // Touch follows the finger: every 48px of travel steps one row, and the
-      // page itself never scrolls while the panel is being dragged.
-      var touchY = 0;
+      // Touch follows the finger: drag the list 1:1 so the preview panel
+      // flips in lock-step with the gesture (no 48px step-lag), then snap to
+      // the nearest row on release. The is-dragging class drops the panel's
+      // flip transition during the drag so it tracks without catch-up.
+      var dragY = 0;
+      var dragging = false;
+
       detail.addEventListener('touchstart', function (event) {
-        if (event.touches.length === 1) touchY = event.touches[0].clientY;
+        if (event.touches.length !== 1) return;
+        dragging = true;
+        dragY = event.touches[0].clientY;
+        cancelSnap();
+        cancelGlide();
+        window.clearTimeout(snapTimer);
+        picker.classList.add('is-dragging');
       }, { passive: true });
+
       detail.addEventListener('touchmove', function (event) {
+        if (!dragging) return;
         event.preventDefault();
         var y = event.touches[0].clientY;
-        var dy = y - touchY;
-        if (Math.abs(dy) < 48) return;
-        touchY = y;
-        stepSelection(dy < 0 ? 1 : -1);
+        var dy = dragY - y; // finger up => scroll forward
+        dragY = y;
+        var max = viewport.scrollHeight - viewport.clientHeight;
+        viewport.scrollTop = Math.max(0, Math.min(max, viewport.scrollTop + dy));
       }, { passive: false });
+
+      function endDrag() {
+        if (!dragging) return;
+        dragging = false;
+        picker.classList.remove('is-dragging');
+        snapToRow(nearestIndex());
+      }
+
+      detail.addEventListener('touchend', endDrag, { passive: true });
+      detail.addEventListener('touchcancel', endDrag, { passive: true });
     }
 
     function remeasure() {

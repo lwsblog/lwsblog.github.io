@@ -2274,7 +2274,7 @@ a.archive-row:hover {
   padding: 0 56px 0 128px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 18px;
   color: var(--paper);
   opacity: 0.45;
@@ -2351,6 +2351,13 @@ a.archive-row:hover {
   transition: transform 380ms var(--ease-out);
   will-change: transform;
   counter-reset: detail-panel;
+}
+
+/* While a touch drag is driving the picker from the right panel, kill the
+   panel flip transition so the preview tracks the finger 1:1 (no catch-up
+   lag); the snap on release re-engages it for a smooth settle. */
+.stream-picker.is-dragging .stream-detail__track {
+  transition: none;
 }
 
 .stream-detail__panel {
