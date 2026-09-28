@@ -1,6 +1,7 @@
 <!-- About page: full article layout (same shell as post.ejs, no TOC, no
      prev/next nav), then the friend links rendered from theme.friends so
-     adding a link is a config edit only. -->
+     adding a link is a config edit only. Friends live inside the article
+     panel, as the last block of the body. -->
 <article class="article page-enter">
   <header class="article__header">
     <div class="article__crumbs">
@@ -23,35 +24,34 @@
   <div class="article__layout article__layout--no-toc">
     <div class="article__body prose">
       <%- page.content %>
+      <% const friends = theme.friends || []; %>
+      <% if (friends.length) { %>
+        <section class="friends article__friends" aria-label="友链">
+          <span class="micro-label">SECTOR / FRIENDS</span>
+          <h2>友链</h2>
+          <ul class="friends__grid">
+            <% friends.forEach(function (f) { %>
+              <li class="friends__card">
+                <a href="<%= f.url %>" target="_blank" rel="noopener noreferrer">
+                  <span class="friends__avatar" aria-hidden="true">
+                    <% if (f.avatar) { %>
+                      <img src="<%= f.avatar %>" alt="" loading="lazy"
+                        onerror="this.style.display='none';this.parentNode.textContent='<%= (f.name || '?').charAt(0) %>';">
+                    <% } else { %><%= (f.name || '?').charAt(0) %><% } %>
+                  </span>
+                  <span class="friends__meta">
+                    <strong><%= f.name %></strong>
+                    <% if (f.desc) { %><small><%= f.desc %></small><% } %>
+                  </span>
+                  <%- partial('_partial/icons', {name: 'arrow-up-right', size: 15}) %>
+                </a>
+              </li>
+            <% }); %>
+          </ul>
+        </section>
+      <% } %>
     </div>
   </div>
-
-  <% const friends = theme.friends || []; %>
-  <% if (friends.length) { %>
-    <section class="friends article__friends" aria-label="友链">
-      <span class="micro-label">SECTOR / FRIENDS</span>
-      <h2>友链</h2>
-      <ul class="friends__grid">
-        <% friends.forEach(function (f) { %>
-          <li class="friends__card">
-            <a href="<%= f.url %>" target="_blank" rel="noopener noreferrer">
-              <span class="friends__avatar" aria-hidden="true">
-                <% if (f.avatar) { %>
-                  <img src="<%= f.avatar %>" alt="" loading="lazy"
-                    onerror="this.style.display='none';this.parentNode.textContent='<%= (f.name || '?').charAt(0) %>';">
-                <% } else { %><%= (f.name || '?').charAt(0) %><% } %>
-              </span>
-              <span class="friends__meta">
-                <strong><%= f.name %></strong>
-                <% if (f.desc) { %><small><%= f.desc %></small><% } %>
-              </span>
-              <%- partial('_partial/icons', {name: 'arrow-up-right', size: 15}) %>
-            </a>
-          </li>
-        <% }); %>
-      </ul>
-    </section>
-  <% } %>
 
   <footer class="article__footer">
     <a class="article__back" href="<%- url_for('/') %>">
