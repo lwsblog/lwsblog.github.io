@@ -71,6 +71,16 @@
     var resizeFrame = 0;
     var pointer = { x: 0, y: 0, tx: 0, ty: 0 };
     var parallaxDirty = false;
+    var baseCanvas = null;
+    var baseCtx = null;
+    var baseDirty = true;
+    // Sweep band of the previous frame, in CSS px. Only the union of the old
+    // and the new band has to be repainted.
+    var bandTop = 0;
+    var bandBottom = 0;
+    var bandKnown = false;
+    // Safety margin around the band: the widest halo stroke is 27px.
+    var GLOW_MARGIN = 20;
     var sceneThrottle = false;
     var throttleTick = 0;
     var scrollIdleTimer = 0;
@@ -126,6 +136,7 @@
       var sweep = parseColor(styles.getPropertyValue('--scene-sweep').trim());
 
       gridInk = grid || (light ? 'rgba(22, 26, 31, 0.13)' : 'rgba(196, 224, 236, 0.145)');
+      baseDirty = true;
 
       if (sweep) {
         sweepInk = {
@@ -218,37 +229,40 @@
       canvas.width = Math.max(1, Math.round(width * ratio));
       canvas.height = Math.max(1, Math.round(height * ratio));
       buildGrid();
+      baseDirty = true;
     }
 
-    function tracePath() {
+    function tracePath(target) {
       var i;
       var j;
       var line;
 
-      ctx.beginPath();
+      target.beginPath();
 
       for (i = 0; i < horizontals.length; i++) {
         line = horizontals[i];
-        ctx.moveTo(line[0][0], line[0][1]);
-        for (j = 1; j < line.length; j++) ctx.lineTo(line[j][0], line[j][1]);
+        target.moveTo(line[0][0], line[0][1]);
+        for (j = 1; j < line.length; j++) target.lineTo(line[j][0], line[j][1]);
       }
 
       for (i = 0; i < verticals.length; i++) {
         line = verticals[i];
-        ctx.moveTo(line[0][0], line[0][1]);
-        for (j = 1; j < line.length; j++) ctx.lineTo(line[j][0], line[j][1]);
+        target.moveTo(line[0][0], line[0][1]);
+        for (j = 1; j < line.length; j++) target.lineTo(line[j][0], line[j][1]);
       }
     }
 
-    function strokeGrid() {
+    function strokeGrid(target) {
+      target = target || ctx;
+
       // Cached Path2D skips rebuilding every segment on every frame.
       if (gridPath) {
-        ctx.stroke(gridPath);
+        target.stroke(gridPath);
         return;
       }
 
-      tracePath();
-      ctx.stroke();
+      tracePath(target);
+      target.stroke();
     }
 
     function phaseAt(now) {
@@ -256,18 +270,61 @@
       return value < 0 ? value + 1 : value;
     }
 
-    function render(phase) {
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, width, height);
+    // The grid in its resting ink never changes, so it is struck once into an
+    // offscreen plate and blitted back instead of being re-stroked on every
+    // frame. Rebuilt whenever the plate size or the theme ink changes.
+    function buildBase() {
+      if (!baseCanvas) {
+        baseCanvas = document.createElement('canvas');
+        baseCtx = baseCanvas.getContext('2d');
+      }
+
+      if (!baseCtx) {
+        baseDirty = false;
+        return;
+      }
+
+      baseCanvas.width = canvas.width;
+      baseCanvas.height = canvas.height;
+      baseCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      baseCtx.clearRect(0, 0, width, height);
+      baseCtx.save();
+      baseCtx.globalCompositeOperation = 'source-over';
+      baseCtx.lineWidth = 1;
+      baseCtx.strokeStyle = gridInk;
+      strokeGrid(baseCtx);
+      baseCtx.restore();
+      baseDirty = false;
+      bandKnown = false;
+    }
+
+    // 1:1 blit of the resting grid, device pixel for device pixel so the thin
+    // lines are never resampled. y0 / y1 are CSS pixels.
+    function drawBase(y0, y1) {
+      if (!baseCanvas || !baseCanvas.width) return;
+
+      var sy = Math.max(0, Math.floor(y0 * ratio));
+      var sh = Math.min(canvas.height, Math.ceil(y1 * ratio)) - sy;
+      if (sh <= 0) return;
 
       ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = gridInk;
-      strokeGrid();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(baseCanvas, 0, sy, baseCanvas.width, sh, 0, sy, baseCanvas.width, sh);
       ctx.restore();
+    }
 
-      if (typeof phase !== 'number') return;
+    function render(phase) {
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      if (baseDirty || !baseCanvas) buildBase();
+
+      // Static frame — no sweep running: the resting grid, nothing else.
+      if (typeof phase !== 'number' || !baseCanvas) {
+        ctx.clearRect(0, 0, width, height);
+        drawBase(0, height);
+        bandKnown = false;
+        return;
+      }
 
       var thickness = height * 0.55;
       var center = height + thickness * 0.5 - phase * (height + thickness);
@@ -286,7 +343,31 @@
       gradient.addColorStop(0.82, tint(0.38));
       gradient.addColorStop(1, tint(0));
 
+      // Only the strip the gradient actually covers can change: outside the
+      // band every halo pass is painted in tint(0) and contributes nothing, so
+      // clearing and restoring that strip — plus the strip the band occupied
+      // on the previous frame — gives the same picture for roughly a third of
+      // the pixels. The band is 55% of the plate tall and moves ~3px a frame.
+      var y0 = bandKnown ? Math.min(top, bandTop) : top;
+      var y1 = bandKnown ? Math.max(bottom, bandBottom) : bottom;
+
+      // Phase wrapped (the band jumps from the top back to the bottom) or the
+      // first sweep frame: the union covers the whole plate anyway.
+      if (!bandKnown || y1 - y0 > height * 0.95) {
+        y0 = 0;
+        y1 = height;
+      }
+
+      y0 = Math.max(0, Math.floor(y0 - GLOW_MARGIN));
+      y1 = Math.min(height, Math.ceil(y1 + GLOW_MARGIN));
+
+      ctx.clearRect(0, y0, width, y1 - y0);
+      drawBase(y0, y1);
+
       ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, y0, width, y1 - y0);
+      ctx.clip();
       ctx.globalCompositeOperation = ink.composite;
       ctx.strokeStyle = gradient;
       ctx.lineWidth = 1;
@@ -311,6 +392,10 @@
       }
 
       ctx.restore();
+
+      bandTop = top;
+      bandBottom = bottom;
+      bandKnown = true;
     }
 
     function paint() {
@@ -931,25 +1016,48 @@
       return parseFloat(styles.rowGap || styles.gap) || 12;
     }
 
+    // Row geometry is fixed (44px rows, single-line titles), so it is read in
+    // one pass per measure instead of inside updateIndents: reading offsetTop
+    // after writing paddingLeft forced a fresh layout for every row, on every
+    // list scroll event and on every frame of the snap glide.
+    var rowMetrics = [];
+
+    function measureRows() {
+      rowMetrics = rows.map(function (row) {
+        return { top: row.offsetTop, height: row.offsetHeight };
+      });
+    }
+
+    function metrics(i) {
+      if (!rowMetrics.length) measureRows();
+      return rowMetrics[i] || { top: 0, height: 0 };
+    }
+
     // Trapezoid typesetting: a row's left inset tracks the wrapper's slant
     // edge at its CURRENT height, so the row starts form a line parallel to
     // the -7deg edge while the list glides. Mobile has no slant — clear it.
     function updateIndents() {
+      if (!rowMetrics.length) measureRows();
+
       var centre = viewport.scrollTop + viewport.clientHeight / 2;
-      rows.forEach(function (row) {
+
+      for (var i = 0; i < rows.length; i++) {
         if (compact.matches) {
-          row.style.paddingLeft = '';
-          return;
+          rows[i].style.paddingLeft = '';
+          continue;
         }
-        var yRel = row.offsetTop + row.offsetHeight / 2 - centre;
-        row.style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
-      });
+
+        var row = rowMetrics[i];
+        var yRel = row.top + row.height / 2 - centre;
+        rows[i].style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
+      }
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.
     // offsetParent is the (position:relative) viewport, so this is scroll-proof.
     function rowCentre(i) {
-      return rows[i].offsetTop + rows[i].offsetHeight / 2;
+      var row = metrics(i);
+      return row.top + row.height / 2;
     }
 
     function nearestIndex() {
@@ -1143,6 +1251,8 @@
 
     function remeasure() {
       if (viewport.clientHeight < 10) return; // details collapsed
+      measureRows();
+
       if (index === -1) {
         setActive(0);
         centreOn(0);
@@ -1296,7 +1406,9 @@
     clearPostEnterTimers();
 
     // Dropping route-ready for one frame restarts the CSS entry animations
-    // when arriving from another page that already had it.
+    // when arriving from another page that already had it — so any block that
+    // has already settled has to be released again first.
+    clearSettled(body);
     body.classList.remove('route-ready');
     forceReflow(body);
     body.classList.add('route-animating', 'route-blackout');
@@ -1361,6 +1473,7 @@
 
     homeReturn.classList.remove('is-running', 'is-complete');
     homeReturn.classList.add('is-held');
+    clearSettled(body);
     forceReflow(homeReturn);
 
     transition.classList.remove('is-held', 'is-running', 'is-home', 'is-line');
@@ -1379,6 +1492,40 @@
       body.classList.add('route-ready');
       if (sceneBackground) sceneBackground.reveal();
     });
+  }
+
+  // Once an entrance animation has finished the element is already sitting on
+  // its natural state (opacity 1 / transform none / filter none), so the
+  // animation can be dropped — see .is-settled in the CSS. Leaving it attached
+  // keeps `filter` and `transform` in the computed style even at their final
+  // values, and either one makes the browser rasterise the block into a
+  // texture, which is what softens the text afterwards.
+  var SETTLED_ANIMATIONS = {
+    'route-content-reveal': true,
+    'post-header-in': true,
+    'post-fly-in': true,
+    'post-fly-in-soft': true,
+    'post-fly-in-tail': true,
+    'page-enter': true
+  };
+
+  function clearSettled(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('.is-settled').forEach(function (node) {
+      node.classList.remove('is-settled');
+    });
+  }
+
+  function setupSettled() {
+    document.addEventListener('animationend', function (event) {
+      var target = event.target;
+      if (!target || !target.classList || !SETTLED_ANIMATIONS[event.animationName]) return;
+      target.classList.add('is-settled');
+    }, true);
+
+    // Scroll reveals (.reveal) are handled in CSS: .reveal.is-visible now ends
+    // on transform:none instead of translateY(0), so there is no lingering
+    // transform layer to clean up and no :hover transform is blocked.
   }
 
   function setupRouteTransition() {
@@ -1458,10 +1605,41 @@
       // PJAX still works when the browser restricts history state.
     }
 
-    function persistScroll() {
+    // history.replaceState is not free and the scroll handler used to fire it
+    // once per frame for the whole gesture. Five checkpoints a second is
+    // plenty, and the trailing write lands the exact resting position — while
+    // navigate() forces a write so the outgoing entry is never stale.
+    var PERSIST_INTERVAL = 200;
+    var persistStamp = 0;
+    var persistTrailing = 0;
+    var lastPersistedY = -1;
+
+    function persistScroll(force) {
+      var y = window.scrollY;
+
+      if (!force) {
+        if (y === lastPersistedY) return;
+
+        var now = Date.now();
+
+        if (now - persistStamp < PERSIST_INTERVAL) {
+          if (!persistTrailing) {
+            persistTrailing = window.setTimeout(function () {
+              persistTrailing = 0;
+              persistScroll(true);
+            }, PERSIST_INTERVAL);
+          }
+          return;
+        }
+
+        persistStamp = now;
+      }
+
+      lastPersistedY = y;
+
       try {
         var state = window.history.state || {};
-        state.willowxiScrollY = window.scrollY;
+        state.willowxiScrollY = y;
         window.history.replaceState(state, '', window.location.href);
       } catch (error) {
         // A failed scroll checkpoint should not interrupt navigation.
@@ -1627,7 +1805,7 @@
         ? options.restoreScroll
         : 0;
 
-      persistScroll();
+      persistScroll(true);
       navigating = true;
       closeNavigation();
 
@@ -1787,6 +1965,7 @@
     sceneBackground = createSceneBackground();
     if (sceneBackground) sceneBackground.init();
     setupTheme();
+    setupSettled();
     setupRouteTransition();
     startIntro();
     setupHeader();

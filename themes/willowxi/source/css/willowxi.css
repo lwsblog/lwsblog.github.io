@@ -2929,7 +2929,11 @@ a.archive-row:hover {
 
 .reveal.is-visible {
   opacity: 1;
-  transform: translateY(0);
+  /* Ending on `translateY(0)` would leave a transform in the computed style
+     and keep the card on its own rasterised layer forever. `none` is the same
+     visual position but hands the text back to the normal render path, and
+     it does not block :hover transforms such as the post-card lift. */
+  transform: none;
 }
 
 .page-enter {
@@ -3067,7 +3071,37 @@ html.js body.is-post.route-ready:not(.route-leaving) .article-nav {
     calc(var(--post-fly-delay) + var(--post-fly-stagger) * 4) both;
 }
 
-.route-transition {
+/* Rendering clean-up. Every entrance animation ends on the element's own
+   natural state (opacity 1 / transform none / filter none), so once it has
+   played it can be dropped entirely — JS tags the element .is-settled on
+   animationend. Keeping the animation alive leaves `filter` and `transform`
+   in the computed style even at their final values, and a non-none filter or
+   transform makes the browser rasterise the block into a texture: the text is
+   then capped at that texture's resolution and looks soft after a zoom or a
+   display-scaling change. Dropping the animation costs nothing visually and
+   hands the text back to the normal, device-resolution text path. */
+html.js body.is-post.route-ready
+  :is(
+    .main-content,
+    .site-footer,
+    .article__header,
+    .listing__header,
+    .standalone__header,
+    .article__body,
+    .archive-years,
+    .standalone__body,
+    .article__cover,
+    .standalone__rule,
+    .article__toc,
+    .article__footer,
+    .pagination,
+    .article-nav
+  ).is-settled,
+html.js body.is-inner .page-enter.is-settled {
+  animation: none;
+}
+
+route-transition {
   position: fixed;
   z-index: 240;
   inset: 0;
