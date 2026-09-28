@@ -1189,6 +1189,10 @@
       var from = viewport.scrollTop;
       var dist = target - from;
       if (Math.abs(dist) < 2) {
+        // Still land EXACTLY on the row centre: gestures end on fractional
+        // scroll offsets (smooth-wheel deltas), and a subpixel rest position
+        // rasterises the whole list soft. 2px is invisible; blur is not.
+        viewport.scrollTop = target;
         setActive(i);
         return;
       }
@@ -1224,7 +1228,10 @@
       cancelSnap();
       window.clearTimeout(snapTimer);
       var max = viewport.scrollHeight - viewport.clientHeight;
-      glideTarget = Math.max(0, Math.min(max, glideTarget + event.deltaY * 0.5));
+      // Whole-pixel target: smooth wheels stream fractional deltas, and the
+      // glide's terminal write copies this value straight into scrollTop —
+      // a fractional target would park the list on a subpixel offset.
+      glideTarget = Math.max(0, Math.min(max, Math.round(glideTarget + event.deltaY * 0.5)));
       var stepGlide = function () {
         var diff = glideTarget - viewport.scrollTop;
         if (Math.abs(diff) < 1) {
@@ -1305,11 +1312,12 @@
         stepSelection(event.deltaY > 0 ? 1 : -1);
       }, { passive: false });
 
-      // Touch follows the finger: drag the list so the preview panel rolls in
-      // lock-step with the gesture, then snap to the nearest row on release.
-      // The list's scroll range is short (44px rows), so a raw 1:1 drag blows
-      // through it in one flick — damp the mapping to keep it controllable.
-      var TOUCH_DAMP = 0.5;
+      // Touch follows the finger, but through the gear ratio: the preview is
+      // geared UP relative to the list (one row = one panel height), so a raw
+      // scrollTop drag made the preview fly at ~7x the finger. Converting the
+      // drag through stride/panelH makes the PREVIEW itself track the finger
+      // 1:1 while the list glides slowly — swipe the left column and the list
+      // is what moves 1:1; swipe the right and the preview is. Symmetric.
       var dragY = 0;
       var dragging = false;
 
@@ -1328,8 +1336,10 @@
         var y = event.touches[0].clientY;
         var dy = dragY - y; // finger up => scroll forward
         dragY = y;
+        var stride = rows.length > 1 ? (metrics(1).top - metrics(0).top) : (44 + gap());
+        var gear = stride / (detail.clientHeight || 1);
         var max = viewport.scrollHeight - viewport.clientHeight;
-        viewport.scrollTop = Math.max(0, Math.min(max, viewport.scrollTop + dy * TOUCH_DAMP));
+        viewport.scrollTop = Math.max(0, Math.min(max, viewport.scrollTop + dy * gear));
       }, { passive: false });
 
       function endDrag() {
