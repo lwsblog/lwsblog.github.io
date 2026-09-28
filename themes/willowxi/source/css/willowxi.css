@@ -2370,8 +2370,24 @@ a.archive-row:hover {
   height: 434px;
   overflow: hidden;
   transform: skewX(-7deg);
-  border: 1px solid var(--line-strong);
   outline: none;
+}
+
+/* The frame lives on an empty pseudo instead of the wrapper border: the
+   skewed hairline rasterises into visible stair steps at fractional display
+   scales, and a sub-pixel blur feathers them away. The pseudo never carries
+   text, so the compositor path this filter creates cannot blur any type. */
+.stream-picker::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--line-strong);
+  pointer-events: none;
+  filter: blur(0.6px);
+}
+
+.stream-picker:focus-within::after {
+  border-color: var(--paper);
 }
 
 .stream-picker::before {
@@ -2384,7 +2400,7 @@ a.archive-row:hover {
   pointer-events: none;
 }
 
-.stream-picker:focus-within {
+.stream-picker:focus-within::after {
   border-color: var(--paper);
 }
 
@@ -2707,6 +2723,11 @@ a.archive-row:hover {
   .stream-picker {
     height: auto;
     transform: none;
+  }
+
+  /* Unskewed frame is rasterised straight — no stair steps to feather. */
+  .stream-picker::after {
+    filter: none;
   }
 
   .stream-picker::before {
