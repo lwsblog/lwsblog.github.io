@@ -1044,12 +1044,17 @@
       for (var i = 0; i < rows.length; i++) {
         if (compact.matches) {
           rows[i].style.paddingLeft = '';
+          rows[i].style.paddingRight = '';
           continue;
         }
 
         var row = rowMetrics[i];
         var yRel = row.top + row.height / 2 - centre;
+        // Left inset matches the title's -7deg lean; the right inset mirrors it
+        // in the opposite direction so the date column rides the SAME diagonal
+        // as the titles — the whole entry slides along the slant as it scrolls.
         rows[i].style.paddingLeft = Math.max(56, PAD_BASE - yRel * TAN7) + 'px';
+        rows[i].style.paddingRight = Math.max(24, 56 + yRel * TAN7) + 'px';
       }
     }
 

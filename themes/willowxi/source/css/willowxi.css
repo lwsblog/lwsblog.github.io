@@ -2274,7 +2274,7 @@ a.archive-row:hover {
   padding: 0 56px 0 128px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 18px;
   color: var(--paper);
   opacity: 0.45;
@@ -2283,6 +2283,8 @@ a.archive-row:hover {
 }
 
 .stream-row__title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2336,8 +2338,11 @@ a.archive-row:hover {
   overflow: hidden;
   /* Drag-stepping is handled in JS; never let the page pan along. */
   touch-action: none;
-  -webkit-clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
-  clip-path: polygon(54px 0, 140% 0, 140% 100%, 0 100%);
+  /* Full -7deg parallelogram: left edge leans like the outer frame,
+     right edge leans the same way (inset at the bottom), so the panel
+     reads as the same slanted plate as the left column. */
+  -webkit-clip-path: polygon(54px 0, 140% 0, calc(140% - 54px) 100%, 0 100%);
+  clip-path: polygon(54px 0, 140% 0, calc(140% - 54px) 100%, 0 100%);
 }
 
 .stream-detail__track {
@@ -2401,9 +2406,9 @@ a.archive-row:hover {
 
 .stream-detail__body small {
   /* Trapezoid typesetting: the blocks' left edges descend along the same
-     -7deg lean as the wrapper (43 - 39 - 28 mirrors the slant across the
-     vertical gaps between the blocks). */
-  margin-left: 43px;
+     -7deg lean as the wrapper (56 - 42 - 28 mirrors the left list's slant
+     across the vertical gaps between the blocks). */
+  margin-left: 56px;
   color: rgba(241, 243, 245, 0.55);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -2413,7 +2418,7 @@ a.archive-row:hover {
 
 .stream-detail__body h4 {
   position: relative;
-  margin: 0 0 0 39px;
+  margin: 0 0 0 42px;
   /* right inset keeps the title's first line clear of the ghost index */
   padding-right: 64px;
   padding-bottom: 18px;
