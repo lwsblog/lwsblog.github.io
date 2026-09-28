@@ -1,7 +1,10 @@
 <%
   const background = theme.background || {};
   const defaultWallpaper = background.wallpaper || '/images/wallpaper/wallpaper-default.jpg';
-  const pageWallpaper = is_post() && page.wallpaper ? page.wallpaper : defaultWallpaper;
+  // The About page rides the post channel: same pending curtain, same
+  // line-enter transition and staged reveal as entering an article.
+  const isPostLike = is_post() || page.layout === 'about';
+  const pageWallpaper = isPostLike && page.wallpaper ? page.wallpaper : defaultWallpaper;
 
   function resolveBackgroundUrl(value) {
     if (/^(?:[a-z]+:)?\/\//i.test(value) || /^data:/i.test(value)) return value;
@@ -15,7 +18,7 @@
 <html lang="<%= config.language || 'zh-CN' %>">
   <%- partial('_partial/head') %>
   <body
-    class="<%= is_home() ? 'is-home' : 'is-inner' %><%= is_post() ? ' is-post' : '' %>"
+    class="<%= is_home() ? 'is-home' : 'is-inner' %><%= isPostLike ? ' is-post' : '' %>"
     data-wallpaper="<%= wallpaperUrl %>"
     data-default-wallpaper="<%= defaultWallpaperUrl %>"
   >
@@ -51,7 +54,7 @@
 
     <div class="theme-transition" data-theme-transition aria-hidden="true"></div>
 
-    <div class="route-transition <%= is_post() ? 'is-pending' : 'is-complete' %>" data-route-transition aria-hidden="true">
+    <div class="route-transition <%= isPostLike ? 'is-pending' : 'is-complete' %>" data-route-transition aria-hidden="true">
       <div class="route-transition__veil route-transition__veil--top"></div>
       <div class="route-transition__veil route-transition__veil--bottom"></div>
       <div class="route-transition__seam">

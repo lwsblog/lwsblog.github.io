@@ -2084,10 +2084,11 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 }
 
 /* --- About page: friend links -------------------------------------------
-   Same editorial language as the rest of the standalone pages: hairline
-   card on a flat ground, mono micro-labels, arrow nudges on hover. */
+   Lives in the article's reading column (same 760px centered column as
+   .article__layout--no-toc), hairline cards on a flat ground, mono
+   micro-labels, arrow nudges on hover. */
 .friends {
-  max-width: 780px;
+  max-width: 760px;
   margin: 78px auto 0;
 }
 
