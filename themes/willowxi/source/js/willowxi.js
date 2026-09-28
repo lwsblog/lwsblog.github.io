@@ -1120,7 +1120,12 @@
       // Whole pixels only: a fractional translate3d promotes the track to a
       // layer that the compositor resamples at subpixel offsets, and every
       // glyph in the panel goes blurry.
-      track.style.transform = 'translate3d(0,' + Math.round(-c * panelH) + 'px,0)';
+      // 2D translate on purpose: a 3D transform (or will-change) would
+      // permanently promote the track to a compositor layer and Chromium
+      // then renders its text without ClearType subpixel AA — soft words.
+      // Main-frame painting keeps the panel text as sharp as the rest of
+      // the site; measured frame cost is unchanged (see track CSS comment).
+      track.style.transform = 'translate(0,' + Math.round(-c * panelH) + 'px)';
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.

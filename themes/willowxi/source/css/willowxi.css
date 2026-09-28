@@ -2352,8 +2352,13 @@ a.archive-row:hover {
 
 .stream-detail__track {
   height: 100%;
-  transform: translate3d(0, 0, 0);
-  will-change: transform;
+  /* No translate3d / will-change here on purpose: both would permanently
+     promote the track to a compositor layer, and Chromium disables ClearType
+     subpixel AA for composited text — every word in the panel would render
+     grayscale and read soft (worst on the big title). The track is moved by
+     JS with a 2D translate instead, which paints in the main frame with full
+     subpixel AA; measured cost on a continuous animated scroll: 0 frames
+     over 17ms (cost-track.js). */
   counter-reset: detail-panel;
 }
 
