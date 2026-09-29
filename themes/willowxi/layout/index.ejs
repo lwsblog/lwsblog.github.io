@@ -1,4 +1,8 @@
 <%
+  const faceValue = theme.identity && theme.identity.avatar ? theme.identity.avatar : '';
+  const faceUrl = faceValue
+    ? (/^(?:[a-z]+:)?\/\//i.test(faceValue) || faceValue.indexOf('data:') === 0 ? faceValue : url_for(faceValue))
+    : '';
   const groups = new Map();
   page.posts.each(function(post) {
     const category = post.categories && post.categories.length
@@ -37,7 +41,11 @@
         <%- partial('_partial/icons', {name: 'arrow-up-right', size: 17}) %>
       </a>
       <a class="button button--ghost" href="<%- url_for('/about/') %>">
-        <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+        <% if (faceUrl) { %>
+          <img class="button__avatar" src="<%- faceUrl %>" alt="" loading="lazy">
+        <% } else { %>
+          <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+        <% } %>
         <span>关于我</span>
       </a>
     </div>
@@ -113,11 +121,19 @@
                     <div class="stream-detail__track" data-stream-track>
                       <% posts.forEach(function(post) {
                         const excerptText = strip_html(post.excerpt || post.content || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-                        const cover = post.wallpaper ? url_for(post.wallpaper) : '';
+                        const coverValue = post.cover || post.wallpaper || (theme.home && theme.home.preview_cover) || '';
+                        const cover = coverValue
+                          ? (/^(?:[a-z]+:)?\/\//i.test(coverValue) || coverValue.indexOf('data:') === 0 ? coverValue : url_for(coverValue))
+                          : '';
                         const cat = post.categories && post.categories.length ? post.categories.first().name : 'UNSORTED';
                       %>
+                        <%/* Unescaped output on purpose. The escaped form turns
+                             this attribute's own quotes into the numeric entity for
+                             a double quote, so the value parses as unquoted text that
+                             still carries two literal quote marks — the declaration
+                             is thrown away and the cover never renders. */%>
                         <article class="stream-detail__panel">
-                          <div class="stream-detail__cover"<%= cover ? ' style="background-image:url(' + cover + ')"' : '' %>></div>
+                          <div class="stream-detail__cover"<%- cover ? ' style="background-image:url(' + cover + ')"' : '' %>></div>
                           <div class="stream-detail__body">
                             <small><%= date(post.date, 'YYYY.MM.DD') %> / <%= cat %></small>
                             <h4><%= post.title %></h4>

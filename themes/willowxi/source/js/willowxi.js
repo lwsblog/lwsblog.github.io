@@ -1016,6 +1016,15 @@
       return parseFloat(styles.rowGap || styles.gap) || 12;
     }
 
+    // Device-pixel snapping: round(css * dpr) / dpr puts the value back on the
+    // physical grid, which is the finest step the panel can resolve and the
+    // only one that keeps glyphs off a subpixel draw offset. At dpr 1 it is
+    // bit-identical to plain integer rounding.
+    function devicePx(value) {
+      var dpr = window.devicePixelRatio || 1;
+      return Math.round(value * dpr) / dpr;
+    }
+
     // Row geometry is fixed (44px rows, single-line titles), so it is read in
     // one pass per measure instead of inside updateIndents: reading offsetTop
     // after writing paddingLeft forced a fresh layout for every row, on every
@@ -1089,11 +1098,18 @@
         var yRel = row.top + row.height / 2 - centre;
         // The date column rides the SAME -7deg diagonal as the titles: its
         // right inset grows as the row sits lower, so both columns lean
-        // together and the whole entry reads as one slanted band. Rounded to
-        // whole pixels — fractional padding puts text on subpixel offsets
-        // and the rasteriser blurs it.
-        rows[i].style.paddingLeft = Math.round(Math.max(56, PAD_BASE - yRel * TAN7)) + 'px';
-        rows[i].style.paddingRight = Math.round(Math.max(24, 56 + yRel * TAN7)) + 'px';
+        // together and the whole entry reads as one slanted band.
+        //
+        // Snapped to the DEVICE pixel grid rather than the CSS one. At a
+        // fractional display scale (Windows 125% = dpr 1.25) an integer CSS
+        // padding lands on x.25/.5/.75 physical pixels, so the glyphs rasterise
+        // on a subpixel draw offset — soft type — and the drift advances in
+        // 1.25-device-px jumps while the list glides. devicePx() gives the
+        // finest step the display can resolve (one physical pixel) and puts the
+        // text back on the physical grid; dpr 1 is bit-identical to the old
+        // rounding.
+        rows[i].style.paddingLeft = devicePx(Math.max(56, PAD_BASE - yRel * TAN7)) + 'px';
+        rows[i].style.paddingRight = devicePx(Math.max(24, 56 + yRel * TAN7)) + 'px';
       }
       // Keep the right panel glued to the live scroll position so a finger
       // drag on either column moves both columns together.
@@ -1134,8 +1150,49 @@
       // then renders its text without ClearType subpixel AA — soft words.
       // Main-frame painting keeps the panel text as sharp as the rest of
       // the site; measured frame cost is unchanged (see track CSS comment).
-      var dpr = window.devicePixelRatio || 1;
-      track.style.transform = 'translate(0,' + Math.round(-c * panelH * dpr) / dpr + 'px)';
+      // Same physical-grid rule as the list indents above.
+      track.style.transform = 'translate(0,' + devicePx(-c * panelH) + 'px)';
+      updateDetailIndents(c);
+    }
+
+    // Right panel: the left list drifts sideways along the -7deg lean as it
+    // glides, but the preview's text column stood perfectly still — only the
+    // track moved. Each panel's body now carries the same diagonal: its
+    // displacement from the bar (in px, positive while the panel sits above
+    // it) times tan(7deg), so one panel of roll drags the text sideways by the
+    // same amount one row of roll drags a title. A 2D translate rather than a
+    // margin, so the boxes keep their layout width and the paragraph never
+    // re-wraps mid-roll; painted in the main frame like the track itself (no
+    // compositor layer, no soft type), snapped to whole device pixels.
+    var detailBodies = [];
+
+    function clearDetailIndents() {
+      for (var i = 0; i < detailBodies.length; i++) {
+        detailBodies[i].el.style.transform = '';
+      }
+      detailBodies = [];
+    }
+
+    function measureDetailBodies() {
+      // Drop what we wrote before re-measuring, so the CSS value — including
+      // the mobile media query — is authoritative again if we land in compact.
+      clearDetailIndents();
+      if (!track || !detail || compact.matches) return;
+      var bodies = track.querySelectorAll('.stream-detail__body');
+      for (var i = 0; i < bodies.length; i++) {
+        detailBodies.push({ el: bodies[i], index: i });
+      }
+    }
+
+    function updateDetailIndents(c) {
+      if (!detailBodies.length) return;
+      var panelH = detail.clientHeight;
+      if (!panelH) return;
+      for (var i = 0; i < detailBodies.length; i++) {
+        var item = detailBodies[i];
+        var shift = (c - item.index) * panelH * TAN7;
+        item.el.style.transform = 'translateX(' + devicePx(shift) + 'px)';
+      }
     }
 
     // Vertical centre of row i, in the scroller's content coordinates.
@@ -1371,6 +1428,7 @@
       if (viewport.clientHeight < 10) return; // details collapsed
       paintDetailMask();
       measureRows();
+      measureDetailBodies();
 
       if (index === -1) {
         setActive(0);

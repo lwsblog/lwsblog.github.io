@@ -17,8 +17,18 @@
       </a>
     <% }); %>
 
+    <%
+      const faceValue = theme.identity && theme.identity.avatar ? theme.identity.avatar : '';
+      const faceUrl = faceValue
+        ? (/^(?:[a-z]+:)?\/\//i.test(faceValue) || faceValue.indexOf('data:') === 0 ? faceValue : url_for(faceValue))
+        : '';
+    %>
     <a class="site-nav__icon" href="<%- url_for('/about/') %>" aria-label="关于我" title="关于我">
-      <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+      <% if (faceUrl) { %>
+        <img class="site-nav__avatar" src="<%- faceUrl %>" alt="" loading="lazy">
+      <% } else { %>
+        <%- partial('_partial/icons', {name: 'user', size: 17}) %>
+      <% } %>
     </a>
 
     <button class="theme-toggle" type="button" aria-label="切换到浅色主题" aria-pressed="false" title="切换明暗主题" data-theme-toggle>

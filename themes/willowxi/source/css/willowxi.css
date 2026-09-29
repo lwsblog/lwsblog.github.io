@@ -682,6 +682,25 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   transform: rotate(-4deg);
 }
 
+/* The "关于我" control now carries the face itself. The frame, the border and
+   the -4deg hover tilt stay exactly as they were; only the glyph inside
+   changed, so the bar's rhythm is untouched. */
+.site-nav__avatar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Same face, same idea, inside the home hero's ghost button — the line-art
+   icon's 17px footprint grows just enough to read as a portrait. */
+.button__avatar {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+}
+
 .theme-toggle {
   display: grid;
   width: 42px;
@@ -3305,7 +3324,12 @@ html.js body.is-post.route-ready:not(.route-leaving) .article-nav {
    then capped at that texture's resolution and looks soft after a zoom or a
    display-scaling change. Dropping the animation costs nothing visually and
    hands the text back to the normal, device-resolution text path. */
-html.js body.is-post.route-ready
+/* :not(.route-leaving) matters: the shell keeps .is-settled after its
+   entrance, and without the guard this rule (specificity 0,5,2) outranks the
+   exit rule html.js body.route-leaving .main-content (0,3,2) — the article
+   page then left with no blur at all, while the archive page (whose shell
+   never plays an entrance, so never settles) blurred correctly. */
+html.js body.is-post.route-ready:not(.route-leaving)
   :is(
     .main-content,
     .site-footer,
