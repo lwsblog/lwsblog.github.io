@@ -12,6 +12,12 @@
   --cyan: #8fd6df;
   --yellow: #e1c46f;
   --coral: #e4897f;
+  /* The status dot's green, promoted to a token and handed to the top-bar
+     controls. Same accent, same meaning: what glows is what is alive, and now
+     also what is pressable. */
+  --control-edge: #8ce2b0;
+  --control-glow: rgba(140, 226, 176, 0.3);
+  --control-glow-hover: rgba(140, 226, 176, 0.55);
   --surface-rgb: 255, 255, 255;
   --surface-soft: rgba(255, 255, 255, 0.035);
   --surface: rgba(255, 255, 255, 0.045);
@@ -116,6 +122,12 @@ html[data-theme="light"] {
   --cyan: #08798a;
   --yellow: #946b0f;
   --coral: #ad493f;
+  /* A pale green dissolves into a pale plate, so light mode deepens the edge
+     and restrains the halo — the same relationship --cyan keeps with its dark
+     twin. The glow stays cool and low: it must tint the plate, not fog it. */
+  --control-edge: #12805c;
+  --control-glow: rgba(18, 128, 92, 0.2);
+  --control-glow-hover: rgba(18, 128, 92, 0.36);
   --surface-rgb: 21, 24, 28;
   --surface-soft: rgba(21, 24, 28, 0.035);
   --surface: rgba(21, 24, 28, 0.055);
@@ -664,9 +676,13 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   transform-origin: left;
 }
 
-/* A round frame: the control reads as a portrait rather than a plate, which
-   is what the square corners made it look like. overflow hidden is what keeps
-   the face inside the circle — and it is load-bearing, see the avatar below. */
+/* A square plate again. The circle was the only round corner anywhere in the
+   chrome, and next to the picker's slanted plates it read as a foreign body —
+   the language is straight lines and -7deg, so the shape goes back to zero
+   radius. What softens the hard corner now is light, not geometry: the status
+   dot's green drawn as the 1px edge plus a halo, so the control glows instead
+   of rounding. overflow hidden is what keeps the face inside the frame — and
+   it is load-bearing, see the avatar below. */
 .site-nav__icon {
   position: relative;
   display: grid;
@@ -675,24 +691,25 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   margin-left: 6px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 50%;
+  border: 1px solid var(--control-edge);
+  box-shadow: 0 0 12px var(--control-glow);
   transition:
     border-color 180ms ease,
     background 180ms ease,
+    box-shadow 180ms var(--ease-out),
     transform 180ms var(--ease-out);
 }
 
-/* ZOOM, not tilt. The old -4deg hover read as a wobble on a shape that has no
-   spare corner to lose; growing it says "pressable" without moving the bar's
-   rhythm. Same 180ms ease the tilt used. */
+/* ZOOM, not tilt, and the halo does the answering. The edge keeps its green:
+   falling back to --line-strong here would cancel the accent the moment you
+   reach for it, so only the glow widens. Same 180ms ease the tilt used. */
 .site-nav__icon:hover {
-  border-color: var(--line-strong);
   background: var(--surface);
+  box-shadow: 0 0 20px var(--control-glow-hover);
   transform: scale(1.08);
 }
 
-/* The "关于我" control carries the face itself, cropped to the circle.
+/* The "关于我" control carries the face itself, cropped to the frame.
    Absolute inset 0 instead of width/height 100%: as a grid item the image's
    percentage height resolves against an auto-sized row, so it fell back to
    the intrinsic aspect ratio — fine while the box happened to be square,
@@ -707,36 +724,39 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
 }
 
 /* Same face, same idea, inside the home hero's ghost button — the line-art
-   icon's 17px footprint grows just enough to read as a portrait. */
+   icon's 17px footprint grows just enough to read as a portrait. Square, like
+   the frame around it and like every other plate on the site. */
 .button__avatar {
   display: block;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
   object-fit: cover;
 }
 
+/* The status dot's twin, not a container: same square plate outline as the
+   avatar button, same green edge, same halo — the two read as a pair. */
 .theme-toggle {
   display: grid;
   width: 42px;
   height: 42px;
   margin-left: 6px;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 50%;
+  border: 1px solid var(--control-edge);
+  box-shadow: 0 0 12px var(--control-glow);
   color: var(--paper);
   background: transparent;
   cursor: pointer;
   transition:
     border-color 180ms ease,
     background 180ms ease,
+    box-shadow 180ms var(--ease-out),
     transform 180ms var(--ease-out);
 }
 
-/* Matching zoom, mirrored from the avatar button. */
+/* Matching zoom and matching halo, mirrored from the avatar button. */
 .theme-toggle:hover {
-  border-color: var(--line-strong);
   background: var(--surface);
+  box-shadow: 0 0 20px var(--control-glow-hover);
   transform: scale(1.08);
 }
 
@@ -753,12 +773,16 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   transform: rotate(-45deg) scale(0.72);
 }
 
+/* The third member of the family, and on a phone it stands in the same row as
+   the two above (the bar becomes the strip's first row). It was already the
+   only square one — it only ever needed the light, never the shape. */
 .nav-toggle {
   display: none;
   width: 42px;
   height: 42px;
   place-items: center;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-edge);
+  box-shadow: 0 0 12px var(--control-glow);
   background: var(--header-solid);
   cursor: pointer;
 }
@@ -3809,9 +3833,9 @@ html.js body.route-leaving .site-header {
   }
 
   /* Same 42px controls as the desktop bar, so the strip's rhythm and the two
-     round buttons above it are the very same two elements. flex: 0 0 auto is
+     glowing buttons above it are the very same two elements. flex: 0 0 auto is
      load-bearing: as flex items they would otherwise shrink on a narrow
-     viewport and a 42px circle squeezed to 28px is an ellipse, not a circle.
+     viewport, and a 42px square squeezed to 28px is a rectangle, not a plate.
      The links carry the give instead. */
   .site-nav__icon,
   .theme-toggle {
