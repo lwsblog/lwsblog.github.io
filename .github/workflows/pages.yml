@@ -37,6 +37,23 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Diagnose Pages API (temporary)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               -w "\nHTTP_STATUS=%{http_code}\n" \
+               "https://api.github.com/repos/$REPO/pages" -o /tmp/pages.json || true
+          if [ ! -s /tmp/pages.json ]; then echo '{"error":"empty response"}' > /tmp/pages.json; fi
+          mkdir -p public
+          cp /tmp/pages.json public/pages-report.json
+          echo "--- GET pages ---"
+          cat public/pages-report.json
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
