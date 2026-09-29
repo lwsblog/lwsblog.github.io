@@ -12,12 +12,15 @@
   --cyan: #8fd6df;
   --yellow: #e1c46f;
   --coral: #e4897f;
-  /* The status dot's green, promoted to a token and handed to the top-bar
-     controls. Same accent, same meaning: what glows is what is alive, and now
-     also what is pressable. */
-  --control-edge: #8ce2b0;
-  --control-glow: rgba(140, 226, 176, 0.3);
-  --control-glow-hover: rgba(140, 226, 176, 0.55);
+  /* The sweep's own light, handed to the top-bar controls. The scene's beam is
+     a cool blue-white trailing across the wallpaper, and --scene-sweep is its
+     source value; drawing it on the 1px edge plus a halo makes the controls
+     read as a piece of that light rather than a colour of their own. The
+     status dot keeps its green: "alive" and "pressable" should not share one
+     signal, and two accents on the bar is one too many. */
+  --control-edge: #d6f0ff;
+  --control-glow: rgba(214, 240, 255, 0.28);
+  --control-glow-hover: rgba(214, 240, 255, 0.5);
   --surface-rgb: 255, 255, 255;
   --surface-soft: rgba(255, 255, 255, 0.035);
   --surface: rgba(255, 255, 255, 0.045);
@@ -122,12 +125,14 @@ html[data-theme="light"] {
   --cyan: #08798a;
   --yellow: #946b0f;
   --coral: #ad493f;
-  /* A pale green dissolves into a pale plate, so light mode deepens the edge
-     and restrains the halo — the same relationship --cyan keeps with its dark
-     twin. The glow stays cool and low: it must tint the plate, not fog it. */
-  --control-edge: #12805c;
-  --control-glow: rgba(18, 128, 92, 0.2);
-  --control-glow-hover: rgba(18, 128, 92, 0.36);
+  /* The sweep flips with the theme — a pale plate gets an ink band, not a
+     white one — so the edge flips with it, keeping the same blue bias: 13, 27,
+     36 is the cool cousin of the beam's 214, 240, 255, and it is the only one
+     of the two that survives on #f4f5f2. The halo stays low so it tints the
+     plate instead of fogging it. */
+  --control-edge: #0d1b24;
+  --control-glow: rgba(13, 27, 36, 0.14);
+  --control-glow-hover: rgba(13, 27, 36, 0.26);
   --surface-rgb: 21, 24, 28;
   --surface-soft: rgba(21, 24, 28, 0.035);
   --surface: rgba(21, 24, 28, 0.055);
@@ -679,8 +684,8 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
 /* A square plate again. The circle was the only round corner anywhere in the
    chrome, and next to the picker's slanted plates it read as a foreign body —
    the language is straight lines and -7deg, so the shape goes back to zero
-   radius. What softens the hard corner now is light, not geometry: the status
-   dot's green drawn as the 1px edge plus a halo, so the control glows instead
+   radius. What softens the hard corner now is light, not geometry: the sweep's
+   cool white drawn as the 1px edge plus a halo, so the control glows instead
    of rounding. overflow hidden is what keeps the face inside the frame — and
    it is load-bearing, see the avatar below. */
 .site-nav__icon {
@@ -700,7 +705,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
     transform 180ms var(--ease-out);
 }
 
-/* ZOOM, not tilt, and the halo does the answering. The edge keeps its green:
+/* ZOOM, not tilt, and the halo does the answering. The edge keeps its light:
    falling back to --line-strong here would cancel the accent the moment you
    reach for it, so only the glow widens. Same 180ms ease the tilt used. */
 .site-nav__icon:hover {
@@ -733,8 +738,8 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   object-fit: cover;
 }
 
-/* The status dot's twin, not a container: same square plate outline as the
-   avatar button, same green edge, same halo — the two read as a pair. */
+/* The status dot's twin in shape, not in hue: same square plate outline as the
+   avatar button, same cool edge, same halo — the two read as a pair. */
 .theme-toggle {
   display: grid;
   width: 42px;
