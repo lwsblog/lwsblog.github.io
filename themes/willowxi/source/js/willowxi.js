@@ -669,6 +669,7 @@
     var count = intro.querySelector('[data-intro-count]');
     var bar = intro.querySelector('[data-intro-bar]');
     var year = intro.querySelector('[data-intro-year]');
+    var skip = intro.querySelector('[data-intro-skip]');
 
     if (year) year.textContent = new Date().getFullYear();
 
@@ -686,25 +687,98 @@
     var progressEnd = Math.round(duration * 0.82);
     var startTime = performance.now();
 
+    /* Two sources, one bar. The animation drives it; the load state is its
+       ceiling. On a normal connection the ceiling is never reached and this is
+       the curve it always was, frame for frame. On a slow one the bar stops
+       where the page actually is instead of lying its way to 100 — which is
+       the only honest thing to do, since nothing here can be clicked yet
+       anyway. */
+    var assets = [].slice.call(
+      document.querySelectorAll('img[src], link[rel="stylesheet"]')
+    );
+    var loadDone = document.readyState === 'complete';
+    var shownValue = -1;
+    var actionsArmed = false;
+    var exitArmed = false;
+    var exitStarted = false;
+
+    function assetsDone() {
+      var done = 0;
+      for (var i = 0; i < assets.length; i++) {
+        var node = assets[i];
+        if (node.tagName === 'IMG' ? node.complete : !!node.sheet) done++;
+      }
+      return done;
+    }
+
+    /* Deliberately capped below 1: only window load closes that last stretch,
+       so the bar can never claim a finished page while a stylesheet or an
+       image is still outstanding. */
+    function loadRatio() {
+      if (loadDone) return 1;
+      if (!assets.length) return 0;
+      return Math.min(0.96, assetsDone() / assets.length);
+    }
+
+    /* The actions row carries "直接进入文章" and the CLICK ANYWHERE TO SKIP
+       hint — both are offers to leave, so neither may appear while leaving is
+       still forbidden. It waits for load rather than for the clock. */
+    function offerActions() {
+      if (actionsArmed && loadDone) intro.classList.add('phase-actions');
+    }
+
+    /* Exit waits for load instead of the clock: the shutter is a one-shot, so
+       firing it early would strand the intro on a half-played transition. When
+       load lands first (the normal case) this fires on the same beat it always
+       did — 0.90 of the duration, revealed 0.10 later. */
+    function armExit() {
+      if (exitStarted || introEnded || !exitArmed || !loadDone) return;
+      exitStarted = true;
+      intro.classList.add('phase-exit');
+      setTimer(revealPage, Math.round(duration * 0.10));
+    }
+
+    function markLoaded() {
+      if (loadDone) return;
+      loadDone = true;
+      if (skip) skip.disabled = false;
+      intro.classList.remove('is-loading');
+      offerActions();
+      armExit();
+    }
+
+    if (loadDone) {
+      if (skip) skip.disabled = false;
+    } else {
+      if (skip) skip.disabled = true;
+      intro.classList.add('is-loading');
+      window.addEventListener('load', markLoaded, { once: true });
+    }
+
     function updateProgress(now) {
       if (introEnded) return;
       var elapsed = now - startTime;
       var raw = (elapsed - progressStart) / Math.max(1, progressEnd - progressStart);
       var eased = 1 - Math.pow(1 - Math.max(0, Math.min(1, raw)), 2.4);
-      var value = Math.min(100, Math.round(eased * 100));
-      if (count) count.textContent = String(value).padStart(3, '0');
-      if (bar) bar.style.transform = 'scaleX(' + (value / 100) + ')';
-      if (value < 100) requestAnimationFrame(updateProgress);
+      var value = Math.round(Math.min(eased * 100, loadRatio() * 100));
+      if (value !== shownValue) {
+        shownValue = value;
+        if (count) count.textContent = String(value).padStart(3, '0');
+        if (bar) bar.style.transform = 'scaleX(' + (value / 100) + ')';
+      }
+      /* The loop no longer stops at 100: on a slow load the bar can sit there
+         waiting for the ceiling to lift. */
+      requestAnimationFrame(updateProgress);
     }
 
     requestAnimationFrame(updateProgress);
     setTimer(function () { intro.classList.add('phase-copy'); }, duration * 0.30);
     setTimer(function () { intro.classList.add('phase-progress'); }, duration * 0.39);
-    setTimer(function () { intro.classList.add('phase-actions'); }, duration * 0.74);
-    setTimer(function () { intro.classList.add('phase-exit'); }, duration * 0.90);
-    setTimer(function () { revealPage(); }, duration);
+    setTimer(function () { actionsArmed = true; offerActions(); }, duration * 0.74);
+    setTimer(function () { exitArmed = true; armExit(); }, duration * 0.90);
 
     intro.addEventListener('click', function (event) {
+      if (!loadDone) return;
       if (event.target.closest('a')) return;
       if (event.target.closest('[data-intro-enter]')) {
         revealPage({ scrollToStream: true });
@@ -714,7 +788,8 @@
     });
 
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') revealPage();
+      if (event.key !== 'Escape' || !loadDone) return;
+      revealPage();
     });
   }
 

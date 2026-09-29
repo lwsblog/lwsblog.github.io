@@ -956,6 +956,33 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   font-size: 9px;
 }
 
+/* The moment the exit starts, the skip affordances get out of the way. They sit
+   exactly where the bar's avatar and theme controls are about to be, and the
+   exit spends 680ms before it is even allowed to fade — long enough to keep
+   covering the very thing the visitor just asked to see. The main exit timing
+   is untouched: that delay belongs to the scene handoff, not to this button. */
+.intro.is-leaving .intro__skip {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    visibility 140ms;
+}
+
+/* Nothing to skip to until the page is actually there. Disabled rather than
+   merely ignored, so the click never fires at all, and dimmed so the state
+   reads as "not yet" instead of "broken". The full-screen pointer drops its
+   invitation for the same reason. */
+.intro__skip[disabled] {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.intro.is-loading {
+  cursor: default;
+}
+
 .intro__stage {
   position: relative;
   z-index: 3;
