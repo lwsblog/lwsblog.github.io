@@ -2128,7 +2128,10 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   --waline-info-color: var(--muted);
   --waline-light-grey: var(--muted);
   --waline-dark-grey: var(--paper-dim);
-  --waline-white: var(--paper);
+  /* Waline paints primary buttons with `theme-color` and their label with
+     `white`; since the theme colour is a paper-on-ink flip, the label has to
+     be the page ink or the submit button renders as a blank rectangle. */
+  --waline-white: var(--ink);
   --waline-bq-color: var(--surface-soft);
   --waline-code-bg-color: var(--code-bg);
   --waline-badge-color: var(--cyan);
