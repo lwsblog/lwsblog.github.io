@@ -1,0 +1,22 @@
+# Cloudflare Pages 响应头配置
+# 文档：https://developers.cloudflare.com/pages/configuration/headers/
+#
+# 为什么需要这个文件
+# ------------------
+# Pages 对静态资源的默认缓存是 `public, max-age=0, must-revalidate`，
+# 浏览器每次加载都要带 ETag 发一次条件请求。单张图无所谓，但正文里
+# 十几张插图时，这些往返会累积成能感觉到的滚动卡顿。
+#
+# 为什么只给 /images/posts/*
+# -------------------------
+# 该目录由 tools/add-image.py 管理，路径按文章 slug 隔离，文件名固定。
+# 唯一会产生「同名不同内容」的情形是重新生成同名图 —— 遇到这种需求请
+# 换个文件名，或参考下面的说明强刷。
+#
+# 刻意不给 /css/* /js/* 设长缓存：这些路径是固定的（/css/willowxi.css
+# 永远叫这个名字），一旦 immutable，改版后老访客将永远拿不到新样式。
+# 它们继续走默认的 must-revalidate + ETag，代价只是一次 304。
+# 同理，主题内的 /images/wallpaper/* 也保持默认（该路径会被覆盖更新）。
+
+/images/posts/*
+  Cache-Control: public, max-age=31536000, immutable

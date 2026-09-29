@@ -23,6 +23,9 @@ Cloudflare 没有这个限速 —— 但单图仍然越小越好，尤其是手�
 ----
     source/images/posts/<slug>/<name>.webp
 
+该目录在 Cloudflare Pages 上由 source/_headers 设了**一年 immutable 缓存**，
+所以换图请换文件名 —— 同名覆盖不会让老访客看到新内容。
+
 在 Markdown 里这样引用（脚本会直接把这一行打印出来给你复制）：
 
     ![说明](/images/posts/<slug>/<name>.webp)
@@ -140,7 +143,9 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool):
     print(f"      {human(before)} → {human(after)}   {change}   {scale}")
     if not dry:
         if existed:
-            print(f"      （覆盖了已存在的 {dst.name}）")
+            print(f"      ! 覆盖了已存在的 {dst.name}")
+            print("        source/_headers 给 /images/posts/* 设了一年 immutable 缓存，")
+            print("        同名覆盖后老访客会继续看到旧图 —— 需要换图就换个文件名。")
         print(f"      {rel_dir}/{stem}.webp")
     if after >= before:
         print("      ! 转 WebP 反而更大（纯色 / 矢量风格图常见）—— 这类图建议直接用原格式引用")
