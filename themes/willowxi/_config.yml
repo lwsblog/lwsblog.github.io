@@ -67,4 +67,4 @@ friends:
 # Fill in the Vercel server URL after deployment, e.g.
 #   serverURL: https://comment.willowxi.site
 waline:
-  serverURL: ''
+  serverURL: 'https://comment.willowxi.site'
