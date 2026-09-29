@@ -3033,6 +3033,29 @@ a.archive-row:hover {
   text-underline-offset: 4px;
 }
 
+/* Buttons placed inside prose (currently only the 404 page) must not inherit
+   the body-link treatment — cyan ink plus an underline would flatten the plate
+   back into a link. Colours are restated explicitly because .prose a (0,1,1)
+   outranks .button--solid (0,1,0), so the solid variant's own ink would lose. */
+.prose a.button {
+  text-decoration: none;
+}
+
+.prose a.button:not(.button--solid) {
+  color: var(--paper);
+}
+
+.prose a.button--solid {
+  color: var(--ink);
+}
+
+.notfound-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 2em 0 0;
+}
+
 .prose strong {
   color: var(--paper);
 }
