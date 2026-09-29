@@ -56,7 +56,7 @@ jobs:
           echo "--- report ---"
           cat public/pages-report2.json
 
-      - name: Re-submit custom domain (temporary)
+      - name: Enable HTTPS enforcement (temporary)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -67,14 +67,14 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/$REPO/pages" \
-            -d '{"cname":"willowxi.site","build_type":"workflow"}' \
+            -d '{"cname":"willowxi.site","build_type":"workflow","https_enforced":true}' \
             -w "\nHTTP_STATUS=%{http_code}\n" \
-            -o public/pages-put.json || true
+            -o public/pages-put2.json || true
           echo "--- PUT result ---"
-          cat public/pages-put.json || true
-          printf '\n--- state after ---\n' >> public/pages-put.json
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages" >> public/pages-put.json || true
-          cat public/pages-put.json
+          cat public/pages-put2.json || true
+          printf '\n--- state after ---\n' >> public/pages-put2.json
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages" >> public/pages-put2.json || true
+          cat public/pages-put2.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
