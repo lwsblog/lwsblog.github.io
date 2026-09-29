@@ -1168,13 +1168,26 @@
     // margin, so the boxes keep their layout width and the paragraph never
     // re-wraps mid-roll; painted in the main frame like the track itself (no
     // compositor layer, no soft type), snapped to whole device pixels.
+    // The panel's two right-hand fixtures — READ and the ghost index — ride the
+    // very same shift, published on the panel as --detail-shift and consumed by
+    // their own transforms. They were the one part of the preview that still
+    // rolled straight down while everything around it leaned; READ is the
+    // panel's only control, so that mismatch read as a fault rather than as
+    // restraint. Both read one variable, which keeps the 118px axis they share
+    // from splitting: READ re-appends its skewX(-7deg) after the translate,
+    // ::before carries no transform of its own.
     var detailBodies = [];
+    var detailPanels = [];
 
     function clearDetailIndents() {
       for (var i = 0; i < detailBodies.length; i++) {
         detailBodies[i].el.style.transform = '';
       }
+      for (var j = 0; j < detailPanels.length; j++) {
+        detailPanels[j].style.removeProperty('--detail-shift');
+      }
       detailBodies = [];
+      detailPanels = [];
     }
 
     function measureDetailBodies() {
@@ -1186,6 +1199,10 @@
       for (var i = 0; i < bodies.length; i++) {
         detailBodies.push({ el: bodies[i], index: i });
       }
+      var panels = track.querySelectorAll('.stream-detail__panel');
+      for (var k = 0; k < panels.length; k++) {
+        detailPanels.push(panels[k]);
+      }
     }
 
     function updateDetailIndents(c) {
@@ -1194,8 +1211,11 @@
       if (!panelH) return;
       for (var i = 0; i < detailBodies.length; i++) {
         var item = detailBodies[i];
-        var shift = (c - item.index) * panelH * TAN7;
-        item.el.style.transform = 'translateX(' + devicePx(shift) + 'px)';
+        var shift = devicePx((c - item.index) * panelH * TAN7);
+        item.el.style.transform = 'translateX(' + shift + 'px)';
+        if (detailPanels[i]) {
+          detailPanels[i].style.setProperty('--detail-shift', shift + 'px');
+        }
       }
     }
 

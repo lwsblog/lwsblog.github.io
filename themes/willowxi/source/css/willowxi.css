@@ -2658,7 +2658,9 @@ a.archive-row:hover {
   counter-increment: detail-panel;
 }
 
-/* Ghost index fills the quiet top-right corner */
+/* Ghost index fills the quiet top-right corner. It shares READ's 118px right
+   edge, so it has to share its displacement too: one --detail-shift on the
+   panel drives both, and the axis the two sit on can never drift apart. */
 .stream-detail__panel::before {
   content: counter(detail-panel, decimal-leading-zero);
   position: absolute;
@@ -2671,6 +2673,7 @@ a.archive-row:hover {
   font-weight: 700;
   letter-spacing: 0.04em;
   -webkit-text-stroke: 1px rgba(241, 243, 245, 0.16);
+  transform: translateX(var(--detail-shift, 0px));
   pointer-events: none;
 }
 
@@ -2752,7 +2755,12 @@ a.archive-row:hover {
 }
 
 /* READ as a slanted solid plate — the same -7deg block language as the
-   group titles; the label counter-skews so the type sits upright. */
+   group titles; the label counter-skews so the type sits upright.
+   --detail-shift is the row's diagonal displacement, written per frame by
+   updateDetailIndents and 0px wherever the picker is not in charge (mobile
+   portrait, narrow landscape). The skew stays last in the list so the
+   translate runs in the panel's own axes and stays purely horizontal — a
+   skew in front would shear the offset itself. */
 .stream-detail__read {
   position: absolute;
   z-index: 1;
@@ -2768,7 +2776,7 @@ a.archive-row:hover {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.16em;
-  transform: skewX(-7deg);
+  transform: translateX(var(--detail-shift, 0px)) skewX(-7deg);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
   transition:
     background 220ms ease,
