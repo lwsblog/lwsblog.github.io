@@ -1,0 +1,20 @@
+# 换行符统一策略
+#
+# 背景：仓库偶尔在 Windows 上被 clone / 检出。Git for Windows 默认
+# core.autocrlf=true 会把文本文件检出成 CRLF，这会让两类文件坏掉：
+#
+#   * Cloudflare Pages 的 _headers / _redirects —— 部署时按行解析的配置文件
+#   * *.sh —— CRLF 会让 bash 报 `\r: command not found`
+#
+# 下列规则把这几类钉死成 LF，不管在哪个平台检出。
+
+source/_headers   text eol=lf
+source/_redirects text eol=lf
+_headers          text eol=lf
+_redirects        text eol=lf
+
+*.sh  text eol=lf
+
+# Windows 批处理反过来必须是 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
