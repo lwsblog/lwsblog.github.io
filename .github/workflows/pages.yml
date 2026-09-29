@@ -43,30 +43,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          for ep in pages health; do
-            curl -sS -H "Authorization: Bearer $GH_TOKEN" \
-                 -H "Accept: application/vnd.github+json" \
-                 -H "X-GitHub-Api-Version: 2022-11-28" \
-                 -w "\nHTTP_STATUS=%{http_code}\n" \
-                 "https://api.github.com/repos/$REPO/pages/$ep" -o "/tmp/$ep.json" || true
-          done
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
-               -H "Accept: application/vnd.github+json" \
-               -w "\nHTTP_STATUS=%{http_code}\n" \
-               "https://api.github.com/repos/$REPO/pages/builds/latest" -o /tmp/build.json || true
           mkdir -p public
-          python3 - <<'PY'
-import json
-out = {}
-for name in ("pages", "health", "build"):
-    try:
-        out[name] = json.load(open(f"/tmp/{name}.json"))
-    except Exception as e:
-        out[name] = {"_error": str(e)}
-with open("public/pages-report.json", "w") as f:
-    json.dump(out, f, ensure_ascii=False, indent=2)
-print(json.dumps(out, ensure_ascii=False, indent=2))
-PY
+          printf '{ "pages": ' > public/pages-report2.json
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages" >> public/pages-report2.json || true
+          printf ', "health": ' >> public/pages-report2.json
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages/health" >> public/pages-report2.json || true
+          printf ', "latest_build": ' >> public/pages-report2.json
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages/builds/latest" >> public/pages-report2.json || true
+          printf ' }' >> public/pages-report2.json
+          echo "--- report ---"
+          cat public/pages-report2.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
