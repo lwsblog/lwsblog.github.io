@@ -32,7 +32,7 @@ intro:
 # parallax_*: pointer parallax amplitudes in px — a larger gap between the
 # wallpaper and the grid reads as stronger depth.
 background:
-  wallpaper: /images/wallpaper/wallpaper-default.jpg
+  wallpaper: /images/wallpaper/wallpaper-default.webp
   desktop_min_width: 769
   grid_spacing: 168
   mobile_grid_spacing: 42
@@ -52,7 +52,7 @@ home:
   # Cover shown in the picker's right-hand preview when a post has neither a
   # `cover` nor a `wallpaper` of its own. Set per post in front-matter to
   # override; a real image always wins over this fallback.
-  preview_cover: /images/wallpaper/wallpaper-preview.jpg
+  preview_cover: /images/wallpaper/wallpaper-preview.webp
 
 post:
   excerpt_length: 118

@@ -2,7 +2,7 @@
 title: 用 Canvas 画一块会呼吸的网格
 date: 2026-09-20 10:24:00
 description: 从 requestAnimationFrame 的相位计算讲到 Path2D 缓存——把扫光光晕做稳的同时把帧率救回来的完整过程。
-wallpaper: /images/wallpaper/wallpaper-default.jpg
+wallpaper: /images/wallpaper/wallpaper-default.webp
 categories:
   - FRONTEND
 tags:

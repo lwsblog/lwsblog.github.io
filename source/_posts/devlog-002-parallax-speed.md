@@ -2,7 +2,7 @@
 title: DEVLOG 002：壁纸、景深与两倍速
 date: 2026-09-25 19:12:00
 description: 壁纸层移动速度调到网格的两倍，视差终于被眼睛读懂了；顺带修掉右边的黑边。
-wallpaper: /images/wallpaper/wallpaper-default.jpg
+wallpaper: /images/wallpaper/wallpaper-default.webp
 categories:
   - DEVLOG
 ---
