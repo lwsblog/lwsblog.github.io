@@ -693,10 +693,24 @@
        where the page actually is instead of lying its way to 100 — which is
        the only honest thing to do, since nothing here can be clicked yet
        anyway. */
+    /* Only what stands between the visitor and a usable page counts here. Two
+       exclusions, both load-bearing: the full-bleed wallpaper is a decorative
+       plate and must not decide whether anyone may enter — it measured 20s on
+       a thin connection — and lazy images are by definition not needed yet, so
+       a lazy image that never enters the viewport would stall the bar forever. */
     var assets = [].slice.call(
       document.querySelectorAll('img[src], link[rel="stylesheet"]')
-    );
+    ).filter(function (node) {
+      return node.loading !== 'lazy' &&
+        !node.classList.contains('scene-background__wallpaper');
+    });
     var loadDone = document.readyState === 'complete';
+    /* The gate has a fuse. Waiting for load is the point — but a visitor must
+       never be trapped behind it, and on this site that is not hypothetical:
+       the home page pulls a 3840px wallpaper that measured 20s to transfer.
+       The gate opens on load, or on the fuse, whichever lands first. */
+    var gateOpen = false;
+    var gateFuse = duration + 3500;
     var shownValue = -1;
     var actionsArmed = false;
     var exitArmed = false;
@@ -722,37 +736,62 @@
 
     /* The actions row carries "直接进入文章" and the CLICK ANYWHERE TO SKIP
        hint — both are offers to leave, so neither may appear while leaving is
-       still forbidden. It waits for load rather than for the clock. */
+       still forbidden. It waits for the gate rather than for the clock. */
     function offerActions() {
-      if (actionsArmed && loadDone) intro.classList.add('phase-actions');
+      if (actionsArmed && gateOpen) intro.classList.add('phase-actions');
     }
 
-    /* Exit waits for load instead of the clock: the shutter is a one-shot, so
-       firing it early would strand the intro on a half-played transition. When
-       load lands first (the normal case) this fires on the same beat it always
-       did — 0.90 of the duration, revealed 0.10 later. */
+    /* Exit waits for the gate instead of the clock: the shutter is a one-shot,
+       so firing it early would strand the intro on a half-played transition.
+       When load lands first (the normal case) this fires on the same beat it
+       always did — 0.90 of the duration, revealed 0.10 later. */
     function armExit() {
-      if (exitStarted || introEnded || !exitArmed || !loadDone) return;
+      if (exitStarted || introEnded || !exitArmed || !gateOpen) return;
       exitStarted = true;
       intro.classList.add('phase-exit');
       setTimer(revealPage, Math.round(duration * 0.10));
     }
 
-    function markLoaded() {
-      if (loadDone) return;
-      loadDone = true;
+    /* byFuse means the wait was abandoned: the bar is then allowed to finish
+       rather than sit at a number the visitor can no longer act on. */
+    function openGate(byFuse) {
+      if (gateOpen) return;
+      gateOpen = true;
+      if (byFuse) loadDone = true;
       if (skip) skip.disabled = false;
       intro.classList.remove('is-loading');
       offerActions();
       armExit();
     }
 
+    function markLoaded() {
+      if (loadDone) return;
+      loadDone = true;
+      openGate(false);
+    }
+
+    /* The page is usable as soon as its real dependencies are in — earlier
+       than window load, which also waits on the wallpaper above. */
+    function checkAssets() {
+      if (assets.length && assetsDone() === assets.length) markLoaded();
+    }
+
     if (loadDone) {
-      if (skip) skip.disabled = false;
+      openGate(false);
     } else {
       if (skip) skip.disabled = true;
       intro.classList.add('is-loading');
+      checkAssets();
+      /* Listening on the nodes themselves, not just on window load: that is
+         what lets a finished stylesheet open the gate while a slow image is
+         still trickling in. window load stays as the backstop, and the fuse
+         as the last one. */
+      assets.forEach(function (node) {
+        node.addEventListener('load', checkAssets, { once: true });
+        node.addEventListener('error', checkAssets, { once: true });
+      });
       window.addEventListener('load', markLoaded, { once: true });
+      setTimer(function () { openGate(true); }, gateFuse);
     }
 
     function updateProgress(now) {
@@ -778,7 +817,7 @@
     setTimer(function () { exitArmed = true; armExit(); }, duration * 0.90);
 
     intro.addEventListener('click', function (event) {
-      if (!loadDone) return;
+      if (!gateOpen) return;
       if (event.target.closest('a')) return;
       if (event.target.closest('[data-intro-enter]')) {
         revealPage({ scrollToStream: true });
@@ -788,7 +827,7 @@
     });
 
     document.addEventListener('keydown', function (event) {
-      if (event.key !== 'Escape' || !loadDone) return;
+      if (event.key !== 'Escape' || !gateOpen) return;
       revealPage();
     });
   }
