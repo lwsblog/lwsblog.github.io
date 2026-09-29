@@ -184,8 +184,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-body.intro-running,
-body.nav-open {
+/* Only the intro locks the page. The nav is a narrow strip on small screens
+   (see the 760px block), so scrolling with it open has to keep working. */
+body.intro-running {
   overflow: hidden;
 }
 
@@ -663,29 +664,42 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   transform-origin: left;
 }
 
+/* A round frame: the control reads as a portrait rather than a plate, which
+   is what the square corners made it look like. overflow hidden is what keeps
+   the face inside the circle — and it is load-bearing, see the avatar below. */
 .site-nav__icon {
+  position: relative;
   display: grid;
   width: 42px;
   height: 42px;
   margin-left: 6px;
   place-items: center;
+  overflow: hidden;
   border: 1px solid var(--line);
+  border-radius: 50%;
   transition:
     border-color 180ms ease,
     background 180ms ease,
     transform 180ms var(--ease-out);
 }
 
+/* ZOOM, not tilt. The old -4deg hover read as a wobble on a shape that has no
+   spare corner to lose; growing it says "pressable" without moving the bar's
+   rhythm. Same 180ms ease the tilt used. */
 .site-nav__icon:hover {
   border-color: var(--line-strong);
   background: var(--surface);
-  transform: rotate(-4deg);
+  transform: scale(1.08);
 }
 
-/* The "关于我" control now carries the face itself. The frame, the border and
-   the -4deg hover tilt stay exactly as they were; only the glyph inside
-   changed, so the bar's rhythm is untouched. */
+/* The "关于我" control carries the face itself, cropped to the circle.
+   Absolute inset 0 instead of width/height 100%: as a grid item the image's
+   percentage height resolves against an auto-sized row, so it fell back to
+   the intrinsic aspect ratio — fine while the box happened to be square,
+   a 428px square spilling out of a 68px strip on mobile. */
 .site-nav__avatar {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -698,6 +712,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   display: block;
   width: 24px;
   height: 24px;
+  border-radius: 50%;
   object-fit: cover;
 }
 
@@ -708,6 +723,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   margin-left: 6px;
   place-items: center;
   border: 1px solid var(--line);
+  border-radius: 50%;
   color: var(--paper);
   background: transparent;
   cursor: pointer;
@@ -717,10 +733,11 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
     transform 180ms var(--ease-out);
 }
 
+/* Matching zoom, mirrored from the avatar button. */
 .theme-toggle:hover {
   border-color: var(--line-strong);
   background: var(--surface);
-  transform: rotate(4deg);
+  transform: scale(1.08);
 }
 
 .theme-toggle__icon {
@@ -1660,9 +1677,55 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
     transform 420ms var(--ease-out);
 }
 
+/* Expand / collapse of the picker makes NO use of opacity, on purpose.
+
+   An element with opacity < 1 becomes a backdrop root, and the acrylic panel's
+   backdrop-filter: blur(14px) can then only sample what is painted inside that
+   root — which is an empty box. Measured on the real page with a high-contrast
+   probe behind the panel: at opacity 1 the panel is a flat grey blur, and at
+   opacity 0.999 the probe shows through razor sharp. So for the whole 380ms
+   fade the panel rendered as a bare dark scrim, and the moment opacity landed
+   on exactly 1 the blur snapped in at full strength — the jump that reads as a
+   lost transition. The three rules above still carry the opacity numbers for
+   the archive page (no backdrop-filter in there, nothing to cut off); here
+   they are pinned back to 1 and the fade moves to the content instead, which
+   owns no filter. */
+.stream-group .stream-group__inner,
+.stream-group[open] .stream-group__inner,
+.stream-group.is-collapsing .stream-group__inner {
+  opacity: 1;
+}
+
+/* The content keeps the fade the wrapper used to give it — same curve, same
+   delay, same 380ms — so the motion still reads as "content rises in behind
+   the height". Only the acrylic, the frame, the divider and the selection
+   plate are now uncovered by the height wipe alone; they have no type on
+   them, so a moving edge over them is not a moving edge over text. */
+.stream-picker__inner,
+.stream-cards {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.stream-group[open] .stream-picker__inner,
+.stream-group[open] .stream-cards {
+  opacity: 1;
+  /* Content starts fading almost with the height: a long delay used to leave
+     a growing empty hole that read as a flash, worst on touch GPUs. */
+  transition: opacity 380ms ease 40ms;
+}
+
+.stream-group.is-collapsing .stream-picker__inner,
+.stream-group.is-collapsing .stream-cards {
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stream-group__inner,
-  .archive-year__inner {
+  .archive-year__inner,
+  .stream-picker__inner,
+  .stream-cards {
     opacity: 1;
     transform: none;
     transition: none;
@@ -3694,17 +3757,23 @@ html.js body.route-leaving .site-header {
     padding: 0 18px;
   }
 
+  /* The open menu is a strip, not a sheet: one row under the bar, right
+     aligned exactly where the bar puts these same controls on a wide
+     viewport, so the page underneath stays visible and the menu reads as the
+     top bar rotated into a dropdown. */
   .site-nav {
     position: fixed;
     top: var(--header-height);
     right: 0;
     left: 0;
-    display: grid;
-    height: calc(100svh - var(--header-height));
-    align-content: center;
-    padding: 32px;
-    gap: 0;
+    display: flex;
+    height: auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 10px 18px;
     background: var(--mobile-nav-bg);
+    border-bottom: 1px solid var(--line);
     opacity: 0;
     pointer-events: none;
     transform: translateY(-12px);
@@ -3720,26 +3789,33 @@ html.js body.route-leaving .site-header {
   }
 
   .site-nav__link {
-    height: 84px;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-    font-size: 18px;
+    height: 42px;
+    justify-content: center;
+    padding: 0 14px;
+    border-bottom: 0;
+    font-size: 12px;
   }
 
   .site-nav__link::after {
     display: none;
   }
 
-  .site-nav__icon {
-    width: 100%;
-    height: 68px;
-    margin: 22px 0 0;
+  /* Same 42px controls as the desktop bar, so the strip's rhythm and the two
+     round buttons above it are the very same two elements. flex: 0 0 auto is
+     load-bearing: as flex items they would otherwise shrink on a narrow
+     viewport and a 42px circle squeezed to 28px is an ellipse, not a circle.
+     The links carry the give instead. */
+  .site-nav__icon,
+  .theme-toggle {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    margin-left: 6px;
   }
 
-  .theme-toggle {
-    width: 100%;
-    height: 68px;
-    margin: 12px 0 0;
+  .site-nav__link {
+    flex-shrink: 1;
+    min-width: 0;
   }
 
   .nav-toggle {

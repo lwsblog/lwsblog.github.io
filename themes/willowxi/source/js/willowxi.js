@@ -748,6 +748,10 @@
     function onScroll() {
       if (!header) return;
       header.classList.toggle('is-scrolled', window.scrollY > 24);
+      // On small screens the menu is a strip pinned under the bar rather than
+      // a sheet over the page, so it has to get out of the way once the page
+      // moves underneath it (it no longer locks the scroll either).
+      if (nav && nav.classList.contains('is-open')) closeNav();
     }
 
     onScroll();
