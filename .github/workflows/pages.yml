@@ -22,6 +22,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # enablement: true 让 Pages 被意外停用时无需人工介入即可自动重新启用，
+      # 避免部署因 "Get Pages site failed" 而中断（2026-09 证书排障时踩过此坑）。
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
@@ -38,43 +40,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Diagnose Pages API (temporary)
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          mkdir -p public
-          printf '{ "pages": ' > public/pages-report2.json
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages" >> public/pages-report2.json || true
-          printf ', "health": ' >> public/pages-report2.json
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages/health" >> public/pages-report2.json || true
-          printf ', "latest_build": ' >> public/pages-report2.json
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages/builds/latest" >> public/pages-report2.json || true
-          printf ' }' >> public/pages-report2.json
-          echo "--- report ---"
-          cat public/pages-report2.json
-
-      - name: Enable HTTPS enforcement (temporary)
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          curl -sS -X PUT \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/$REPO/pages" \
-            -d '{"cname":"willowxi.site","build_type":"workflow","https_enforced":true}' \
-            -w "\nHTTP_STATUS=%{http_code}\n" \
-            -o public/pages-put2.json || true
-          echo "--- PUT result ---"
-          cat public/pages-put2.json || true
-          printf '\n--- state after ---\n' >> public/pages-put2.json
-          curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/pages" >> public/pages-put2.json || true
-          cat public/pages-put2.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
