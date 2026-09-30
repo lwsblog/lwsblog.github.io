@@ -2344,8 +2344,10 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
      - its panel is painted with `--waline-bg-color`, which this skin maps to the
        3.5% surface token — you read the page straight through it;
      - its buttons are `2em` wide with no height of their own, so the line box
-       around each 1.5em face resolves to ~104px. That is the loose grid: one
-       row of faces eats a whole screenful and the picker scrolls forever.
+       around each face resolves to ~104px. That is the loose grid: one row of
+       faces eats a whole screenful and the picker scrolls forever. (The 104px
+       is not the line box alone: it is 24px of face plus the 2.5em top and
+       bottom margin the faces inherit from `.prose img` — see below.)
    So the panel gets the site's acrylic (the same wash the header uses) plus a
    real edge, and the cells are pinned square so 36px on the grid means 36px on
    screen. Waline's own `button:hover` still supplies the hover wash.
@@ -2368,19 +2370,33 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   margin: 2px;
 }
 
-/* The faces are `<img>` and images are draggable by default, which is what
-   swallows the press. Waline binds the insert to `onClick` on the button, but
-   the image is the topmost element at the centre of a cell, so a real press
-   lands on it — and as soon as the pointer travels a couple of pixels Edge
-   starts a native image drag instead of a click, and a drag suppresses the
-   `click` on release. The picker then reads as dead: no insert, nothing in the
-   console, and no event to catch. A synthesised `.click()` can never start a
-   drag, which is why this only ever shows up on a real pointer.
-   Taking the images out of hit testing hands every press to the button
-   underneath — buttons are not draggable, so the click always lands. Hover and
-   the `title` tooltip still resolve to the button, and nothing moves on screen:
-   only the hit target and the drag go away. */
-.comments .wl-emoji-popup button img {
+/* Every image in the picker — the faces, the tab icons, and the hover preview —
+   inherits `margin: 2.5em auto` from this skin's `.prose img` rule, and inside
+   the picker that margin is load-bearing in the wrong direction. The preview is
+   an absolutely positioned `<img>` whose inline `top` is measured from the
+   pointer, so a 40px top margin drops it 40px and lands it squarely on the face
+   you are pointing at. Zeroing the margin lifts it back above the pointer,
+   which is where Waline intends it to sit.
+   That geometry is also why the picker reads as dead. The preview is an `<img>`,
+   so it is draggable, and it is what the press actually hits — measured with a
+   real pointer: `pointerdown` resolves to `IMG.wl-emoji-preview` while
+   `pointerup` resolves to the button. The browser only fires `click` when press
+   and release share a target, so no click is dispatched at all; and if the
+   pointer travels a couple of pixels (any trackpad), Edge starts a native image
+   drag instead. Waline binds the insert to `onClick`, so the outcome is the
+   same either way: no insert, nothing in the console, no event to catch. A
+   synthesised `.click()` can never start a drag, which is why this only ever
+   shows up on a real pointer.
+   Taking the images out of hit testing hands every press to the undraggeable
+   button underneath, so the click always lands. Faces keep their rect to the
+   pixel: the cell is `inline-flex` + `align-items: center`, so the top and
+   bottom margins cancelled each other before and 0px lands the face in the same
+   pixel. Hover and the `title` tooltip still resolve to the button.
+   NOTE: `.wl-gif-popup img` has the same leak (Waline sets no margin there
+   either). It is inert while GIF search is unconfigured — that button is never
+   rendered — so it is deliberately left untouched. */
+.comments .wl-emoji-popup img {
+  margin: 0;
   pointer-events: none;
   -webkit-user-drag: none;
 }
