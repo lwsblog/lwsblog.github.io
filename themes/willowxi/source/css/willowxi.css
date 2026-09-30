@@ -2738,15 +2738,19 @@ a.archive-row:hover {
   inset: -24px;
   background-size: cover;
   background-position: center;
-  opacity: 0.4;
-  filter: saturate(0.85);
+  /* The panel is a text plate first and a picture second: the cover is a
+     ground for the title, not a gallery. Lightened from .4 (with the scrim
+     below eased from .5/.88) because a set wallpaper was reading as "no
+     image at all" — but kept below 1 so the white type still wins. */
+  opacity: 0.72;
+  filter: saturate(0.92);
 }
 
 .stream-detail__panel::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(7, 9, 12, 0.5) 0%, rgba(7, 9, 12, 0.88) 76%);
+  background: linear-gradient(180deg, rgba(7, 9, 12, 0.3) 0%, rgba(7, 9, 12, 0.72) 76%);
   pointer-events: none;
 }
 
