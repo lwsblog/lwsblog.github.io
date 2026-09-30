@@ -19,6 +19,13 @@ Cloudflare 没有这个限速 —— 但单图仍然越小越好，尤其是手�
     python tools/add-image.py a.jpg b.png --slug my-new-post --width 1600 --quality 82
     python tools/add-image.py shot.png --slug my-post --dry-run    # 只看结果不落盘
 
+    # 剪贴板直取（截图后直接跑，不用存文件、不用敲路径）
+    python tools/add-image.py --paste --slug my-new-post
+    python tools/add-image.py --paste                # slug 自动取最近改动的文章
+
+    # Markdown 自动进剪贴板，直接在编辑器里 Ctrl+V
+    python tools/add-image.py 图.png --slug my-post --copy
+
 产物
 ----
     source/images/posts/<slug>/<name>.webp
@@ -52,10 +59,85 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parent.parent
 OUT_ROOT = REPO / "source" / "images" / "posts"
+POSTS_DIR = REPO / "source" / "_posts"
 
 # 高于这个体积就提醒一下。100KB 是 GitHub Pages 的限速门槛，现在走 Cloudflare
 # 已经不卡这个数，但仍是「一篇文章十几张图」时的合理预算线。
 SOFT_LIMIT = 200 * 1024
+
+
+# --------------------------------------------------------------------------
+# 剪贴板（截图直取 / Markdown 回填）
+# --------------------------------------------------------------------------
+def clipboard_image():
+    """
+    从剪贴板取出图片，存成临时 PNG 返回路径；没有图片则返回 None。
+
+    优先用 Pillow 自带的 ImageGrab（Windows/macOS 原生支持，零依赖）。
+    它只能拿「位图」；如果剪贴板里是复制的**文件**（资源管理器里 Ctrl+C），
+    则走 Windows 的 PowerShell 取文件路径兜底。
+    """
+    try:
+        from PIL import ImageGrab
+
+        grabbed = ImageGrab.grabclipboard()
+    except Exception:
+        grabbed = None
+
+    if grabbed is None:
+        return None
+
+    # grabclipboard() 在剪贴板是「文件」时返回路径列表
+    if isinstance(grabbed, list):
+        for item in grabbed:
+            p = Path(str(item))
+            if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}:
+                return p
+        print("  剪贴板里是文件，但没有可用的图片格式")
+        return None
+
+    # 位图：落成临时 PNG
+    import tempfile
+
+    tmp = Path(tempfile.gettempdir()) / "wb-clipboard-paste.png"
+    if grabbed.mode in ("RGBA", "LA", "P"):
+        grabbed = grabbed.convert("RGBA")
+    else:
+        grabbed = grabbed.convert("RGB")
+    grabbed.save(tmp, "PNG")
+    return tmp
+
+
+def clipboard_put(text: str) -> bool:
+    """把文本放进剪贴板（Markdown 引用自动回填）。"""
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["clip"],
+            input=text.encode("utf-16-le"),
+            shell=True,
+            capture_output=True,
+            timeout=10,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def latest_post_slug() -> str | None:
+    """
+    取 source/_posts 下**最近修改**的文章文件名作为 slug。
+    剪贴板传图时省掉 --slug —— 通常你刚建完文章、正在写它。
+    """
+    try:
+        posts = [p for p in POSTS_DIR.glob("*.md") if not p.name.startswith("tmp-")]
+        if not posts:
+            return None
+        newest = max(posts, key=lambda p: p.stat().st_mtime)
+        return newest.stem
+    except Exception:
+        return None
 
 
 def human(n: int) -> str:
@@ -163,16 +245,44 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    ap.add_argument("images", nargs="+", help="要处理的图片（可多张）")
-    ap.add_argument("--slug", required=True, help="文章标识，决定存放目录（如 devlog-004-shadows）")
+    ap.add_argument("images", nargs="*", help="要处理的图片（可多张）")
+    ap.add_argument("--slug", help="文章标识，决定存放目录（默认取最近改动的文章）")
+    ap.add_argument("--paste", action="store_true", help="直接从剪贴板取图（截图后无需存文件）")
+    ap.add_argument("--copy", action="store_true", help="把 Markdown 引用写进剪贴板，直接 Ctrl+V")
     ap.add_argument("--width", type=int, default=1600, help="最长边像素上限，默认 1600")
     ap.add_argument("--quality", type=int, default=82, help="WebP 质量 1-100，默认 82")
     ap.add_argument("--dry-run", action="store_true", help="只报告体积，不写文件")
     args = ap.parse_args()
 
-    slug = sanitize(args.slug).lower()
-    if slug != args.slug.lower():
-        print(f"（slug 已规范化为：{slug}）")
+    # ---- 图片来源：--paste 优先，其次命令行路径 ----
+    sources = []
+    if args.paste:
+        got = clipboard_image()
+        if got is None:
+            print("x 剪贴板里没有图片。")
+            print("  提示：先截图（Win+Shift+S）或复制图片，再跑 --paste。")
+            return 1
+        sources.append(got)
+    sources.extend(Path(p) for p in args.images)
+
+    if not sources:
+        print("x 没有指定图片。给个路径，或用 --paste 从剪贴板取。")
+        print("  例：python tools/add-image.py 图.png --slug my-post")
+        print("      python tools/add-image.py --paste")
+        return 1
+
+    # ---- slug：参数优先，否则取最近改动的文章 ----
+    if args.slug:
+        slug = sanitize(args.slug).lower()
+        if slug != args.slug.lower():
+            print(f"（slug 已规范化为：{slug}）")
+    else:
+        inferred = latest_post_slug()
+        if not inferred:
+            print("x 没给 --slug，也推断不出文章（source/_posts 为空？）")
+            return 1
+        slug = sanitize(inferred).lower()
+        print(f"（未指定 --slug，自动用最近修改的文章：{inferred}）")
 
     print()
     print(f"目标目录：source/images/posts/{slug}/")
@@ -180,19 +290,38 @@ def main():
     print()
 
     ok, fail = 0, 0
-    for raw in args.images:
-        if convert_one(Path(raw), slug, args.width, args.quality, args.dry_run):
+    made = []
+    for src in sources:
+        dst = convert_one(src, slug, args.width, args.quality, args.dry_run)
+        if dst:
             ok += 1
+            if not args.dry_run:
+                made.append(f"![说明](/images/posts/{slug}/{dst.name})")
         else:
             fail += 1
 
+    # --paste 落下的临时 PNG 收掉，别留在 temp 里
+    if args.paste and sources and sources[0].name.startswith("wb-clipboard-paste"):
+        try:
+            sources[0].unlink()
+        except Exception:
+            pass
+
     print(f"完成：{ok} 张成功" + (f"，{fail} 张失败" if fail else ""))
-    if not args.dry_run and ok:
+
+    if ok and not args.dry_run:
+        if args.copy and made:
+            if clipboard_put("\n".join(made)):
+                print()
+                print("Markdown 已进剪贴板 —— 去编辑器里直接 Ctrl+V。")
+            else:
+                print()
+                print("（剪贴板写入失败，手动复制上面的引用）")
         print()
         print("下一步：")
-        print("    1. 把上面打印的 ![...](...) 粘进文章")
+        print("    1. 把上面的 ![...](...) 粘进文章" + ("（已在剪贴板）" if args.copy else ""))
         print("    2. git add source/images/posts/" + slug)
-        print("    3. bash deploy-cf.sh")
+        print("    3. bash publish.sh --push \"说明\"")
     return 0 if fail == 0 else 1
 
 
