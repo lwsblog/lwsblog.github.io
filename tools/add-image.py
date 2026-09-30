@@ -97,9 +97,22 @@ def clipboard_image():
         return None
 
     # 位图：落成临时 PNG
+    #
+    # 文件名带时间戳，因为临时文件的 stem 会成为产物名
+    # （source/images/posts/<slug>/<stem>.webp）。固定叫 wb-clipboard-paste 的话，
+    # 同一篇文章截第二张图就会覆盖第一张 —— 而 source/_headers 给
+    # /images/posts/* 设了一年 immutable 缓存，老访客永远看不到新图。
     import tempfile
+    import time
 
-    tmp = Path(tempfile.gettempdir()) / "wb-clipboard-paste.png"
+    tmpdir = Path(tempfile.gettempdir())
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    tmp = tmpdir / f"wb-clipboard-{stamp}.png"
+    n = 2
+    while tmp.exists():  # 同一秒内连按两次
+        tmp = tmpdir / f"wb-clipboard-{stamp}-{n}.png"
+        n += 1
+
     if grabbed.mode in ("RGBA", "LA", "P"):
         grabbed = grabbed.convert("RGBA")
     else:
@@ -109,20 +122,79 @@ def clipboard_image():
 
 
 def clipboard_put(text: str) -> bool:
-    """把文本放进剪贴板（Markdown 引用自动回填）。"""
-    try:
-        import subprocess
+    """
+    把文本放进剪贴板（Markdown 引用自动回填）。
 
-        proc = subprocess.run(
-            ["clip"],
-            input=text.encode("utf-16-le"),
-            shell=True,
-            capture_output=True,
-            timeout=10,
-        )
-        return proc.returncode == 0
+    直接调 Win32 的 SetClipboardData(CF_UNICODETEXT)，不走 `clip.exe` ——
+    clip 按控制台代码页解释 stdin，中文引用（本站图片名允许中文）会变乱码。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        u32.OpenClipboard.argtypes = [wintypes.HWND]
+        u32.OpenClipboard.restype = wintypes.BOOL
+        u32.EmptyClipboard.restype = wintypes.BOOL
+        u32.CloseClipboard.restype = wintypes.BOOL
+        u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        u32.SetClipboardData.restype = wintypes.HANDLE
+        k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k32.GlobalAlloc.restype = wintypes.HGLOBAL          # 必须显式声明，否则句柄被截断
+        k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalLock.restype = wintypes.LPVOID            # 64 位下必须用 LPVOID
+        k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalUnlock.restype = wintypes.BOOL
+        k32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalFree.restype = wintypes.HGLOBAL
+
+        buf = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-16-le") + b"\x00\x00"
+
+        # 剪贴板是全局独占资源，别的程序可能正占着 → 重试几次
+        import time
+
+        opened = False
+        for _ in range(8):
+            if u32.OpenClipboard(None):
+                opened = True
+                break
+            time.sleep(0.06)
+        if not opened:
+            raise OSError("剪贴板被其他程序占用")
+
+        try:
+            GMEM_MOVEABLE = 0x0002
+            CF_UNICODETEXT = 13
+            h = k32.GlobalAlloc(GMEM_MOVEABLE, len(buf))
+            if not h:
+                raise OSError("GlobalAlloc 失败")
+            p = k32.GlobalLock(h)
+            if not p:
+                k32.GlobalFree(h)
+                raise OSError("GlobalLock 失败")
+            ctypes.memmove(p, buf, len(buf))
+            k32.GlobalUnlock(h)
+
+            u32.EmptyClipboard()
+            if not u32.SetClipboardData(CF_UNICODETEXT, h):
+                k32.GlobalFree(h)
+                raise OSError("SetClipboardData 失败")
+            # 成功后内存所有权移交系统，不能再 free
+        finally:
+            u32.CloseClipboard()
+        return True
     except Exception:
         return False
+
+
+def clipboard_seq() -> int:
+    """
+    剪贴板「序列号」——内容一变就 +1。轮询它比每次真去抓剪贴板便宜得多，
+    适合做「监听剪贴板」的触发器。
+    """
+    import ctypes
+
+    return int(ctypes.windll.user32.GetClipboardSequenceNumber())
 
 
 def latest_post_slug() -> str | None:
@@ -165,9 +237,10 @@ def sanitize(name: str) -> str:
     return cleaned or "image"
 
 
-def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool):
+def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=print):
+    """压一张图。emit 可换成别的输出函数（GUI 用它把日志接进界面）。"""
     if not src.is_file():
-        print(f"  x 找不到文件：{src}")
+        emit(f"  x 找不到文件：{src}")
         return None
 
     before = src.stat().st_size
@@ -175,8 +248,8 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool):
         im = Image.open(src)
         im.load()
     except Exception as exc:
-        print(f"  x 读不了 {src.name}：{exc}")
-        print("    （HEIC 需要先转成 JPG/PNG；Pillow 原生不支持 HEIC）")
+        emit(f"  x 读不了 {src.name}：{exc}")
+        emit("    （HEIC 需要先转成 JPG/PNG；Pillow 原生不支持 HEIC）")
         return None
 
     orig_size = im.size
@@ -221,20 +294,19 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool):
     if orig_size == new_size:
         scale = f"{new_size[0]}x{new_size[1]}（尺寸未变）"
 
-    print(f"  {src.name}")
-    print(f"      {human(before)} → {human(after)}   {change}   {scale}")
+    emit(f"  {src.name}")
+    emit(f"      {human(before)} → {human(after)}   {change}   {scale}")
     if not dry:
         if existed:
-            print(f"      ! 覆盖了已存在的 {dst.name}")
-            print("        source/_headers 给 /images/posts/* 设了一年 immutable 缓存，")
-            print("        同名覆盖后老访客会继续看到旧图 —— 需要换图就换个文件名。")
-        print(f"      {rel_dir}/{stem}.webp")
+            emit(f"      ! 覆盖了已存在的 {dst.name}")
+            emit("        source/_headers 给 /images/posts/* 设了一年 immutable 缓存，")
+            emit("        同名覆盖后老访客会继续看到旧图 —— 需要换图就换个文件名。")
+        emit(f"      {rel_dir}/{stem}.webp")
     if after >= before:
-        print("      ! 转 WebP 反而更大（纯色 / 矢量风格图常见）—— 这类图建议直接用原格式引用")
+        emit("      ! 转 WebP 反而更大（纯色 / 矢量风格图常见）—— 这类图建议直接用原格式引用")
     elif after > SOFT_LIMIT:
-        print(f"      ! 仍超过 {human(SOFT_LIMIT)} —— 可考虑 --width 1200 或 --quality 75")
-    print(f"      ![说明](/images/posts/{slug}/{stem}.webp)")
-    print()
+        emit(f"      ! 仍超过 {human(SOFT_LIMIT)} —— 可考虑 --width 1200 或 --quality 75")
+    emit(f"      ![说明](/images/posts/{slug}/{stem}.webp)")
 
     return dst
 
@@ -301,7 +373,7 @@ def main():
             fail += 1
 
     # --paste 落下的临时 PNG 收掉，别留在 temp 里
-    if args.paste and sources and sources[0].name.startswith("wb-clipboard-paste"):
+    if args.paste and sources and sources[0].name.startswith("wb-clipboard-"):
         try:
             sources[0].unlink()
         except Exception:

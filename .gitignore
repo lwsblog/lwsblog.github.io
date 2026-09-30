@@ -6,3 +6,19 @@ node_modules/
 public/
 .deploy*/
 _multiconfig.yml
+
+# 写作台（tools/willowxi-studio.py）的本地配置：开关状态、图片参数
+.studio-prefs.json
+
+# PyInstaller 打包产物（build-exe.sh）：spec 文件、中间目录、生成的图标
+build/
+
+# Python 字节码缓存
+__pycache__/
+
+# 本地工具：只在本机跑，不进仓库。
+# ⚠️ 必须在这里挡住 —— publish.sh 用的是 `git add -A`，
+#    不忽略的话下次发文章会把它们一起卷进提交推上去。
+tools/willowxi-studio.py
+tools/make-icon.py
+build-exe.sh
