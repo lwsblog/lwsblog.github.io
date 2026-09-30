@@ -2273,7 +2273,14 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   --waline-bq-color: var(--surface-soft);
   --waline-code-bg-color: var(--code-bg);
   --waline-badge-color: var(--cyan);
-  --waline-avatar-radius: 2px;
+  /* The face wears the same plate as the bar controls: zero radius, and a size
+     that matches the other portrait on the site (.friends__avatar, 40px).
+     --waline-box-shadow stays `none` on purpose — Waline spends that token on
+     the editor panel, the emoji/gif popups and the verify badge too, so the
+     halo is written directly on the avatar rule below instead. */
+  --waline-avatar-radius: 0;
+  --waline-avatar-size: 40px;
+  --waline-m-avatar-size: 34px;
   --waline-box-shadow: none;
   font-family: inherit;
 }
@@ -2315,6 +2322,50 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 
 .prose .comments .wl-rss svg path:last-child {
   fill: var(--muted);
+}
+
+/* The commenter's face, rebuilt as one of the bar's plates. Two of Waline's own
+   rules argue with this, and both are outranked by specificity rather than
+   source order (waline.css loads last, so a tie would go to Waline):
+     - `[data-waline] img { border-style: none }` strips any border an image
+       carries inside the widget, so the 1px edge has to be re-stated here;
+     - `margin: 0` undoes `.prose img { margin: 2.5em auto }`. That 40px top
+       margin is what floated the face down to the vertical middle of the card —
+       killing it is what puts the plate back on the nickname's line.
+   object-fit keeps the square crop from stretching a non-square source. */
+.comments .wl-cards .wl-user .wl-user-avatar {
+  margin: 0;
+  border: 1px solid var(--control-edge);
+  box-shadow: 0 0 12px var(--control-glow);
+  object-fit: cover;
+}
+
+/* The emoji picker carries two faults that only surface once it is open:
+     - its panel is painted with `--waline-bg-color`, which this skin maps to the
+       3.5% surface token — you read the page straight through it;
+     - its buttons are `2em` wide with no height of their own, so the line box
+       around each 1.5em face resolves to ~104px. That is the loose grid: one
+       row of faces eats a whole screenful and the picker scrolls forever.
+   So the panel gets the site's acrylic (the same wash the header uses) plus a
+   real edge, and the cells are pinned square so 36px on the grid means 36px on
+   screen. Waline's own `button:hover` still supplies the hover wash.
+   Radius goes to 0 — round corners belong to prose on this site, not chrome. */
+.comments .wl-emoji-popup {
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--scene-acrylic);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 22px 44px -16px rgba(0, 0, 0, 0.6);
+}
+
+.comments .wl-emoji-popup button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 2px;
 }
 
 .friends__grid {
