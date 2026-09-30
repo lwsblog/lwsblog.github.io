@@ -2368,6 +2368,23 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   margin: 2px;
 }
 
+/* The faces are `<img>` and images are draggable by default, which is what
+   swallows the press. Waline binds the insert to `onClick` on the button, but
+   the image is the topmost element at the centre of a cell, so a real press
+   lands on it — and as soon as the pointer travels a couple of pixels Edge
+   starts a native image drag instead of a click, and a drag suppresses the
+   `click` on release. The picker then reads as dead: no insert, nothing in the
+   console, and no event to catch. A synthesised `.click()` can never start a
+   drag, which is why this only ever shows up on a real pointer.
+   Taking the images out of hit testing hands every press to the button
+   underneath — buttons are not draggable, so the click always lands. Hover and
+   the `title` tooltip still resolve to the button, and nothing moves on screen:
+   only the hit target and the drag go away. */
+.comments .wl-emoji-popup button img {
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
 .friends__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
