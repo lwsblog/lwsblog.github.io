@@ -87,13 +87,13 @@ new_post() {
 preview() {
   step "构建"
   rm -rf public db.json
-  ./node_modules/.bin/hexo generate >/dev/null 2>&1 || die "构建失败，跑 ./node_modules/.bin/hexo generate 看详情"
+  ./node_modules/.bin/hexo generate >/dev/null 2>&1 || die "构建失败，请运行 ./node_modules/.bin/hexo generate 查看详情"
   ok "产物 $(find public -type f | wc -l) 个文件"
 
   local blocked
   blocked="$(scan_blocked)"
   if [ -n "$blocked" ]; then
-    warn "检测到占位/测试文章（预览无妨，但 --push 会上线）："
+    warn "检测到占位/测试文章（--push 会上线）："
     echo "$blocked" | sed 's/^/      /'
   fi
 
@@ -174,7 +174,7 @@ run_checks() {
     page_posts="$(grep -c 'class="stream-row"' public/index.html 2>/dev/null || echo 0)"
     # 首页列出的是全部文章（per_page: 0），两者应一致
     if [ "$src_posts" != "$page_posts" ]; then
-      echo "${RED}  ✗ 源文件 ${src_posts} 篇，首页只列出 ${page_posts} 篇 —— 有文章没渲染出来${RST}"
+      echo "${RED}  ✗ 源文件 ${src_posts} 篇，首页仅列出 ${page_posts} 篇，存在未渲染的文章${RST}"
       fail=1
     else
       ok "文章数一致（${src_posts} 篇全部渲染）"
@@ -219,7 +219,7 @@ run_checks() {
 # =============================================================================
 push_live() {
   local msg="${1:-}"
-  run_checks || die "自检未通过，已中止（没有推送任何东西）"
+  run_checks || die "自检未通过，已中止，未推送"
 
   step "变更预览"
   git status --short | sed 's/^/  /'
