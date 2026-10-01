@@ -1,0 +1,14 @@
+---
+title: devlog 004 compression chain
+date: 2026-10-01 01:36:35
+tags:
+wallpaper: /images/wallpaper/devlog-004-compression-chain.webp
+---
+
+## 这条链是怎么串起来的
+
+从截图到上线，写作台一路都是同一个方向：**取图 → 压到上限 → 落盘 → 把 Markdown 引用放进剪贴板**。体积上限是这轮新加的：它不只按质量和最长边压，还会盯着最终字节数，超了就继续降质量、必要时缩尺寸，直到落进上限以内。
+
+![说明](/images/posts/devlog-004-compression-chain/clipboard-2026-09-30T17-26-45-018Z-057d0ce1.webp)
+
+文章的壁纸也是同一套处理，只是落点换成了主题的壁纸目录，并把 `wallpaper:` 写进 front-matter。

@@ -14,6 +14,11 @@
   const orderedGroups = Array.from(groups.entries()).sort(function(a, b) {
     return b[1][0].date.valueOf() - a[1][0].date.valueOf();
   });
+  // Same source as layout.ejs: the preview cover falls back to the site
+  // wallpaper, so a post with no image of its own shows one and the same
+  // plate in the list and on the article page.
+  const coverFallback = (theme.background && theme.background.wallpaper)
+    || '/images/wallpaper/wallpaper-default.webp';
 %>
 
 <section class="home-hero">
@@ -121,7 +126,7 @@
                     <div class="stream-detail__track" data-stream-track>
                       <% posts.forEach(function(post) {
                         const excerptText = strip_html(post.excerpt || post.content || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-                        const coverValue = post.cover || post.wallpaper || (theme.home && theme.home.preview_cover) || '';
+                        const coverValue = post.wallpaper || coverFallback;
                         const cover = coverValue
                           ? (/^(?:[a-z]+:)?\/\//i.test(coverValue) || coverValue.indexOf('data:') === 0 ? coverValue : url_for(coverValue))
                           : '';

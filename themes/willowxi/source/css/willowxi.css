@@ -1625,9 +1625,16 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   background: var(--paper);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
   color: var(--ink);
-  font-size: clamp(24px, 3.4vw, 42px);
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  /* Han-first stack. The mono stack carries no CJK face, so a Chinese
+     group name used to fall through to the system serif; Noto Sans SC is
+     a variable font, which is what makes the 250 weight possible at all.
+     The CJK faces after it are the fallback for visitors who lack Noto. */
+  font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC",
+    "Microsoft YaHei", var(--font-mono);
+  font-variation-settings: "wght" 250;
+  font-size: clamp(28px, 4.4vw, 52px);
+  font-weight: 250;
+  letter-spacing: 0.12em;
   line-height: 1.25;
   transform: skewX(-7deg);
 }
@@ -2055,30 +2062,6 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-}
-
-.article__cover {
-  position: relative;
-  margin: 66px 0 0;
-  border: 1px solid var(--line);
-}
-
-.article__cover img {
-  width: 100%;
-  max-height: 720px;
-  object-fit: cover;
-}
-
-.article__cover figcaption {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  padding: 6px 8px;
-  color: #ffffff;
-  background: rgba(9, 11, 15, 0.78);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
 }
 
 .article__layout {
@@ -3527,8 +3510,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .standalone__body {
     var(--post-fly-delay) both;
 }
 
-/* Tier 2 — supporting panels: the cover and the standalone divider rule. */
-html.js body.is-post.route-ready:not(.route-leaving) .article__cover,
+/* Tier 2 — supporting panels: the standalone divider rule. */
 html.js body.is-post.route-ready:not(.route-leaving) .standalone__rule {
   animation: post-fly-in-soft var(--post-fly-duration-soft) var(--ease-out)
     calc(var(--post-fly-delay) + var(--post-fly-stagger)) both;
@@ -3577,7 +3559,6 @@ html.js body.is-post.route-ready:not(.route-leaving)
     .article__body,
     .archive-years,
     .standalone__body,
-    .article__cover,
     .standalone__rule,
     .article__toc,
     .article__footer,
@@ -4140,10 +4121,6 @@ html.js body.route-leaving .site-header {
   .article__meta {
     gap: 12px;
     flex-direction: column;
-  }
-
-  .article__cover {
-    margin-top: 44px;
   }
 
   .article__layout {

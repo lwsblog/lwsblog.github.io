@@ -19,12 +19,26 @@ Cloudflare 没有这个限速 —— 但单图仍然越小越好，尤其是手�
     python tools/add-image.py a.jpg b.png --slug my-new-post --width 1600 --quality 82
     python tools/add-image.py shot.png --slug my-post --dry-run    # 只看结果不落盘
 
+    # 按体积上限压：自动降质量、必要时缩尺寸，直到落进 200KB
+    python tools/add-image.py 大图.png --slug my-post --max-size 200
+
     # 剪贴板直取（截图后直接跑，不用存文件、不用敲路径）
     python tools/add-image.py --paste --slug my-new-post
     python tools/add-image.py --paste                # slug 自动取最近改动的文章
 
     # Markdown 自动进剪贴板，直接在编辑器里 Ctrl+V
     python tools/add-image.py 图.png --slug my-post --copy
+
+体积上限怎么够的
+----------------
+`--max-size` 不保证「画质最好」，只保证「落进这个体积」。手段按损耗从小到大：
+
+1. 先在 `--quality` 直接试 —— 够小就一个字节都不多动；
+2. 不够就在 `[25, --quality]` 上**二分**，找能过线里质量最高的那档；
+3. 质量压到 25 还超，才**缩尺寸**（每次 ×0.85）重来，最多 8 轮。
+
+先把质量压到底不是好选择：质量 25 的 WebP 已经有块状伪影，而把 1920px 缩到
+1400px 配 70 的质量，肉眼基本无损。压不下去会明确报错，不会偷偷写一张超标的图。
 
 产物
 ----
@@ -237,8 +251,65 @@ def sanitize(name: str) -> str:
     return cleaned or "image"
 
 
-def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=print):
-    """压一张图。emit 可换成别的输出函数（GUI 用它把日志接进界面）。"""
+def encode_webp(im, quality: int) -> bytes:
+    """把图编码成 WebP 字节（不落盘）—— 体积上限要反复试，必须先在内存里量。"""
+    import io
+
+    buf = io.BytesIO()
+    im.save(buf, "WEBP", quality=quality, method=6)
+    return buf.getvalue()
+
+
+# 压到上限时的下限：质量不再低于 MIN_QUALITY，尺寸不再小于 MIN_SIDE
+MIN_QUALITY = 25
+MIN_SIDE = 240
+FIT_STEPS = 8
+
+
+def fit_under(im, max_bytes: int, quality: int):
+    """
+    把 im 压到 max_bytes 之内，返回 (字节, 图, 实际质量)；压不下去返回 (None, None, 0)。
+
+    两级手段：**先降质量**（在 [25, quality] 上二分，要「能过的最小损耗」），
+    质量压到底还超，才**缩尺寸**（每次 ×0.85）重来。
+
+    为什么不是一路降质量：质量 25 的 WebP 已经能看见块状伪影，而把 1920px
+    缩到 1400px 再给 70 的质量，肉眼几乎无损 —— 先动尺寸更划算。
+    """
+    cur = im
+    for _ in range(FIT_STEPS):
+        if len(encode_webp(cur, quality)) <= max_bytes:      # 上限质量就够小，直接收工
+            return encode_webp(cur, quality), cur, quality
+
+        lo, hi, best = MIN_QUALITY, quality, None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            data = encode_webp(cur, mid)
+            if len(data) <= max_bytes:
+                best = (data, mid)
+                lo = mid + 1                                 # 够小 → 往上试更大的质量
+            else:
+                hi = mid - 1
+        if best:
+            return best[0], cur, best[1]
+
+        if min(cur.size) <= MIN_SIDE:                        # 已经没得缩了
+            break
+        cur = cur.resize((max(1, round(cur.width * 0.85)), max(1, round(cur.height * 0.85))),
+                         Image.LANCZOS)
+    return None, None, 0
+
+
+def prepare(src: Path, width: int, quality: int, max_bytes: int = 0, emit=print):
+    """
+    读图 → 按 EXIF 摆正 → 缩到 width → （可选）压到 max_bytes。
+
+    返回 dict(data/im/quality/orig/before)，失败返回 None 并自己 emit 原因。
+
+    单独抽出来，是因为「落进 /images/posts/」和写作台的「设为文章壁纸（落进
+    /images/wallpaper/）」只差一个落点名字，处理这一段必须完全一致 ——
+    否则壁纸会绕过体积上限。
+    """
     if not src.is_file():
         emit(f"  x 找不到文件：{src}")
         return None
@@ -263,25 +334,46 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=
 
     # thumbnail 只在超出时才缩，不动尺寸比例
     im.thumbnail((width, width), Image.LANCZOS)
-    new_size = im.size
+
+    if max_bytes > 0:
+        data, fitted, quality = fit_under(im, max_bytes, quality)
+        if data is None:
+            emit(f"  x {src.name} 压不到 {human(max_bytes)} 以内"
+                 f"（质量已到底 {MIN_QUALITY}，尺寸已缩到 {MIN_SIDE}px 下限）")
+            return None
+        if fitted is not None:
+            im = fitted
+    else:
+        data = encode_webp(im, quality)
+
+    return {"data": data, "im": im, "quality": quality, "orig": orig_size, "before": before}
+
+
+def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=print,
+                max_bytes: int = 0):
+    """压一张图落到 source/images/posts/<slug>/。emit 可换成别的输出函数（GUI 用它接日志）。
+
+    max_bytes > 0 时改为「压到该体积以内」：质量与尺寸由 fit_under() 反推。
+    """
+    got = prepare(src, width, quality, max_bytes, emit)
+    if got is None:
+        return None
+
+    data, im, quality = got["data"], got["im"], got["quality"]
+    before, orig_size, new_size = got["before"], got["orig"], im.size
+    after = len(data)
+    capped = max_bytes > 0
 
     stem = sanitize(src.stem)
     dst_dir = OUT_ROOT / slug
     dst = dst_dir / f"{stem}.webp"
 
     if dry:
-        # 内存里压一遍，只为报告体积，不写盘
-        import io
-
-        buf = io.BytesIO()
-        im.save(buf, "WEBP", quality=quality, method=6)
-        after = buf.tell()
         existed = False
     else:
         dst_dir.mkdir(parents=True, exist_ok=True)
-        existed = dst.exists()  # 必须在 save 之前判断，否则永远是「刚被自己写出来」
-        im.save(dst, "WEBP", quality=quality, method=6)
-        after = dst.stat().st_size
+        existed = dst.exists()  # 必须在写盘之前判断，否则永远是「刚被自己写出来」
+        dst.write_bytes(data)
 
     delta = before - after  # 正数 = 变小
     if delta >= 0:
@@ -296,6 +388,8 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=
 
     emit(f"  {src.name}")
     emit(f"      {human(before)} → {human(after)}   {change}   {scale}")
+    if capped:
+        emit(f"      已压到上限 {human(max_bytes)} 内（质量 {quality}）")
     if not dry:
         if existed:
             emit(f"      ! 覆盖了已存在的 {dst.name}")
@@ -304,7 +398,7 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=
         emit(f"      {rel_dir}/{stem}.webp")
     if after >= before:
         emit("      ! 转 WebP 反而更大（纯色 / 矢量风格图常见）—— 这类图建议直接用原格式引用")
-    elif after > SOFT_LIMIT:
+    elif not capped and after > SOFT_LIMIT:
         emit(f"      ! 仍超过 {human(SOFT_LIMIT)} —— 可考虑 --width 1200 或 --quality 75")
     emit(f"      ![说明](/images/posts/{slug}/{stem}.webp)")
 
@@ -323,6 +417,8 @@ def main():
     ap.add_argument("--copy", action="store_true", help="把 Markdown 引用写进剪贴板，直接 Ctrl+V")
     ap.add_argument("--width", type=int, default=1600, help="最长边像素上限，默认 1600")
     ap.add_argument("--quality", type=int, default=82, help="WebP 质量 1-100，默认 82")
+    ap.add_argument("--max-size", type=int, default=0, metavar="KB",
+                    help="压缩后文件大小上限（KB）；给了就自动降质量/缩尺寸去够它，0=不限")
     ap.add_argument("--dry-run", action="store_true", help="只报告体积，不写文件")
     args = ap.parse_args()
 
@@ -358,13 +454,16 @@ def main():
 
     print()
     print(f"目标目录：source/images/posts/{slug}/")
-    print(f"参数：最长边 {args.width}px，质量 {args.quality}" + ("（dry-run，不写盘）" if args.dry_run else ""))
+    print(f"参数：最长边 {args.width}px，质量 {args.quality}"
+          + (f"，上限 {args.max_size}KB" if args.max_size > 0 else "")
+          + ("（dry-run，不写盘）" if args.dry_run else ""))
     print()
 
     ok, fail = 0, 0
     made = []
     for src in sources:
-        dst = convert_one(src, slug, args.width, args.quality, args.dry_run)
+        dst = convert_one(src, slug, args.width, args.quality, args.dry_run,
+                          max_bytes=args.max_size * 1024)
         if dst:
             ok += 1
             if not args.dry_run:

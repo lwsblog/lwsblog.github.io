@@ -25,13 +25,6 @@
     </div>
   </header>
 
-  <% if (page.cover) { %>
-    <figure class="article__cover">
-      <img src="<%- url_for(page.cover) %>" alt="<%= page.title %>">
-      <figcaption>WILLOWXI / VISUAL NOTE</figcaption>
-    </figure>
-  <% } %>
-
   <% var tocHtml = theme.post.toc !== false ? toc(page.content).trim() : ''; %>
   <div class="article__layout<%= tocHtml ? '' : ' article__layout--no-toc' %>">
     <% if (tocHtml) { %>

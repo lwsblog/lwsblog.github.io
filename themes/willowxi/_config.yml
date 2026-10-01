@@ -12,10 +12,10 @@ identity:
   # The face on the "关于我" controls (header button + home hero button).
   # Leave empty to fall back to the line-art user icon.
   avatar: /images/avatar.jpg
-  eyebrow: PHOTOGRAPHY / AI / CODE
+  eyebrow: PHOTOGRAPHY / LIFE / CODE
   tagline: 'さぁ下剋上、自分を越えていけ！'
   description: '记录光影、AI 与编程，也收录仍在生长的日常。'
-  location: CN / SHANGHAI
+  location: CN / BEIJING
   status: ONLINE
 
 # The full-screen sequence is shown on the home page. Visitors can skip it
@@ -49,10 +49,6 @@ home:
   direct_entry: '直接进入文章'
   stream_title: 'SIGNAL GROUPS'
   stream_description: '按主题折叠整理。选择一组，展开阅读。'
-  # Cover shown in the picker's right-hand preview when a post has neither a
-  # `cover` nor a `wallpaper` of its own. Set per post in front-matter to
-  # override; a real image always wins over this fallback.
-  preview_cover: /images/wallpaper/wallpaper-preview.webp
 
 post:
   excerpt_length: 118
