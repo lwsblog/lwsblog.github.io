@@ -4664,9 +4664,16 @@ html[data-theme="light"] .gallery-board {
      — and the script writes 1 on its very first frame, where the print
      covers the viewport anyway. */
   --acrylic-k: 0;
-  background: rgba(9, 11, 15, calc(0.66 * var(--acrylic-k)));
-  -webkit-backdrop-filter: blur(calc(13px * var(--acrylic-k)));
-  backdrop-filter: blur(calc(13px * var(--acrylic-k)));
+  /* 22px of blur, not 13. Reported as "the acrylic blur is too weak on the
+     screen": over a 1440px grid the 13px plate left the photographs under it
+     still readable as pictures, which is the opposite of what a plate between
+     the print and the grid is for. At 22px what is under it is only colour and
+     light. The alpha went up with it (0.66 → 0.74) because the two work as one
+     wash and blur alone leaves the grid's contrast intact. Both still scale
+     with --acrylic-k, so the plate reaches exactly "not there" at 0. */
+  background: rgba(9, 11, 15, calc(0.74 * var(--acrylic-k)));
+  -webkit-backdrop-filter: blur(calc(22px * var(--acrylic-k)));
+  backdrop-filter: blur(calc(22px * var(--acrylic-k)));
   pointer-events: none;
 }
 
@@ -4674,7 +4681,7 @@ html[data-theme="light"] .gallery-board {
    photographs, the pale paper wash under the light theme's. Same values the
    scene background and the header panel use. */
 html[data-theme="light"] .photo-acrylic {
-  background: rgba(244, 245, 242, calc(0.72 * var(--acrylic-k)));
+  background: rgba(244, 245, 242, calc(0.78 * var(--acrylic-k)));
 }
 
 /* --- the masthead: ONE element, start to finish ---------------------------
@@ -4700,10 +4707,24 @@ html[data-theme="light"] .photo-acrylic {
   z-index: 32;
   top: calc(var(--header-height) + 30px);
   left: clamp(20px, 4vw, 64px);
-  text-align: left;
+  text-align: center;
   pointer-events: none;
   transform-origin: 0 0;
   will-change: transform;
+  /* shrink-to-fit. As a block with `right: auto` the box was stretched and
+     then clamped by the viewport — 350px wide on a 390px phone — while the
+     title itself is only 144px of glyphs. So the resting box was 253px, the
+     travel centred *that*, and the title sat at the left edge of it: on a
+     phone the heading that should be centred on the screen was neither
+     centred nor enlarged.
+
+     The centring is load-bearing rather than decorative. The box is sized by
+     its widest line — the caption, 253.1px — not by the title's 168px, so
+     centring the BOX only centres the title when the title is centred inside
+     it. Measured before this rule, with the box centre at x=720 on a 1440px
+     viewport: the title's glyphs ran 200 to 368, i.e. centred on 284. The
+     three lines are one stack and are aligned as one. */
+  width: max-content;
   /* --mast-s is the masthead's current scale, written by JS. The halos
      divide by it for the same reason .photo-screen's shadow does: a
      transform scales text-shadow with the text, and a 20px glow on a 21px
@@ -4977,6 +4998,23 @@ html[data-theme="light"] .photo-frame.is-dragging {
   grid-column: 1 / -1;
 }
 
+/* The cell the print lands on is EMPTY until the print arrives. Seeing the
+   destination show the same photograph the print is carrying — the print
+   shrinking across the screen while its own cell sits there legible, one
+   photo in two places — is exactly the "two of the same image" the whole
+   single-take build exists to avoid.
+
+   `visibility`, not `opacity` and not `display`: an element below opacity 1
+   becomes a backdrop root, which would kill the acrylic plate's blur at the
+   one site where it matters most, and `display: none` would take the cell out
+   of the grid and make the arrival jump. visibility keeps the box, so the
+   grid's geometry — measured at 2362.5px tall on a 390px phone — is byte for
+   byte the same before and after, and the hand-off stays exact. Toggled by
+   scroll position every frame, so it comes back on the way up. */
+.photo-frame.is-vacant {
+  visibility: hidden;
+}
+
 /* The lightbox is reparented to <body> while it is open (see photos.js):
    .app-shell is a stacking context at z-index 1, so a layer left inside it can
    never climb over the frozen bar at 261 no matter what z-index it carries.
@@ -5164,6 +5202,23 @@ body.is-gallery-static .photo-masthead__title {
   padding-top: 0;
 }
 
+/* 🔴 The label and the caption are dropped on phones, and the title is not.
+   The heading is scaled up to fill most of the viewport there, so a secondary
+   line cannot survive: measured on a 390px screen, "22 FRAMES / 18 LANDSCAPE /
+   4 PORTRAIT" is 343px at rest — 88% of the viewport before any scaling — and
+   at the heading's 2.08× it runs to 714px, so it rendered 160→504 against a
+   390px viewport and read as "AMES / 18 LANDSCAPE / 4 POR". The alternative was
+   to hold the heading to 1.35× (28px) so the caption would fit, which trades
+   the page's h1 for a tally line nobody came for. The collection total is still
+   on the page: the album header below carries it, and every frame carries its
+   own number in the grid. Desktop keeps all three lines. */
+@media (max-width: 760px) {
+  .photo-masthead__label,
+  .photo-masthead__sub {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .gallery-board {
     inset: -12px -12px 0;
@@ -5173,19 +5228,26 @@ body.is-gallery-static .photo-masthead__title {
     height: 190vh;
   }
 
-  .photo-masthead__title {
-    font-size: 18px;
-  }
+  /* No font-size override here any more. The 18px cap held the phone title to
+     24px on a 390px screen and made it read as a caption; the travel's own
+     clamp (the viewport minus the margins, expressed against the title's
+     glyphs) is what bounds it, and it is the same bound at every width. */
 
   .photo-screen {
-    padding: 8px 8px 26px;
+    padding: 8px 8px 32px;
   }
 
   /* The print's caption and mat scale with the box, so on a phone — where
-     the print starts at 2.6× the cell — the desktop 11px/38px becomes a
-     100px white band with the date pushed off the edge. The cell's own
-     padding is 8/8/32, and the print has to match it at scale 1 for the
-     hand-off to be seamless, so the mat is trimmed, not the caption. */
+     the print starts at 2.6× the cell — a 38px mat becomes a 100px white band
+     with the date pushed off the edge. What the mat has to be is the CELL's
+     padding exactly: the hand-off is the print at scale 1 standing where the
+     cell is, and if the two disagree the print's photograph covers a different
+     box than the cell's does, so the image shifts and re-crops as the print
+     takes over. The cell is 8/8/32 here and this used to be 26, which made the
+     print's content area 6px taller than the cell's at scale 1 — measured as
+     dh=6 in the hand-off probe, with both sides on object-fit: cover, i.e. a
+     real crop difference rather than a rounding artefact. Zero on the desktop,
+     where the two are both 11/11/38. */
   .photo-screen__cap {
     right: 8px;
     bottom: 8px;

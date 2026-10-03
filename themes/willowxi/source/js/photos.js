@@ -64,6 +64,7 @@
     // The masthead lives OUTSIDE .gallery on purpose: it has to outlive the
     // screen, which is dropped from the layer tree the moment it lands.
     var masthead = document.querySelector('[data-photo-masthead]');
+    var mastTitle = document.querySelector('[data-photo-mast-title]');
     var mastLabel = document.querySelector('[data-photo-mast-label]');
     var mastSub = document.querySelector('[data-photo-mast-sub]');
 
@@ -83,6 +84,31 @@
     // grid shows the print's own photograph at the spot it is flying
     // towards: one photo, two copies, both legible.
     var TAIL = 260;
+    // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
+    // own linear parameter posT (so it is relative to the travel, not to a
+    // fixed pixel count, and it retraces identically on the way up):
+    //
+    //   ACRYLIC_FROM — the plate starts closing, and this is the number the
+    //                  "the acrylic is not on yet when I start scrolling"
+    //                  report is about. Measured on a 390×844 screen: the white
+    //                  paper edge comes into the viewport at scrollY 450 (t=0.32)
+    //                  and is already 46px wide by scrollY 562 (t=0.40) — while
+    //                  at 0.42 the plate was still at k=0.000 there, because
+    //                  0.42 of the print parameter is scrollY 529. A bare white
+    //                  edge over a fully sharp grid is the visible seam. 0.25
+    //                  starts the fade at scrollY 433, just before the edge
+    //                  appears, and the print is still covering the viewport
+    //                  (its content box is 844px tall against a 844px viewport
+    //                  out to t=0.30), so the opening itself stays clean.
+    //   ACRYLIC_TO   — the plate is fully closed, and it has to be BEFORE the
+    //                  landing cell becomes readable. Measured, the first grid
+    //                  cell enters the viewport at posT 0.62 on a 360–430px
+    //                  phone and at 0.845 on 1440×900, so 0.55 leaves margin at
+    //                  both ends. Verified k=1.000 at the frame the cell touches
+    //                  the viewport on 360, 390, 430, 768, 1024, 1280, 1440 and
+    //                  1920.
+    var ACRYLIC_FROM = 0.25;
+    var ACRYLIC_TO = 0.55;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -96,7 +122,14 @@
     var startY = 0;
     var mastFrom = null;
     var mastTo = null;
-    var landed = false;
+    // Not "the screen has landed" but "the screen has been retired": the print
+    // stays in the layer tree once it lands so the whole travel can play again
+    // on the way up. See the tail of render().
+    var retired = false;
+    var vacant = false;
+    // Latched by the font re-measure and by teardown, so the fonts.ready
+    // callback can run at most once per page and never after a PJAX navigation.
+    var hasReseat = false;
     var frameRequest = 0;
     var detachers = [];
 
@@ -199,30 +232,77 @@
       // --- the masthead. Its rest position is the stylesheet's; read it back
       // with the transform cleared so an in-flight frame cannot poison the
       // measurement, then compute where it starts: centred on the screen.
-      if (masthead) {
+      //
+      // 🔴 What is measured is the title's GLYPH box, via a Range. Neither the
+      // element's own box nor the masthead's box will do:
+      //   - the masthead's box is as wide as its widest line (the caption,
+      //     253.1px) while the title's glyphs are 168px on the desktop, so
+      //     centring that box centres the caption's box, not the title;
+      //   - the title element is a block, so its box is its parent's content
+      //     width, not its text. Measured: 253.1px again.
+      // The glyph box is the only honest number, and it is what has to fit the
+      // viewport. The stylesheet centres the type inside the box
+      // (.photo-masthead is text-align: center), so a measure anchored on the
+      // glyphs puts the glyphs on the screen's centre line exactly.
+      var anchor = mastTitle || masthead;
+      if (masthead && anchor) {
+        // 🔴 Measured in TWO steps, and the second one is the one that matters.
+        //
+        // Step 1, transform cleared: the title's GLYPH box. Neither the
+        // masthead's box nor the title's own box will do — the masthead is
+        // sized to its widest line (253.1px, the caption) and the title is a
+        // block, so its box is that same 253.1px, while the glyphs are 164.6px.
+        // The clamp has to be expressed against what actually has to fit: on
+        // the box it put the phone title at 1.356× (28px, caption-sized, which
+        // is the "not enlarged" report) instead of 2.084× (43.8px).
+        //
+        // Step 2, transform APPLIED: where the glyphs actually land. A scale
+        // does not merely multiply the offset of a left-aligned run — the text
+        // is laid out again inside the scaled border box, so it re-centres
+        // inside a box that is now s·253.1 wide. Multiplying the untransformed
+        // glyph offset by the scale gets this wrong by 141.5px on a 1440px
+        // viewport (predicted 779.15 against an actual landing of 814.06), and
+        // the error scales with the applied size, so no fixed correction
+        // exists. Doing it the other way round — pick the scale, ask the
+        // browser where the glyphs landed, then translate by the difference —
+        // cannot be wrong about any layout rule.
         var parked = masthead.style.transform;
         masthead.style.transform = 'none';
-        var rest = masthead.getBoundingClientRect();
-        masthead.style.transform = parked;
+        // Force a synchronous layout before reading: a rect read in the same
+        // task as the transform change can still describe the previous layout.
+        void masthead.offsetWidth;
+        var rest = anchor.getBoundingClientRect();
+        if (mastTitle) {
+          var probe = document.createRange();
+          probe.selectNodeContents(mastTitle);
+          var originGlyphs = probe.getBoundingClientRect();
+          // A zero-width glyph box means the title is empty or not laid out;
+          // the element box is then the better of the two bad options.
+          if (originGlyphs.width) rest = originGlyphs;
+        }
 
-        // The title reads at 21px in the corner (a stylesheet value) and at
-        // 21 × bigScale on the screen, so the screen size is expressed as a
-        // ratio of the resting one rather than as a second font-size written
-        // from JS. transform-origin is 0 0, so the measured left/top are the
-        // element's own top-left and the start offset has to cancel them out
-        // — the transform is applied on top of the stylesheet's position, not
-        // instead of it.
-        //
-        // The wish is clamped to the viewport. The block is as wide as its
-        // widest line (the frame tally), and 4.2 × 253px is 1063px, which
-        // fits 1440 but runs 217px off a 390px phone — the title used to sit
-        // at x=-109 there.
+        // The clamp protects the margin and is measured against the glyphs:
+        // 390×0.88/164.6 = 2.084 on a phone, and 1440×0.88/164.6 = 7.7 on the
+        // desktop, where the wish of 4.2 binds instead.
         var wish = size.width < 760 ? 2.4 : 4.2;
         var bigScale = Math.min(wish, (size.width * 0.88) / rest.width);
+
+        masthead.style.transform = 'scale(' + bigScale + ')';
+        void masthead.offsetWidth;
+        var landed = anchor.getBoundingClientRect();
+        if (mastTitle) {
+          var probe2 = document.createRange();
+          probe2.selectNodeContents(mastTitle);
+          var landedGlyphs = probe2.getBoundingClientRect();
+          if (landedGlyphs.width) landed = landedGlyphs;
+        }
+        masthead.style.transform = parked;
+
         mastTo = { x: 0, y: 0, scale: 1 };
+        // translation = target centre − where the scaled glyphs actually are.
         mastFrom = {
-          x: (size.width - rest.width * bigScale) / 2 - rest.left,
-          y: (size.height - rest.height * bigScale) / 2 - rest.top,
+          x: size.width / 2 - (landed.left + landed.width / 2),
+          y: size.height / 2 - (landed.top + landed.height / 2),
           scale: bigScale
         };
       }
@@ -266,15 +346,20 @@
       // the print carries a 315px halo at the start of the travel.
       screen.style.setProperty('--screen-s', scale.toFixed(4));
 
-      // The masthead runs 0.06 -> 0.66, finishing before the print: the title
-      // is the first thing to settle, so by the time the print is small the
-      // corner already looks like a header rather than a caption in flight.
+      // The masthead runs 0.18 -> 0.62, inside the print's own stretch. It used
+      // to run 0.06 -> 0.66 and that start is why the reversal was broken even
+      // after the layers stopped being destroyed: coming back up from the
+      // landing spot the very first pixel of scroll moved the title, so the
+      // header detached from its corner while the print was still sitting at
+      // rest on its cell and the acrylic had not begun to move. Starting it at
+      // the print's own 0.18 welds the two: nothing moves until the print does,
+      // in either direction, and both settle together before the landing.
       // It is never faded: it goes from centred-and-large to parked at its
       // stylesheet position and stays there for the rest of the page. Only the
       // label and the tally leave, and they leave early — they belong to the
       // splash, not to the header.
       if (masthead && mastFrom && mastTo) {
-        var titleT = segment(t, 0.06, 0.66);
+        var titleT = segment(t, 0.18, 0.62);
         var mScale = lerp(mastFrom.scale, mastTo.scale, titleT);
         var mx = lerp(mastFrom.x, mastTo.x, titleT);
         var my = lerp(mastFrom.y, mastTo.y, titleT);
@@ -284,38 +369,80 @@
         if (mastSub) mastSub.style.opacity = String(1 - segment(t, 0.04, 0.26));
       }
 
-      // The acrylic holds the grid down for the whole approach and only lifts
-      // once the print has touched down. Full strength while the print is
-      // airborne, because that is exactly the stretch where the grid would
-      // otherwise show the print's own photograph sitting at the spot the
-      // print is flying towards: one photo, two copies, both legible.
+      // The acrylic exists for the moment the grid comes into view under the
+      // print. Its envelope is a function of the PRINT's own linear parameter,
+      // NOT of the acrylic's own progress through the tail.
       //
-      // t=0 takes 1, not 0. The print covers the viewport there, so the value
-      // is invisible either way, but starting at 0 would mean the grid
-      // flashing clear for the first frames before the veil came up, which is
-      // exactly the seam this layer exists to remove.
-      // The tail, not t: the veil holds full strength for the entire travel
-      // and only starts lifting once the print has touched down, so the grid
-      // is never bare while the print is airborne beside it.
+      // Both ways of driving it from the tail were tried and both are wrong:
+      //   - linear in the tail (1 - after/tailRange): a full-strength plate
+      //     3px after the landing, so it snapped off the instant the print
+      //     touched down and the visitor never saw it;
+      //   - eased in the tail (what shipped in f1ab3e8): the easing put the
+      //     plate at 0.98 while the print was still at scale 1.93, so by the
+      //     time the grid entered the viewport (measured at 90% of the travel,
+      //     1743px of 1937px) only the last 10% of the scroll was left to see
+      //     anything at all.
+      // Driven from the print, the plate is exactly as visible as the print's
+      // own approach is long: it closes over the first 10% of the travel (while
+      // the print fills the viewport anyway) and holds full strength for the
+      // remaining 72% — the whole stretch where the grid is on screen. Then it
+      // lifts over the tail once the print has touched down, so the grid is
+      // never bare while the print is airborne beside it.
+      //
+      // A function of t rather than of a one-way flag is also what makes the
+      // whole thing reversible for free: scrolling up retraces the envelope
+      // exactly, so the plate comes back before the print leaves its cell.
       if (acrylic) {
-        acrylic.style.setProperty('--acrylic-k', (1 - segment(after, 0, tailRange)).toFixed(4));
+        // The inverse of the curve below, so the plate's motion and the print's
+        // motion stay locked to the same parameter in both directions. Easing a
+        // tail-derived value instead would put the two on different clocks and
+        // the reversal would run at the wrong speed.
+        var kIn = Math.pow(clamp01((posT - ACRYLIC_FROM) / (ACRYLIC_TO - ACRYLIC_FROM)), 1 / 3);
+        acrylic.style.setProperty('--acrylic-k', (kIn * (1 - segment(after, 0, tailRange))).toFixed(4));
       }
 
-      // Once the print is down it is display:none, which also takes its
-      // will-change layer off the compositor. The layer exists only for the
-      // animation; leaving it promoted afterwards would be pure waste. The
-      // masthead is untouched by this — it is what stays.
-      if (after >= tailRange && !landed) {
-        landed = true;
-        screen.style.display = 'none';
-        if (acrylic) acrylic.style.display = 'none';
-        if (screenHint) screenHint.style.display = 'none';
-        document.body.classList.remove('is-gallery-screen');
+      // The cell the print is flying towards is EMPTY until the print is
+      // sitting on it: with its own photograph on show there, the travel reads
+      // as two copies of one image. Not "after it has landed" — AT the landing,
+      // where the print covers the cell and the swap happens underneath it, so
+      // the print takes over from the cell rather than appearing beside it.
+      // One-way on the way down, one-way on the way up, and derived purely from
+      // scroll position, so there is no state to drift.
+      if (frames.length) {
+        var wantVacant = after < 1;
+        if (wantVacant !== vacant) {
+          vacant = wantVacant;
+          frames[0].classList.toggle('is-vacant', vacant);
+        }
+      }
+
+      // Once the print is down it is taken off the layer tree with
+      // `visibility: hidden`, which is what retires its will-change layer: the
+      // layer exists for the animation and leaving it promoted afterwards is
+      // pure waste. It used to be `display: none` plus a `return` in onScroll,
+      // which is what made the travel a one-way trip — after landing there was
+      // no print and no listener left, so scrolling back up showed a still
+      // page. visibility (not display) keeps the element in the layout and
+      // keeps the frame loop running, so the same code both keeps it retired at
+      // rest and brings it back the moment the visitor scrolls up: the print
+      // rises out of its cell, the cell empties again and the plate closes over
+      // the grid before the print is clear of it.
+      var wantRetired = after >= tailRange;
+      if (wantRetired !== retired) {
+        retired = wantRetired;
+        screen.style.visibility = retired ? 'hidden' : '';
+        // The plate's last job is covering the print's own cell on the way
+        // down; once the print is retired there is nothing left for it to hide.
+        // Dropped so it cannot sit over the grid while the visitor reads it —
+        // and it is put back before the print comes out again, because the
+        // class only goes away at rest.
+        if (acrylic) acrylic.style.visibility = retired ? 'hidden' : '';
+        if (screenHint) screenHint.style.visibility = retired ? 'hidden' : '';
+        document.body.classList.toggle('is-gallery-screen', !retired);
       }
     }
 
     function onScroll() {
-      if (landed) return;
       if (frameRequest) return;
       frameRequest = window.requestAnimationFrame(function () {
         frameRequest = 0;
@@ -329,25 +456,18 @@
       // Every number the animation uses is viewport-relative, so a resize has
       // to re-measure before the next frame is drawn.
       measure();
-      if (landed) {
-        screen.style.display = 'none';
-        if (acrylic) acrylic.style.display = 'none';
-        if (screenHint) screenHint.style.display = 'none';
-        document.body.classList.remove('is-gallery-screen');
-        // The masthead is still on screen after landing, so a resize has to
-        // re-aim it or it drifts away from its resting place.
-        if (masthead && mastTo) masthead.style.transform = 'none';
-        return;
-      }
       onScroll();
     }
 
     function settle() {
-      landed = true;
+      // The screen's image never loaded. Retire the layers without turning the
+      // travel one-way: `retired` stays tied to scroll position, so scrolling
+      // up still hands the page back to the masthead and the grid.
+      retired = true;
       if (screenVeil) screenVeil.style.opacity = '0';
-      if (screenHint) screenHint.style.display = 'none';
-      screen.style.display = 'none';
-      if (acrylic) acrylic.style.display = 'none';
+      if (screenHint) screenHint.style.visibility = 'hidden';
+      screen.style.visibility = 'hidden';
+      if (acrylic) acrylic.style.visibility = 'hidden';
       document.body.classList.remove('is-gallery-screen');
       if (masthead) masthead.style.transform = 'none';
       if (mastLabel) mastLabel.style.opacity = '';
@@ -412,6 +532,23 @@
       // A deep link or a restored scroll position can land past the screen
       // before this runs; render() has to see that, not assume zero.
       onScroll();
+
+      // The first measure() can in principle run before the web font has
+      // landed, and a font swap changes the title's width — which is what the
+      // clamp and the centring are measured against. In practice the
+      // `void masthead.offsetWidth` above makes the first pass correct even on
+      // a cold cache (verified: at 1440×900 and 390×844 with caching disabled
+      // the very first frame already reads the real face's 164.6px glyph box),
+      // so this is a safety net rather than a fix. It is coalesced into one
+      // pass, and `hasReseat` is the teardown latch so a PJAX navigation cannot
+      // leave a timer running against a replaced shell.
+      detachers.push(function () { hasReseat = true; });
+      window.setTimeout(function () {
+        if (hasReseat) return;
+        hasReseat = true;
+        measure();
+        onScroll();
+      }, 1200);
     }
 
     /* ---- 2. lightbox --------------------------------------------------- */
@@ -643,7 +780,13 @@
       frames.forEach(function (frame) {
         frame.style.transform = '';
         frame.classList.remove('is-dragging');
+        // The vacant class is scroll state, not authored markup: a PJAX
+        // navigation that reuses this DOM must not hand a hidden cell to the
+        // next page.
+        frame.classList.remove('is-vacant');
       });
+      vacant = false;
+      retired = false;
       // The masthead lives outside .gallery, so a PJAX navigation that
       // replaces the shell would otherwise leave it stranded on the page.
       if (masthead) {
@@ -653,6 +796,7 @@
         if (mastSub) mastSub.style.opacity = '';
       }
       screen.style.display = '';
+      screen.style.visibility = '';
       screen.style.transform = '';
       screen.style.removeProperty('--screen-w');
       screen.style.removeProperty('--screen-h');
@@ -660,10 +804,12 @@
       screen.style.removeProperty('--screen-s');
       if (acrylic) {
         acrylic.style.display = '';
+        acrylic.style.visibility = '';
         acrylic.style.removeProperty('--acrylic-k');
       }
       if (screenHint) {
         screenHint.style.display = '';
+        screenHint.style.visibility = '';
         screenHint.style.opacity = '';
       }
     }
