@@ -1,3 +1,27 @@
+/* Ubuntu Mono, latin subset only, self-hosted (no external request, and the
+   same vendor treatment as waline.css). Two weights are all the family has, so
+   every 800/900 on the site falls back to 700 -- that is a deliberate look,
+   not an accident to patch later. The unicode-range stops at Latin: any Han
+   character walks past this face untouched and lands on the serif the mono
+   stack has always fallen through to. src: themes/willowxi/source/fonts/ */
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/ubuntu-mono-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/ubuntu-mono-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --ink: #090b0f;
   --ink-soft: #10141a;
@@ -107,8 +131,12 @@
   /* Trailing layer: footer and prev/next — a plain lift, no blur. */
   --post-fly-distance-tail: 18px;
   --post-fly-duration-tail: 850ms;
-  --font-sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
-  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
+  /* Ubuntu Mono leads both stacks. It has no Han in it, so every Chinese
+     character walks straight past it to the face that was already there --
+     the sans stack keeps YaHei, the mono stack keeps falling through to the
+     system serif exactly as before. Only Latin and digits change hands. */
+  --font-sans: "Ubuntu Mono", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+  --font-mono: "Ubuntu Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 html[data-theme="light"] {
@@ -1623,7 +1651,12 @@ html.js body.intro-running .site-search__panel {
 .home-hero__name {
   position: relative;
   width: fit-content;
-  font-family: var(--font-mono);
+  /* Pinned off the variable on purpose. The site runs on Ubuntu Mono now,
+     but this is the one name that stays Cascadia Code 900 -- it is the
+     largest type on the site and the only place the 900 weight is asked
+     for at a size where the difference between 900 and 700 is a whole
+     silhouette. Ubuntu Mono has no 900 to give it. */
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: clamp(56px, 10.4vw, 142px);
   font-weight: 900;
   letter-spacing: -0.06em;
