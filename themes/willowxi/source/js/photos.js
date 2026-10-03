@@ -54,6 +54,7 @@
   function createGallery(root, options) {
     var settings = options || {};
     var screen = root.querySelector('[data-photo-screen]');
+    var acrylic = root.querySelector('[data-photo-acrylic]');
     var spacer = root.querySelector('[data-gallery-spacer]');
     var main = root.querySelector('[data-photo-main]');
     var lightbox = root.querySelector('[data-photo-lightbox]');
@@ -73,14 +74,26 @@
 
     var reduced = prefersReducedMotion();
     var scrollRange = 1;
+    var tailRange = 1;
+    // How much scroll is left over after the print has touched down, for the
+    // acrylic to lift in. The print lands at t=1 (a projection, so the
+    // landing is exact) and the veil then gets this many pixels of extra
+    // scroll to leave in. Without the tail the veil would have to start
+    // leaving while the print was still airborne, which is exactly when the
+    // grid shows the print's own photograph at the spot it is flying
+    // towards: one photo, two copies, both legible.
+    var TAIL = 260;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
+    //   start   — where the print's top-left sits at t=0 (see measure)
     //   mast    — where the masthead starts and where it rests
     // Filled in by measure().
     var cell = null;
     var screenBox = null;
     var startScale = 1;
+    var startX = 0;
+    var startY = 0;
     var mastFrom = null;
     var mastTo = null;
     var landed = false;
@@ -114,35 +127,71 @@
       screen.style.setProperty('--screen-w', boxW + 'px');
       screen.style.setProperty('--screen-h', boxH + 'px');
 
-      // It starts large enough to read as a screen, centred, and on a phone
-      // it starts by HEIGHT. There the cell is already full-width, so a
-      // width-derived scale lands at 1.0 and the print never grows — the
-      // screen and the cell end up the same size and there is no travel to
-      // watch. 0.42 rather than 0.52 because the mat and the caption scale
-      // with the box: at 0.52 the 26px band under the photo is 100px tall
-      // with the date hanging at the very edge.
-      // On a desktop the width share is the binding one instead.
-      startScale = size.width < 760
-        ? (size.height * 0.42) / boxH
-        : Math.min((size.width * 0.86) / boxW, (size.height * 0.78) / boxH);
+      // --- the print opens FULL-BLEED: the photograph fills the viewport.
+      // The box is the cell's aspect ratio (a 3:2 frame with its caption
+      // strip is ~1.21:1), not the viewport's, and that ratio has to hold for
+      // the whole travel — a non-uniform scale would re-crop the photograph
+      // as it shrank and hand off to a cell showing a different crop. So
+      // "full bleed" is cover, not stretch: the print is scaled until its
+      // CONTENT area (box minus mat) covers the viewport, and the mat itself
+      // is pushed off screen. It then slides back into view as the print
+      // shrinks, so the paper edge arrives rather than being there all along.
+      //
+      // Measuring the mat instead of hard-coding it is what keeps this honest
+      // across the phone breakpoint, where the padding is 8/8/26 rather than
+      // 11/11/38. getComputedStyle reports the untransformed padding, so an
+      // in-flight transform cannot poison the number.
+      //
+      // The box it replaced started at 86% x 78% of the viewport — a screen
+      // floating in the middle of the page, which is not what the page opens
+      // on. The old phone branch (height * 0.42) existed because a
+      // width-derived scale hit 1.0 on a full-width cell and the print never
+      // travelled; cover subsumes that case and gives it more travel, not
+      // less.
+      var cs = window.getComputedStyle(screen);
+      var padL = parseFloat(cs.paddingLeft) || 0;
+      var padT = parseFloat(cs.paddingTop) || 0;
+      var contentW = Math.max(1, boxW - padL - (parseFloat(cs.paddingRight) || 0));
+      var contentH = Math.max(1, boxH - padT - (parseFloat(cs.paddingBottom) || 0));
+      startScale = Math.max(size.width / contentW, size.height / contentH);
+      // The CONTENT area is centred in the viewport, not the box: the mat is
+      // asymmetric (11 top / 38 bottom for the caption strip), so centring
+      // the box would leave that strip hanging inside the frame and push the
+      // photograph off-centre. Offsetting by the mat puts the photograph
+      // exactly on the viewport and the paper edge out of sight.
+      startX = (size.width - contentW * startScale) / 2 - padL * startScale;
+      startY = (size.height - contentH * startScale) / 2 - padT * startScale;
 
-      // --- where the cell will be when the travel ends. The travel ends
-      // with the first cell already on screen — a cell below the fold is not
-      // a landing — so the range is derived from that cell, not from the
-      // spacer. (The grid below is far taller than the travel, so the
-      // document always has room to scroll the rest of the way afterwards.)
+      // --- the landing spot, and the two ranges the travel is measured in.
+      // The travel ends with the first cell already on screen (a cell below
+      // the fold is not a landing), so the range comes from that cell, not
+      // from the spacer.
       var cellTop = cellRect ? cellRect.top + window.scrollY : 0;
-      var wanted = cellTop - size.height * 0.42;
       var reachable = document.documentElement.scrollHeight - size.height;
-      scrollRange = Math.max(1, Math.round(Math.min(wanted, reachable)));
+      // A PROJECTION held constant for the whole travel, not the cell's live
+      // position. Aiming at the live position makes the print chase a cell
+      // that is still below the fold: at t=0.7 that cell is at 959 on a 900px
+      // viewport, so the print followed it off the bottom edge and the middle
+      // of the travel showed nothing but acrylic. A fixed spot keeps the print
+      // on screen from the first frame to the last, and it is still exact,
+      // because at t=1 the cell arrives at that spot by construction.
+      //
+      // Clamped HERE rather than on the range afterwards, and with max not
+      // min: 0.42*vh is the spot we want, but if the document is too short
+      // to scroll the cell that far up then the deepest position it can
+      // reach (cellTop - reachable) is the landing spot instead. Either way
+      // print and cell coincide at t=1, which is what makes the landing
+      // exact rather than merely close.
+      var landY = Math.max(size.height * 0.42, cellTop - reachable);
+      scrollRange = Math.max(1, Math.round(cellTop - landY));
+      tailRange = Math.max(1, Math.round(Math.min(TAIL, reachable - scrollRange)));
 
       cell = {
-        // The projection, not the live rect: aiming at where the cell
-        // happens to be sends the print past the bottom edge for the whole
-        // second half of the travel. At t=1 the two coincide, so the landing
-        // is still exact.
         x: cellRect ? cellRect.left : 0,
-        y: size.height * 0.42,
+        // The projection (see above). Past the landing the per-frame code
+        // subtracts the travelled tail from this, which is arithmetically the
+        // same as following the cell and keeps the two welded.
+        y: landY,
         width: boxW,
         height: boxH
       };
@@ -186,35 +235,44 @@
       if (screenVeil) screenVeil.style.opacity = String(1 - veilT);
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
-      // The print: 0.18 -> 1, one scale, one position, both interpolated
-      // linearly in the same eased parameter. Nothing else is written, so the
-      // photograph is the same photograph at every frame — including t=0,
-      // where the transform still has to be written, because the element's
-      // own top-left is 0,0 and an unwritten transform leaves a 215px print
-      // sitting in the corner of the screen.
+      // The print: 0.18 -> 1, one scale, one position, both interpolated in
+      // the same eased parameter. Nothing else is written, so the photograph
+      // is the same photograph at every frame, including t=0, where the
+      // transform still has to be written: the element's own top-left is 0,0
+      // and an unwritten transform leaves a 215px print in the corner.
       //
-      // The travel has to END at t=1, not short of it. The print's target is
-      // a projection — the place the cell WILL be when the travel ends — so
-      // any printT that reaches 1 before t=1 parks the print at that spot
-      // while the cell is still travelling towards it, and the last stretch
-      // of scrolling shows the print hanging in mid-air with the cell sliding
-      // up underneath. At 0.92 that was a 97px gap over 155px of scroll, and
-      // the snap only happened because the print was display:none'd on arrival.
-      // Ending both at t=1 makes the two coincide at every frame's end and
-      // leaves no stall to hide.
+      // `after` is how far past the landing the page has scrolled. For that
+      // stretch the print rides its cell — the cell's viewport top is exactly
+      // (cell.y - after) — which is what lets the landing stay exact while the
+      // acrylic lifts afterwards.
+      var after = Math.max(0, window.scrollY - scrollRange);
+      // Position runs LINEARLY, scale stays eased. The cell climbs at a
+      // constant rate (the page scrolls at one rate), so a print that eases
+      // into its position lags the scroll for the whole approach and then has
+      // to catch up in the last few percent. At t=0.7 the eased parameter was
+      // already 0.99, which pinned the print to a cell still 59px BELOW the
+      // fold: the print left the viewport entirely and the middle of the
+      // travel showed nothing but acrylic. Linear position keeps the print
+      // moving with the scroll from the first frame. Both parameters still
+      // finish together at t=1, so the landing is exact either way.
+      var posT = clamp01((t - 0.18) / 0.82);
       var printT = segment(t, 0.18, 1);
-      var size = viewport();
       var scale = lerp(startScale, 1, printT);
-      var x = lerp((size.width - cell.width * startScale) / 2, cell.x, printT);
-      var y = lerp((size.height - cell.height * startScale) / 2, cell.y, printT);
+      var x = lerp(startX, cell.x, posT);
+      var y = lerp(startY, cell.y, posT) - after;
       screen.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
       // A transform scales a box-shadow and a text-shadow along with their
       // box, so both are divided by the current scale in CSS. Without this
       // the print carries a 315px halo at the start of the travel.
       screen.style.setProperty('--screen-s', scale.toFixed(4));
 
-      // The masthead: the same single transform, running slightly ahead of
-      // the print so the title arrives first and waits. It is never hidden.
+      // The masthead runs 0.06 -> 0.66, finishing before the print: the title
+      // is the first thing to settle, so by the time the print is small the
+      // corner already looks like a header rather than a caption in flight.
+      // It is never faded: it goes from centred-and-large to parked at its
+      // stylesheet position and stays there for the rest of the page. Only the
+      // label and the tally leave, and they leave early — they belong to the
+      // splash, not to the header.
       if (masthead && mastFrom && mastTo) {
         var titleT = segment(t, 0.06, 0.66);
         var mScale = lerp(mastFrom.scale, mastTo.scale, titleT);
@@ -222,19 +280,35 @@
         var my = lerp(mastFrom.y, mastTo.y, titleT);
         masthead.style.transform = 'translate(' + mx + 'px, ' + my + 'px) scale(' + mScale + ')';
         masthead.style.setProperty('--mast-s', mScale.toFixed(4));
-        // The two small lines belong to the screen, not to the corner. They
-        // go early and stay gone — the title is the only thing that travels.
         if (mastLabel) mastLabel.style.opacity = String(1 - segment(t, 0.04, 0.26));
         if (mastSub) mastSub.style.opacity = String(1 - segment(t, 0.04, 0.26));
+      }
+
+      // The acrylic holds the grid down for the whole approach and only lifts
+      // once the print has touched down. Full strength while the print is
+      // airborne, because that is exactly the stretch where the grid would
+      // otherwise show the print's own photograph sitting at the spot the
+      // print is flying towards: one photo, two copies, both legible.
+      //
+      // t=0 takes 1, not 0. The print covers the viewport there, so the value
+      // is invisible either way, but starting at 0 would mean the grid
+      // flashing clear for the first frames before the veil came up, which is
+      // exactly the seam this layer exists to remove.
+      // The tail, not t: the veil holds full strength for the entire travel
+      // and only starts lifting once the print has touched down, so the grid
+      // is never bare while the print is airborne beside it.
+      if (acrylic) {
+        acrylic.style.setProperty('--acrylic-k', (1 - segment(after, 0, tailRange)).toFixed(4));
       }
 
       // Once the print is down it is display:none, which also takes its
       // will-change layer off the compositor. The layer exists only for the
       // animation; leaving it promoted afterwards would be pure waste. The
       // masthead is untouched by this — it is what stays.
-      if (t >= 1 && !landed) {
+      if (after >= tailRange && !landed) {
         landed = true;
         screen.style.display = 'none';
+        if (acrylic) acrylic.style.display = 'none';
         if (screenHint) screenHint.style.display = 'none';
         document.body.classList.remove('is-gallery-screen');
       }
@@ -257,6 +331,7 @@
       measure();
       if (landed) {
         screen.style.display = 'none';
+        if (acrylic) acrylic.style.display = 'none';
         if (screenHint) screenHint.style.display = 'none';
         document.body.classList.remove('is-gallery-screen');
         // The masthead is still on screen after landing, so a resize has to
@@ -272,6 +347,7 @@
       if (screenVeil) screenVeil.style.opacity = '0';
       if (screenHint) screenHint.style.display = 'none';
       screen.style.display = 'none';
+      if (acrylic) acrylic.style.display = 'none';
       document.body.classList.remove('is-gallery-screen');
       if (masthead) masthead.style.transform = 'none';
       if (mastLabel) mastLabel.style.opacity = '';
@@ -582,6 +658,10 @@
       screen.style.removeProperty('--screen-h');
       if (screenVeil) screenVeil.style.opacity = '';
       screen.style.removeProperty('--screen-s');
+      if (acrylic) {
+        acrylic.style.display = '';
+        acrylic.style.removeProperty('--acrylic-k');
+      }
       if (screenHint) {
         screenHint.style.display = '';
         screenHint.style.opacity = '';

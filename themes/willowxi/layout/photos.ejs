@@ -37,6 +37,17 @@
 </div>
 
 <div class="gallery" data-gallery>
+  <!-- The global acrylic. One full-viewport plate that sits BETWEEN the grid
+       and the print: it blurs and dims the whole column while the print is
+       still travelling, and fades out as the print lands. Without it the grid
+       is naked the moment the print shrinks off it, and the cell the print is
+       flying towards — the same photograph, its own landing site — shows
+       through beside it, so one travel reads as two copies of one photo.
+       The plate fades by animating --acrylic-k (see willowxi.css); it is
+       never taken to opacity < 1, which would make it its own backdrop root
+       and kill its own blur. -->
+  <div class="photo-acrylic" data-photo-acrylic aria-hidden="true"></div>
+
   <!-- The screen is a print the size of the viewport, not a full-bleed
        photograph. It holds the SAME aspect ratio as the grid cell it lands
        on, so the whole travel is one continuous scale of one box: the crop
@@ -51,7 +62,13 @@
     <div class="photo-screen__veil" data-photo-screen-veil></div>
     <figcaption class="photo-screen__cap" data-photo-screen-cap>
       <span><%= stamp(cover ? cover.date : '') %></span>
-      <span><%= String(photos.length).padStart(2, '0') %></span>
+      <!-- The print IS the head of the grid (see the `ordered` list above),
+           so its tally has to be the tally that cell shows — "01", not the
+           collection total. With the total here the arrival swapped 22 -> 01
+           on the one frame where the print hands over to its own cell, which
+           is a visible edit in the middle of a transition that is supposed to
+           have no seam. The collection total lives in the masthead's sub. -->
+      <span>01</span>
     </figcaption>
   </figure>
 

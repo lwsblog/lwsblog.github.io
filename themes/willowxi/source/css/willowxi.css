@@ -4638,6 +4638,45 @@ html[data-theme="light"] .gallery-board {
   z-index: 1;
 }
 
+/* --- the global acrylic: one plate between the grid and the print --------
+   This is not the backboard above and it is not the print's own veil. It is
+   a full-viewport layer that exists only for the travel: it blurs and dims
+   everything under the print, so the grid is never naked while the print is
+   still shrinking off it. Without it the cell the print is flying towards —
+   which is the print's own photograph, sitting at its own landing site —
+   shows through beside the print and the whole travel reads as two copies of
+   one image instead of one image moving.
+
+   It fades by animating --acrylic-k, written by JS every frame. NOT opacity:
+   any element below opacity 1 becomes a backdrop root, and its own
+   backdrop-filter then has nothing to sample (the .stream-picker trap on the
+   home page). Writing the factor into the colour's alpha *and* the blur
+   radius keeps the filter live for the whole fade, and at --acrylic-k: 0 it
+   is fully transparent over blur(0px) — exactly "not there", reached without
+   ever taking the element off the compositor mid-fade. */
+.photo-acrylic {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  /* Defaults to 0, not 1: with no JS (or before the first frame lands) this
+     layer must be invisible. The grid being briefly bare is a much smaller
+     failure than a permanent full-page blur over content nobody can un-blur
+     — and the script writes 1 on its very first frame, where the print
+     covers the viewport anyway. */
+  --acrylic-k: 0;
+  background: rgba(9, 11, 15, calc(0.66 * var(--acrylic-k)));
+  -webkit-backdrop-filter: blur(calc(13px * var(--acrylic-k)));
+  backdrop-filter: blur(calc(13px * var(--acrylic-k)));
+  pointer-events: none;
+}
+
+/* The plate is always the scene's own wash: dark under the dark theme's
+   photographs, the pale paper wash under the light theme's. Same values the
+   scene background and the header panel use. */
+html[data-theme="light"] .photo-acrylic {
+  background: rgba(244, 245, 242, calc(0.72 * var(--acrylic-k)));
+}
+
 /* --- the masthead: ONE element, start to finish ---------------------------
    It holds the title while the screen is up, walks it into the top-left
    corner, and stays there. The previous build faded the screen's own type out
@@ -5102,6 +5141,7 @@ body.is-gallery-screen .site-header.is-scrolled {
    of .gallery (it has to outlive the screen), so a descendant selector never
    reached it and the h1 stayed pinned in the corner. */
 body.is-gallery-static .photo-screen,
+body.is-gallery-static .photo-acrylic,
 body.is-gallery-static .photo-screen__hint,
 body.is-gallery-static .gallery-spacer {
   display: none;
