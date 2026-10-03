@@ -778,6 +778,217 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   transform: rotate(-45deg) scale(0.72);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Search: a 120px well to the left of INDEX, same light as the two plates
+   beside it. Not a plate itself — it is a field, so it takes the quiet edge
+   and earns the halo only while it holds a query. */
+.site-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 42px;
+  margin-right: 10px;
+  transition: opacity 500ms var(--ease-out);
+}
+
+.site-search__field {
+  display: flex;
+  width: 120px;
+  height: 42px;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+  transition:
+    width 260ms var(--ease-out),
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms var(--ease-out);
+}
+
+.site-search__field:hover {
+  border-color: var(--control-edge);
+}
+
+.site-search.is-active .site-search__field {
+  width: 176px;
+  border-color: var(--control-edge);
+  background: var(--surface);
+  box-shadow: 0 0 12px var(--control-glow);
+}
+
+.site-search__input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  outline: 0;
+  color: var(--paper);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.site-search__input::placeholder {
+  color: var(--muted);
+  letter-spacing: 0.12em;
+}
+
+/* The engine's own clear button is a rounded pill in every UA stylesheet and
+   would be the only round corner left in the chrome. */
+.site-search__input::-webkit-search-cancel-button,
+.site-search__input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.site-search__input:focus-visible {
+  outline: 0;
+}
+
+/* Results drop from the field's right edge, not its left edge: the field sits
+   ~308px from the viewport's right side, so a panel left-aligned to it would
+   hang off-screen. The right edge is shared with the bar's own right edge. */
+.site-search__panel {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 420px;
+  max-height: min(58vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  border: 1px solid var(--line-strong);
+  background: var(--scene-acrylic);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.site-search__panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.site-search__panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.site-search__panel::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  background: var(--line-strong);
+}
+
+.site-search__panel[hidden] {
+  display: none;
+}
+
+/* The panel rides on the same opacity as the bar. During the seam and the
+   intro the bar drops out, and a panel left floating over the curtain would
+   be the one thing on screen that the transition forgot to hide. */
+html.js body.route-blackout .site-search__panel,
+html.js body.intro-running .site-search__panel {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.site-search__status {
+  padding: 14px 16px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.site-search__item {
+  display: block;
+  padding: 11px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--paper-dim);
+  text-decoration: none;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.site-search__item:last-child {
+  border-bottom: 0;
+}
+
+.site-search__item:hover,
+.site-search__item.is-active {
+  color: var(--paper);
+  background: var(--surface);
+}
+
+/* The site's one marker for "this row is the one under the cursor": a 2px bar
+   on the leading edge, not a fill or a border on all four sides. */
+.site-search__item.is-active {
+  box-shadow: inset 2px 0 0 var(--control-edge);
+}
+
+/* Title and date share one baseline row, but the title gets the space: a
+   wrapped title used to push the date into the middle of the second line.
+   min-width: 0 on the flex item is load-bearing — without it the title's
+   intrinsic width refuses to shrink and never wraps at all. */
+.site-search__title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--paper);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.site-search__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-search__cat {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
+.site-search__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.site-search__date {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
 /* The third member of the family, and on a phone it stands in the same row as
    the two above (the bar becomes the strip's first row). It was already the
    only square one — it only ever needed the light, never the shape. */
@@ -3911,6 +4122,13 @@ html.js body.route-leaving .site-header {
   .site-header {
     height: var(--header-height);
     padding: 0 18px;
+  }
+
+  /* No search on phones, and the panel goes with it. The strip already holds
+     INDEX, ARCHIVE and the two 42px plates in ~268px of a 320px viewport;
+     a 120px field would leave 10px and squeeze the plates off-square. */
+  .site-search {
+    display: none;
   }
 
   /* The open menu is a strip, not a sheet: one row under the bar, right

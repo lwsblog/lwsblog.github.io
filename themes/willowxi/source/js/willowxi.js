@@ -872,6 +872,513 @@
     window.addEventListener('scroll', onScroll, { passive: true });
   }
 
+  // ---------------------------------------------------------------------
+  // Search
+  //
+  // The field lives in the bar, outside the PJAX container, so it survives a
+  // navigation untouched — only the panel has to be dismissed when the route
+  // changes. Everything else (engine + index) is fetched once and kept.
+  //
+  // The tokenizer below is duplicated in scripts/search-index.js. The two
+  // copies MUST segment identically: FlexSearch raises no error when a query
+  // is split differently from the documents, it just matches nothing.
+  // ---------------------------------------------------------------------
+  var searchTeardown = function () {};
+
+  function searchTokenize(text) {
+    var value = String(text == null ? '' : text);
+    var out = [];
+
+    if (!window.Intl || !window.Intl.Segmenter) {
+      for (var i = 0; i < value.length; i++) {
+        var ch = value.charAt(i).toLowerCase();
+        if (/[\u3400-\u9fff]/.test(ch) || /[\w]/.test(ch)) out.push(ch);
+      }
+      return out;
+    }
+
+    // One segmenter per call would re-read the locale; the site language is
+    // fixed and the instance is stateless for this purpose.
+    var segments = searchSegmenter().segment(value);
+
+    for (var part of segments) {
+      var word = part.segment.trim();
+      if (!word) continue;
+
+      if (/[\u3400-\u9fff]/.test(word)) {
+        if (word.length === 1) {
+          out.push(word);
+          continue;
+        }
+        for (var k = 0; k + 1 < word.length; k++) out.push(word.slice(k, k + 2));
+        if (word.length > 2) out.push(word);
+      } else if (/[\w]/.test(word)) {
+        out.push(word.toLowerCase());
+      }
+    }
+
+    return out;
+  }
+
+  var searchSegmenterCache = null;
+  function searchSegmenter() {
+    if (!searchSegmenterCache) {
+      searchSegmenterCache = new window.Intl.Segmenter('zh-CN', { granularity: 'word' });
+    }
+    return searchSegmenterCache;
+  }
+
+  function setupSearch() {
+    var spec = config.search;
+    if (!spec || !spec.index) return;
+
+    var root = document.querySelector('[data-search]');
+    if (!root) return;
+
+    var input = root.querySelector('[data-search-input]');
+    var panel = root.querySelector('[data-search-panel]');
+    if (!input || !panel) return;
+
+    var engine = null;
+    var titleIndex = null;
+    var bodyIndex = null;
+    var posts = [];
+    var synonyms = spec.synonyms || {};
+    var results = [];
+    var activeIndex = -1;
+    var loadState = 'idle';
+    var loadPromise = null;
+    var requestFrame = 0;
+
+    function setPanelVisible(visible) {
+      if (visible) {
+        panel.removeAttribute('hidden');
+      } else {
+        panel.setAttribute('hidden', '');
+      }
+      input.setAttribute('aria-expanded', visible ? 'true' : 'false');
+    }
+
+    function render(list, statusText) {
+      results = list;
+      activeIndex = list.length ? 0 : -1;
+      panel.textContent = '';
+
+      if (statusText) {
+        var note = document.createElement('p');
+        note.className = 'site-search__status';
+        note.textContent = statusText;
+        panel.appendChild(note);
+        setPanelVisible(true);
+        return;
+      }
+
+      if (!list.length) {
+        var empty = document.createElement('p');
+        empty.className = 'site-search__status';
+        empty.textContent = '无匹配';
+        panel.appendChild(empty);
+        setPanelVisible(true);
+        return;
+      }
+
+      list.forEach(function (post, position) {
+        var item = document.createElement('a');
+        item.className = 'site-search__item';
+        item.href = post.u;
+        item.id = 'site-search-item-' + position;
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', position === activeIndex ? 'true' : 'false');
+        if (position === activeIndex) item.classList.add('is-active');
+
+        var title = document.createElement('span');
+        title.className = 'site-search__title';
+
+        var name = document.createElement('span');
+        name.className = 'site-search__name';
+        name.textContent = post.t;
+        title.appendChild(name);
+
+        if (post.y) {
+          var date = document.createElement('span');
+          date.className = 'site-search__date';
+          date.textContent = post.y;
+          title.appendChild(date);
+        }
+
+        if (post.c && post.c.length) {
+          var cat = document.createElement('span');
+          cat.className = 'site-search__cat';
+          cat.textContent = post.c[0];
+          title.appendChild(cat);
+        }
+
+        var desc = document.createElement('span');
+        desc.className = 'site-search__desc';
+        desc.textContent = post.d || '';
+
+        item.appendChild(title);
+        item.appendChild(desc);
+        panel.appendChild(item);
+
+        // data-pjax=false keeps a result click on the normal navigation path,
+        // so the panel can never survive onto the destination page.
+        item.setAttribute('data-pjax', 'false');
+      });
+
+      setPanelVisible(true);
+      input.setAttribute('aria-activedescendant', list.length ? 'site-search-item-0' : '');
+    }
+
+    function closePanel() {
+      setPanelVisible(false);
+      input.removeAttribute('aria-activedescendant');
+      results = [];
+      activeIndex = -1;
+    }
+
+    function loadScript(src) {
+      return new Promise(function (resolve, reject) {
+        var existing = document.querySelector('script[data-search-engine]');
+        if (existing && existing.getAttribute('src') === src) {
+          if (window.FlexSearch) {
+            resolve();
+            return;
+          }
+          existing.addEventListener('load', function () { resolve(); }, { once: true });
+          existing.addEventListener('error', reject, { once: true });
+          return;
+        }
+
+        var script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.setAttribute('data-search-engine', '');
+        script.addEventListener('load', function () { resolve(); }, { once: true });
+        script.addEventListener('error', function () {
+          reject(new Error('engine script failed: ' + src));
+        }, { once: true });
+        document.head.appendChild(script);
+      });
+    }
+
+    function loadEngine() {
+      if (loadPromise) return loadPromise;
+
+      loadState = 'loading';
+      loadPromise = Promise.all([
+        // The engine is a self-hosted UMD bundle and installs itself on the
+        // real global, so it has to go in as a script tag — fetching the text
+        // and evaluating it in a wrapper reads the wrong `this` and finds
+        // nothing.
+        loadScript(spec.engine),
+        fetch(spec.index, { credentials: 'same-origin' }).then(function (response) {
+          if (!response.ok) throw new Error('index HTTP ' + response.status);
+          return response.json();
+        })
+      ]).then(function (results) {
+        var payload = results[1];
+        engine = window.FlexSearch;
+
+        if (!engine || !engine.Index) throw new Error('FlexSearch global missing');
+
+        // export/import is a callback pair, not an object: the collected
+        // chunks have to be replayed key-by-key in reg-then-map order. Handing
+        // import() the array instead yields a silently empty index.
+        var encode = searchTokenize;
+
+        titleIndex = new engine.Index({ encode: encode, cache: 64 });
+        bodyIndex = new engine.Index({ encode: encode, cache: 64 });
+
+        (payload.title || []).forEach(function (chunk) {
+          titleIndex.import(chunk[0], chunk[1]);
+        });
+        (payload.body || []).forEach(function (chunk) {
+          bodyIndex.import(chunk[0], chunk[1]);
+        });
+
+        posts = payload.posts || [];
+        loadState = 'ready';
+        return payload;
+      }).catch(function (error) {
+        loadState = 'failed';
+        loadPromise = null;
+        if (window.console && window.console.warn) {
+          window.console.warn('WillowXI search unavailable:', error);
+        }
+        return null;
+      });
+
+      return loadPromise;
+    }
+
+    /*
+     * Query terms are expanded through the configured synonym table before
+     * hitting the index, and the expansions are OR-ed with the original term.
+     * "暗色" therefore also finds a post that only says "深色", without either
+     * word ever entering the index — the table stays editable without a
+     * rebuild.
+     */
+    function expandTerms(query) {
+      var terms = [query];
+
+      Object.keys(synonyms).forEach(function (key) {
+        if (key !== query && query.length >= 2 && key.indexOf(query) > -1) {
+          terms.push(key);
+          (synonyms[key] || []).forEach(function (word) { terms.push(word); });
+        }
+      });
+
+      (synonyms[query] || []).forEach(function (word) { terms.push(word); });
+
+      return terms.filter(function (term, position, all) {
+        return term && all.indexOf(term) === position;
+      });
+    }
+
+    function collect(index, terms) {
+      var ids = [];
+
+      terms.forEach(function (term) {
+        var found = index.search(term, { limit: 12 });
+        found.forEach(function (id) {
+          if (ids.indexOf(id) === -1) ids.push(id);
+        });
+      });
+
+      return ids;
+    }
+
+    /*
+     * Bigrams are what make Chinese searchable without a dictionary, but they
+     * also make a search far too permissive: 「壁纸」 splits into one bigram, yet
+     * a long article containing only 「壁」 or only 「纸」 would still come back
+     * and sit next to the real match. Requiring every bigram of the term to be
+     * present restores precision, and since an OR across terms is kept for the
+     * synonym expansions, a two-character term still matches on both halves of
+     * different words.
+     */
+    function collectStrict(index, term) {
+      var tokens = searchTokenize(term);
+      if (!tokens.length) return [];
+
+      /*
+       * A one-character query is the one case bigrams cannot serve. 「糊」
+       * segments as the word 「模糊」 and so is indexed as the bigram 模糊 —
+       * the bare character is never a token, and searching it returns nothing.
+       * Substring matching over the metadata recovers it. The body index is
+       * deliberately not consulted: it holds only tokens, and shipping the
+       * plain text alongside it to cover one edge case would double the payload
+       * for a query nobody types often.
+       */
+      if (tokens.length === 1 && String(term).length === 1) {
+        return substringHits(term);
+      }
+
+      var buckets = tokens.map(function (token) {
+        return index.search(token, { limit: 40 });
+      });
+
+      var merged = buckets[0] || [];
+      for (var i = 1; i < buckets.length; i++) {
+        var next = buckets[i];
+        merged = merged.filter(function (id) { return next.indexOf(id) !== -1; });
+      }
+
+      return merged;
+    }
+
+    /* Single characters are answered from the metadata held in memory. */
+    function substringHits(char) {
+      if (!posts.length) return [];
+
+      return posts.reduce(function (hits, post) {
+        var haystack = [post.t, post.d].concat(post.c || [], post.g || []).join(' ');
+        if (haystack.indexOf(char) !== -1) hits.push(post.i);
+        return hits;
+      }, []);
+    }
+
+    function runSearch() {
+      var query = input.value.trim();
+
+      if (!query) {
+        closePanel();
+        return;
+      }
+
+      if (loadState === 'failed') {
+        render([], '搜索暂不可用');
+        return;
+      }
+
+      if (loadState !== 'ready') {
+        render([], '索引载入中');
+        loadEngine().then(function () {
+          if (input.value.trim() === query) runSearch();
+        });
+        return;
+      }
+
+      var terms = expandTerms(query);
+      var isSingleChar = String(query).length === 1;
+
+      // Title / summary / category hits outrank body hits, and the title index
+      // preserves its own order, so the two lists are concatenated rather than
+      // merged and re-scored. The query itself is matched strictly; only the
+      // synonym expansions are OR-ed, since a synonym is a deliberate widening.
+      var strict = collectStrict(titleIndex, query);
+      var primary = strict.slice();
+
+      terms.forEach(function (term) {
+        if (term === query) return;
+        collect(titleIndex, term).forEach(function (id) {
+          if (primary.indexOf(id) === -1) primary.push(id);
+        });
+      });
+
+      // A single character is answered from metadata alone (see collectStrict),
+      // so asking the body index as well would return the same rows twice.
+      var secondary = isSingleChar ? [] : collectStrict(bodyIndex, query).filter(function (id) {
+        return primary.indexOf(id) === -1;
+      });
+
+      if (!isSingleChar) {
+        terms.forEach(function (term) {
+          if (term === query) return;
+          collect(bodyIndex, term).forEach(function (id) {
+            if (secondary.indexOf(id) === -1) secondary.push(id);
+          });
+        });
+      }
+
+      var ordered = primary.concat(secondary).slice(0, 6).map(function (id) {
+        return posts[Number(id) - 1];
+      }).filter(Boolean);
+
+      /*
+       * One more ordering pass, and it is the one that matters most in Chinese:
+       * whether the title or the summary contains the typed string verbatim.
+       * Bigram matching is deliberately loose, so「壁纸」 also reaches posts that
+       * only spell out「壁」 and「纸」 in different places — but a reader who
+       * types 壁纸 wants the post that actually says 壁纸 first. Anything with
+       * no literal occurrence at all sinks to the bottom rather than being
+       * dropped, since a body hit is still a real hit.
+       */
+      ordered.sort(function (a, b) {
+        return literalRank(b) - literalRank(a);
+      });
+
+      render(ordered);
+    }
+
+    function literalRank(post) {
+      var needle = input.value.trim();
+      if (!needle) return 0;
+      if (post.t.indexOf(needle) !== -1) return 3;
+      if (post.d && post.d.indexOf(needle) !== -1) return 2;
+      return 0;
+    }
+
+    function scheduleSearch() {
+      if (requestFrame) return;
+      requestFrame = window.requestAnimationFrame(function () {
+        requestFrame = 0;
+        runSearch();
+      });
+    }
+
+    function moveSelection(step) {
+      if (!results.length) return;
+
+      var previous = activeIndex;
+      activeIndex = (activeIndex + step + results.length) % results.length;
+
+      if (previous > -1 && panel.children[previous]) {
+        panel.children[previous].classList.remove('is-active');
+        panel.children[previous].setAttribute('aria-selected', 'false');
+      }
+
+      var current = panel.children[activeIndex];
+      if (current) {
+        current.classList.add('is-active');
+        current.setAttribute('aria-selected', 'true');
+        input.setAttribute('aria-activedescendant', current.id);
+        if (typeof current.scrollIntoView === 'function') {
+          current.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    }
+
+    input.addEventListener('input', scheduleSearch);
+
+    input.addEventListener('focus', function () {
+      root.classList.add('is-active');
+      if (loadState === 'idle') {
+        // First focus warms the engine; the idle prefetch below usually beat
+        // it here, and this only covers the visitor who types immediately.
+        loadEngine();
+      }
+    });
+
+    input.addEventListener('blur', function () {
+      root.classList.remove('is-active');
+    });
+
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveSelection(1);
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveSelection(-1);
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        var target = activeIndex > -1 && panel.children[activeIndex];
+        if (target) {
+          event.preventDefault();
+          window.location.assign(target.href);
+        }
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        input.value = '';
+        closePanel();
+        input.blur();
+      }
+    });
+
+    // Clicking anywhere else dismisses the panel. The bar itself is outside
+    // the PJAX container, so this survives a route change like any listener.
+    document.addEventListener('click', function (event) {
+      if (root.contains(event.target)) return;
+      closePanel();
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      if (panel.hasAttribute('hidden')) return;
+      closePanel();
+    });
+
+    // The panel belongs to the current route. PJAX replaces only the main
+    // container, so without this it would hang over the destination page.
+    searchTeardown = closePanel;
+
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(function () { loadEngine(); }, { timeout: 3000 });
+    } else {
+      window.setTimeout(function () { loadEngine(); }, 1200);
+    }
+  }
+
   function setupTheme() {
     var toggle = document.querySelector('[data-theme-toggle]');
     var themeColor = document.querySelector('meta[name="theme-color"]');
@@ -2193,6 +2700,7 @@
       persistScroll(true);
       navigating = true;
       closeNavigation();
+      searchTeardown();
 
       if (!reducedMotion) {
         body.classList.add('route-leaving');
@@ -2354,6 +2862,7 @@
     setupRouteTransition();
     startIntro();
     setupHeader();
+    setupSearch();
     setupPageContent();
     setupPjax();
   });

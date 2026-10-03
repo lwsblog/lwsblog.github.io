@@ -8,6 +8,31 @@
   </a>
 
   <nav class="site-nav" aria-label="主导航" data-nav>
+    <% const searchSpec = (theme.search && theme.search.enabled !== false) ? (theme.search || {}) : null; %>
+    <% if (searchSpec) { %>
+      <div class="site-search" data-search>
+        <label class="site-search__field">
+          <span class="visually-hidden">搜索文章</span>
+          <input
+            class="site-search__input"
+            type="search"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="<%= searchSpec.placeholder || '搜索' %>"
+            aria-label="搜索文章"
+            aria-expanded="false"
+            aria-controls="site-search-results"
+            role="combobox"
+            aria-autocomplete="list"
+            data-search-input
+          >
+        </label>
+        <div class="site-search__panel" id="site-search-results" role="listbox" aria-label="搜索结果" hidden data-search-panel></div>
+      </div>
+    <% } %>
+
     <% Object.keys(theme.menu || {}).forEach(function(label) { %>
       <% const target = theme.menu[label]; %>
       <% const current = is_current(target); %>

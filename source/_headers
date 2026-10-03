@@ -17,6 +17,13 @@
 # 永远叫这个名字），一旦 immutable，改版后老访客将永远拿不到新样式。
 # 它们继续走默认的 must-revalidate + ETag，代价只是一次 304。
 # 同理，主题内的 /images/wallpaper/* 也保持默认（该路径会被覆盖更新）。
+#
+# 搜索索引是唯一可以长缓存的「数据」文件：它的路径固定，但 URL 上带着
+# 内容哈希（/search-index.json?v=<sha1前10位>，由 scripts/search-index.js
+# 生成）。内容变 → 哈希变 → URL 变，所以 immutable 不会让老访客卡在旧索引上。
+
+/search-index.json
+  Cache-Control: public, max-age=31536000, immutable
 
 /images/posts/*
   Cache-Control: public, max-age=31536000, immutable

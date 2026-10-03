@@ -54,6 +54,29 @@ post:
   excerpt_length: 118
   toc: true
 
+# Top-bar search. The index is rebuilt by scripts/search-index.js on every
+# `hexo generate`, so publishing needs no extra step.
+# enabled: false drops the input and stops generating the index.
+# synonyms: queried terms are expanded through this table before searching, so
+#   a visitor who types one word still lands on the post that uses the other.
+#   It is a plain map of "what people type" -> "what the posts say". Keep it
+#   small; every entry widens the net a little.
+search:
+  enabled: true
+  placeholder: '搜索'
+  synonyms:
+    暗色: ['深色', '黑色模式']
+    亮色: ['浅色', '白色模式']
+    手机: ['移动端', '窄屏']
+    平板: ['窄屏', '移动端']
+    加载: ['打开速度', '提速']
+    搜索框: ['搜索']
+    评论: ['Waline', '留言']
+    头像: ['方板']
+    报错: ['出错', '失败']
+    卡顿: ['抖动', '起台阶']
+    字体: ['字型', '字重']
+
 footer:
   since: 2026
   notice: 'WILLOWXI / PERSONAL ARCHIVE'

@@ -79,6 +79,15 @@
         parallaxGrid: Number(background.parallax_grid) > 0 ? Number(background.parallax_grid) : 7,
         home: is_home(),
         homePath: url_for('/'),
+        search: (theme.search && theme.search.enabled !== false) ? {
+          // The hash comes from the generator (scripts/search-index.js) and
+          // rides on the query string, so an updated index is a new URL and
+          // /search-index.json can stay immutable in _headers.
+          index: url_for('/search-index.json') + '?v=' + (typeof search_index_hash !== 'undefined' && search_index_hash ? search_index_hash : '0'),
+          engine: url_for('/vendor/flexsearch/flexsearch.compact.min.js'),
+          placeholder: (theme.search && theme.search.placeholder) || '搜索',
+          synonyms: (theme.search && theme.search.synonyms) || {}
+        } : null,
         waline: (theme.waline && theme.waline.serverURL) ? {
           serverURL: theme.waline.serverURL,
           js: url_for('/vendor/waline/waline.js'),
