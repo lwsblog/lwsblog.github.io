@@ -682,7 +682,7 @@ html.js body.is-post.route-ready:not(.route-leaving) .site-header {
   padding: 0 16px;
   color: var(--paper-dim);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--type-s);
   font-weight: 700;
   letter-spacing: 0.1em;
   transition: color 180ms ease;
@@ -1632,7 +1632,7 @@ html.js body.intro-running .site-search__panel {
   gap: 9px;
   color: var(--paper-dim);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--type-s);
   font-weight: 700;
   letter-spacing: 0.16em;
 }
@@ -1758,7 +1758,7 @@ html.js body.intro-running .site-search__panel {
   gap: 15px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--type-xs);
   font-weight: 700;
   letter-spacing: 0.14em;
 }
@@ -2134,7 +2134,7 @@ html.js body.intro-running .site-search__panel {
   gap: 20px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--type-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -2339,7 +2339,7 @@ html.js body.intro-running .site-search__panel {
   margin-top: 32px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--type-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -3013,7 +3013,7 @@ a.archive-row:hover {
   transform: skewX(7deg);
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--type-xs);
   font-weight: 700;
   letter-spacing: 0.14em;
   pointer-events: none;
@@ -3124,7 +3124,7 @@ a.archive-row:hover {
   margin-left: 56px;
   color: rgba(241, 243, 245, 0.55);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--type-xs);
   font-weight: 700;
   letter-spacing: 0.16em;
 }
