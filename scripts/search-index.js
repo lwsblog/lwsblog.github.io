@@ -36,7 +36,13 @@ const SEGMENTER =
  * "层叠上下文" becomes 层叠 / 叠上 / 上文 / 层叠上下文. A bigram index answers
  * "层叠" and "上下文" both, and tolerates a dropped character for free — a
  * typo costs one bigram out of several, so the intersection still clears.
- * Latin runs stay whole words, lower-cased.
+ *
+ * Latin runs get the same tolerance through prefixes: "hello" is indexed as
+ * he / hel / hell / hello, so typing "hell" — or "hel", or "he" — still finds
+ * it. Without this the Chinese path would be forgiving and the English one
+ * exact, and "hell" would find nothing on a site with an English-titled post.
+ * The one-character prefix is left out on purpose: it would match nearly every
+ * document on the site.
  */
 function tokenize(text) {
   const value = String(text == null ? '' : text);
@@ -63,7 +69,12 @@ function tokenize(text) {
       for (let i = 0; i + 1 < word.length; i++) out.push(word.slice(i, i + 2));
       if (word.length > 2) out.push(word);
     } else if (/[\w]/.test(word)) {
-      out.push(word.toLowerCase());
+      const lower = word.toLowerCase();
+      if (lower.length === 1) {
+        out.push(lower);
+        continue;
+      }
+      for (let i = 2; i <= lower.length; i++) out.push(lower.slice(0, i));
     }
   }
 

@@ -913,7 +913,15 @@
         for (var k = 0; k + 1 < word.length; k++) out.push(word.slice(k, k + 2));
         if (word.length > 2) out.push(word);
       } else if (/[\w]/.test(word)) {
-        out.push(word.toLowerCase());
+        // Prefixes, so "hell" reaches "hello". The one-character prefix is left
+        // out: it would match nearly every document. Keep byte-for-byte
+        // equivalent to tokenize() in scripts/search-index.js.
+        var lower = word.toLowerCase();
+        if (lower.length === 1) {
+          out.push(lower);
+          continue;
+        }
+        for (var p = 2; p <= lower.length; p++) out.push(lower.slice(0, p));
       }
     }
 
@@ -1020,10 +1028,6 @@
         item.appendChild(title);
         item.appendChild(desc);
         panel.appendChild(item);
-
-        // data-pjax=false keeps a result click on the normal navigation path,
-        // so the panel can never survive onto the destination page.
-        item.setAttribute('data-pjax', 'false');
       });
 
       setPanelVisible(true);
