@@ -787,22 +787,50 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
   white-space: nowrap;
 }
 
-/* Search: a 120px well to the left of INDEX, same light as the two plates
-   beside it. Not a plate itself — it is a field, so it takes the quiet edge
-   and earns the halo only while it holds a query. */
+/* Search: a well to the left of INDEX, same light as the two plates beside
+   it. Not a plate itself — it is a field, so it takes the quiet edge and
+   earns the halo only while it holds a query.
+
+   Two widths, one rule. The slot keeps --search-rest for its whole life, so
+   focusing the field never shoves INDEX and ARCHIVE sideways; the field
+   itself hangs off the slot's left edge instead. It has to be absolute to do
+   that: an in-flow flex item wider than its container grows to the RIGHT —
+   margin-left:auto collapses to 0 the moment there is no free space to
+   distribute — which put the open field straight on top of the nav links at
+   every viewport width. right:0 is the whole trick. flex: none is there for
+   the same reason the 42px plates carry it: as a flex item the field would
+   shrink straight back to the slot and the open width would never happen.
+
+   On a wide bar that is 210 at rest, exactly half the 420px panel, and 420 on
+   focus, exactly the panel's width: the results drop from a field as wide as
+   the thing they land in. The bar is not that wide everywhere, though — it
+   runs out of empty middle around 1180px and is completely full by 810 — so
+   the pair steps down together and the field never grows into the brand.
+
+   The slot still declares its own 42px because the field is out of flow and
+   no longer contributes height. */
 .site-search {
+  --search-rest: 210px;
+  --search-open: 420px;
   position: relative;
   display: flex;
   align-items: center;
+  width: var(--search-rest);
   height: 42px;
   margin-right: 10px;
+  flex: none;
   transition: opacity 500ms var(--ease-out);
 }
 
 .site-search__field {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
-  width: 120px;
+  width: var(--search-rest);
   height: 42px;
+  flex: none;
   align-items: center;
   border: 1px solid var(--line-strong);
   background: var(--surface-soft);
@@ -818,7 +846,7 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 }
 
 .site-search.is-active .site-search__field {
-  width: 176px;
+  width: var(--search-open);
   border-color: var(--control-edge);
   background: var(--surface);
   box-shadow: 0 0 12px var(--control-glow);
@@ -856,14 +884,20 @@ html[data-theme="light"] .theme-toggle [data-theme-icon="sun"] {
 }
 
 /* Results drop from the field's right edge, not its left edge: the field sits
-   ~308px from the viewport's right side, so a panel left-aligned to it would
-   hang off-screen. The right edge is shared with the bar's own right edge. */
+   ~300px from the viewport's right side, so a panel left-aligned to it would
+   hang off-screen. The right edge is shared with the bar's own right edge.
+
+   The panel is as wide as the field opens to, so the two edges always line up
+   — that is the whole point of the open width being the panel's width. The
+   100vw term is the scrollbar's share: 100vw counts the bar the layout does
+   not have, so without it the panel walks off the left edge on a narrow
+   window. */
 .site-search__panel {
   position: absolute;
   z-index: 1;
   top: calc(100% + 8px);
   right: 0;
-  width: 420px;
+  width: min(var(--search-open), calc(100vw - 40px));
   max-height: min(58vh, 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3137,6 +3171,38 @@ a.archive-row:hover {
    Both markups render; portrait swaps the parallelogram out entirely. */
 .stream-cards {
   display: none;
+}
+
+/* --- search field width ladder ---
+   210/420 is the pair the wide bar can afford. Measured on the real bar, the
+   empty middle between the brand and the field is 584px at 1440, 363 at 1200,
+   253 at 1080, 161 at 980, 87 at 900 and 0 by 800 — the bar is genuinely full
+   there, so a 210px field at rest already touches the brand and there is
+   nothing left to expand into. Each step below keeps the field clear of the
+   brand by at least ~20px and keeps the open/rest relationship (open is
+   always the larger of the two). Steps are additive, so a later rule wins. */
+@media (max-width: 1180px) {
+  .site-search {
+    --search-rest: 180px;
+    --search-open: 340px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .site-search {
+    --search-rest: 150px;
+    --search-open: 260px;
+  }
+}
+
+/* Last step before the phone breakpoint: the bar has no slack left, so the
+   field keeps its resting width and only the halo and the panel answer the
+   click. */
+@media (max-width: 900px) {
+  .site-search {
+    --search-rest: 120px;
+    --search-open: 120px;
+  }
 }
 
 @media (max-width: 960px) and (orientation: portrait) {
