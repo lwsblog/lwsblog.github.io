@@ -22,36 +22,49 @@
   };
   const landscape = photos.filter(function (p) { return Number(p.w) > Number(p.h); }).length;
 %>
-<!-- The screen is a fixed layer, so it lives outside .photo-main and is never
-     inside the scrolling flow. .gallery-board must stay at opacity 1 (see the
-     backdrop-root note in the CSS) or its own blur dies with it. -->
-<div class="gallery" data-gallery>
-  <div class="gallery-board" aria-hidden="true"></div>
+<!-- The masthead is a page-level fixed layer, NOT part of the screen. It is
+     the one element that carries the title from the middle of the screen to
+     the top-left corner and then stays there for the rest of the session —
+     it is never faded out and re-shown, because that reads as a blink. The
+     screen below it can be display:none once it lands and the title is
+     untouched. -->
+<div class="photo-masthead" data-photo-masthead>
+  <span class="photo-masthead__label" data-photo-mast-label>CONTACT SHEET</span>
+  <h1 class="photo-masthead__title" data-photo-mast-title><%= page.title %></h1>
+  <p class="photo-masthead__sub" data-photo-mast-sub>
+    <%= photos.length %> FRAMES / <%= landscape %> LANDSCAPE / <%= photos.length - landscape %> PORTRAIT
+  </p>
+</div>
 
-  <div class="photo-screen" data-photo-screen>
+<div class="gallery" data-gallery>
+  <!-- The screen is a print the size of the viewport, not a full-bleed
+       photograph. It holds the SAME aspect ratio as the grid cell it lands
+       on, so the whole travel is one continuous scale of one box: the crop
+       never changes, nothing is re-cropped, and no second image is ever
+       created. That is what makes it read as one print shrinking rather than
+       one photo being replaced by another. -->
+  <figure class="photo-screen" data-photo-screen>
     <% if (cover) { %>
       <img class="photo-screen__img" data-photo-screen-img
         src="<%- photoUrl(cover.id, 'screen') %>" alt="" decoding="async">
     <% } %>
     <div class="photo-screen__veil" data-photo-screen-veil></div>
-    <div class="photo-screen__type" data-photo-screen-type>
-      <span class="photo-screen__label">CONTACT SHEET</span>
-      <h1 class="photo-screen__title"><%= page.title %></h1>
-      <p class="photo-screen__sub">
-        <%= photos.length %> 帧 · 横 <%= landscape %> 竖 <%= photos.length - landscape %>
-      </p>
-    </div>
-    <p class="photo-screen__hint" data-photo-screen-hint>SCROLL</p>
-  </div>
+    <figcaption class="photo-screen__cap" data-photo-screen-cap>
+      <span><%= stamp(cover ? cover.date : '') %></span>
+      <span><%= String(photos.length).padStart(2, '0') %></span>
+    </figcaption>
+  </figure>
 
-  <div class="photo-corner" data-photo-corner>
-    <strong><%= page.title %></strong>
-    <small>CONTACT / <%= String(photos.length).padStart(2, '0') %> / <%= photos.length ? stamp(photos[0].date).slice(0, 4) : '' %></small>
-  </div>
+  <p class="photo-screen__hint" data-photo-screen-hint>SCROLL</p>
 
   <div class="gallery-spacer" data-gallery-spacer></div>
 
   <div class="photo-main" data-photo-main>
+    <!-- The backboard. It is the first child of the column and absolutely
+         positioned against it, so the column is mounted ON it rather than the
+         board floating over the viewport. -->
+    <div class="gallery-board" aria-hidden="true"></div>
+
     <header class="photo-main__header">
       <span class="micro-label">ALBUM / <%= page.title %></span>
       <% if (page.description) { %><p><%= page.description %></p><% } %>

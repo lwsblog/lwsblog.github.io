@@ -4572,7 +4572,7 @@ html.js body.route-leaving .site-header {
 
 /* --- Gallery (/photos/) ---------------------------------------------------
    The screen is scroll-driven, so almost every moving part here is written by
-   JS every frame. Two rules came out of the prototypes and are load-bearing:
+   JS every frame. Three rules came out of the prototypes and are load-bearing:
 
    1. The veil must NOT carry backdrop-filter. Blurring the veil blurs the
       title sitting on top of it and drops the contrast to unreadable; the
@@ -4582,33 +4582,39 @@ html.js body.route-leaving .site-header {
       becomes the backdrop root, and a backdrop-filter can then only sample
       inside itself — the board's own blur would die (same trap as
       .stream-picker on the home page). The fade-out is on the screen layer.
+   3. The screen is a PRINT at the grid cell's exact aspect ratio, not a
+      full-bleed photograph. That is what lets the whole travel be one
+      continuous scale of one box: same crop at every size, so nothing is
+      re-cropped and no second <img> is ever created. See photos.js.
 
-   will-change appears three times in this block, which is the one documented
+   will-change appears twice in this block, which is the one documented
    exception to the site rule. The animation re-writes transform/opacity on
    these nodes on every scroll frame; without the hint the compositor
-   re-rasterises the whole gallery each frame. It is scoped to elements that
+   re-rasterises the whole layer each frame. It is scoped to elements that
    exist only while the screen animation runs, and JS drops the screen from
-   the layer tree once it lands (see photos.js). */
+   the layer tree once it lands. */
 .gallery {
   position: relative;
 }
 
+/* The backboard. It is a child of .photo-main with inset:0, so its bounds
+   ARE the column's bounds — it is mounted on the column rather than floating
+   over the viewport. Before this it was `position:fixed; width:200px` down
+   the middle of the screen, which read as a shaft of light rather than as a
+   board with the photos on it. The negative inline inset gives the column a
+   margin to sit in, and the top inset lets it run under the column header. */
 .gallery-board {
-  position: fixed;
-  z-index: 1;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 200px;
-  transform: translateX(-50%);
+  position: absolute;
+  z-index: 0;
+  inset: -18px -30px 0;
   border-right: 1px solid var(--line);
   border-left: 1px solid var(--line);
   background: linear-gradient(
     90deg,
-    transparent,
-    rgba(20, 25, 34, 0.66) 26%,
-    rgba(20, 25, 34, 0.66) 74%,
-    transparent
+    rgba(20, 25, 34, 0.42),
+    rgba(20, 25, 34, 0.7) 14%,
+    rgba(20, 25, 34, 0.7) 86%,
+    rgba(20, 25, 34, 0.42)
   );
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
@@ -4618,36 +4624,173 @@ html.js body.route-leaving .site-header {
 html[data-theme="light"] .gallery-board {
   background: linear-gradient(
     90deg,
-    transparent,
-    rgba(226, 229, 231, 0.7) 26%,
-    rgba(226, 229, 231, 0.7) 74%,
-    transparent
+    rgba(226, 229, 231, 0.46),
+    rgba(226, 229, 231, 0.72) 14%,
+    rgba(226, 229, 231, 0.72) 86%,
+    rgba(226, 229, 231, 0.46)
   );
 }
 
-/* The screen is a photograph under a veil, so its own palette is fixed
-   regardless of the site theme — it is an image, not a page. The type on it
-   is light and the veil is dark in BOTH themes. Inheriting --paper here is
-   what made the light theme render dark text on a dark photo (measured: the
-   title sat at roughly 1.6:1 against the veil). Only the header bar, which
-   sits on top of the screen, follows the theme. */
+/* The column's own content sits above the board. */
+.photo-main__header,
+.photo-grid {
+  position: relative;
+  z-index: 1;
+}
+
+/* --- the masthead: ONE element, start to finish ---------------------------
+   It holds the title while the screen is up, walks it into the top-left
+   corner, and stays there. The previous build faded the screen's own type out
+   at t=0.74 and faded a separate .photo-corner in at t=0.78, which reads as
+   the title blinking out and coming back; there is no second copy here and
+   the title is never taken to opacity 0.
+
+   The corner is the resting state (t=1) and the stylesheet owns it — the
+   fixed position and the 21px are both written here, not in JS. JS only
+   writes `transform`, interpolating from "centred on the screen" to
+   "sitting at that corner", so the resting appearance cannot drift out of
+   sync with what the animation aims at.
+
+   Its colours are fixed cold white while the dark screen is behind it and
+   follow the theme once it has landed. That switch is a class on <body>
+   (is-gallery-screen), not a second element: --paper inverts to dark ink in
+   the light theme, and inheriting it put the title at roughly 1.6:1 against
+   the veil. */
+.photo-masthead {
+  position: fixed;
+  z-index: 32;
+  top: calc(var(--header-height) + 30px);
+  left: clamp(20px, 4vw, 64px);
+  text-align: left;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  /* --mast-s is the masthead's current scale, written by JS. The halos
+     divide by it for the same reason .photo-screen's shadow does: a
+     transform scales text-shadow with the text, and a 20px glow on a 21px
+     title becomes an 84px smear on the 88px screen title. */
+  --mast-s: 1;
+}
+
+.photo-masthead__label {
+  display: block;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  opacity: 0.82;
+}
+
+.photo-masthead__title {
+  margin: 16px 0 0;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  /* The title's size lives here and nowhere else. JS used to write
+     style.fontSize every frame, which pinned it and pushed the title past
+     the right edge. */
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-shadow: 0 0 calc(20px / var(--mast-s, 1)) rgba(9, 11, 15, 0.8);
+}
+
+.photo-masthead__sub {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+}
+
+html[data-theme="light"] .photo-masthead__title {
+  text-shadow: 0 0 calc(18px / var(--mast-s, 1)) rgba(244, 245, 242, 0.9);
+}
+
+/* While the dark screen is up, the masthead is type on a photograph: cold
+   white in BOTH themes. --paper inverts to dark ink in the light theme, and
+   inheriting it put the title at roughly 1.6:1 against the veil. The class
+   is dropped once the print lands, and the same rules then hand the title
+   back to the theme — one element, two colour sets, no second copy. */
+body.is-gallery-screen .photo-masthead__title {
+  color: #f1f3f5;
+  text-shadow: 0 0 calc(44px / var(--mast-s, 1)) rgba(9, 11, 15, 0.7);
+}
+
+body.is-gallery-screen .photo-masthead__label {
+  color: #d6f0ff;
+}
+
+body.is-gallery-screen .photo-masthead__sub {
+  color: #b8bec8;
+}
+
+body.is-gallery-screen .photo-screen__hint {
+  color: #b8bec8;
+}
+
+.photo-screen__hint {
+  position: fixed;
+  z-index: 31;
+  bottom: 28px;
+  left: 50%;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.28em;
+  transform: translateX(-50%);
+}
+
+/* --- the screen: a print, scaled as one box -------------------------------
+   Same aspect ratio as the grid cell it lands on, and scaled with a single
+   `transform: scale()` from the start size down to 1. Nothing about the crop
+   changes along the way, so the travel is one continuous shrink of one
+   photograph. The previous build scaled a full-bleed viewport box (a
+   different aspect ratio) and then handed off to a second <img> created by
+   JS, which read as one photo being replaced by another.
+
+   The paper and the mat are always there — a print has a border — and they
+   scale with the box, so the border is 11px at the end because 11px × 1 is
+   11px, not because anything was re-measured.
+
+   --screen-s is the current scale, written by JS every frame. The shadow
+   divides by it so its blur is divided by 4 at the start of the travel
+   instead of being multiplied by it: a transform scales a box-shadow along
+   with the box, and 80px of blur at 3.9× is a 315px halo that swallows the
+   whole gallery. Divided, the shadow lands on exactly .photo-frame's
+   14px/44px at scale 1 — which is what makes the hand-off seamless. */
 .photo-screen {
   position: fixed;
   z-index: 30;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: var(--screen-w, 50vw);
+  height: var(--screen-h, 50vh);
+  margin: 0;
+  padding: 11px 11px 38px;
+  background: #f4f4f1;
+  box-shadow: 0 calc(14px / var(--screen-s, 1)) calc(44px / var(--screen-s, 1)) rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  background: #090b0f;
-  will-change: opacity;
+  transform-origin: 0 0;
+  will-change: transform;
+  pointer-events: none;
+}
+
+html[data-theme="light"] .photo-screen {
+  box-shadow:
+    0 calc(12px / var(--screen-s, 1)) calc(34px / var(--screen-s, 1)) rgba(13, 27, 36, 0.2),
+    0 calc(2px / var(--screen-s, 1)) calc(6px / var(--screen-s, 1)) rgba(13, 27, 36, 0.12);
 }
 
 .photo-screen__img {
-  position: absolute;
-  inset: 0;
+  display: block;
   width: 100%;
   max-width: none;
   height: 100%;
   object-fit: cover;
-  will-change: transform;
 }
 
 .photo-screen__veil {
@@ -4657,99 +4800,21 @@ html[data-theme="light"] .gallery-board {
   will-change: opacity;
 }
 
-.photo-screen__type {
+/* The caption is part of the print, so it is never faded: at the start of
+   the travel the veil is what dims it, and the veil is going to lift anyway.
+   Fading it independently left the wide bottom mat blank while the photo
+   still filled the frame above it. */
+.photo-screen__cap {
   position: absolute;
-  z-index: 2;
-  top: 50%;
-  left: 50%;
-  text-align: center;
-  /* The title's size lives here and nowhere else. JS used to write
-     style.fontSize every frame, which pinned it at 118px and pushed
-     "WillowXI's Gallery" past the right edge. */
-  transform: translate(-50%, -50%);
-  transform-origin: 0 0;
-  will-change: transform;
-}
-
-.photo-screen__label {
-  display: block;
-  color: #d6f0ff;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.34em;
-  opacity: 0.82;
-}
-
-.photo-screen__title {
-  margin: 16px 0 0;
-  color: #f1f3f5;
-  font-family: var(--font-mono);
-  font-size: clamp(30px, 7vw, 96px);
-  font-weight: 400;
-  letter-spacing: -0.03em;
-  line-height: 1.06;
-  white-space: nowrap;
-  text-shadow: 0 0 44px rgba(9, 11, 15, 0.7);
-}
-
-.photo-screen__sub {
-  margin: 16px 0 0;
-  color: #b8bec8;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.2em;
-}
-
-.photo-screen__hint {
-  position: absolute;
-  z-index: 2;
-  bottom: 28px;
-  left: 50%;
-  margin: 0;
-  color: #b8bec8;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.28em;
-  transform: translateX(-50%);
-}
-
-/* The corner label takes over once the screen has left. It sits below the
-   fixed bar, so it reads as page furniture rather than a second header.
-   Unlike the screen's own type this one lives on the themed ground, so it
-   does follow --paper — and its shadow has to flip with it, or a dark halo
-   rings dark text in light mode. */
-.photo-corner {
-  position: fixed;
-  z-index: 26;
-  top: calc(var(--header-height) + 30px);
-  left: clamp(20px, 4vw, 64px);
-  opacity: 0;
-  pointer-events: none;
-  will-change: opacity;
-}
-
-.photo-corner strong {
-  display: block;
-  color: var(--paper);
-  font-family: var(--font-mono);
-  font-size: 21px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  text-shadow: 0 0 20px rgba(9, 11, 15, 0.8);
-}
-
-html[data-theme="light"] .photo-corner strong {
-  text-shadow: 0 0 18px rgba(244, 245, 242, 0.9);
-}
-
-.photo-corner small {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
+  right: 11px;
+  bottom: 11px;
+  left: 11px;
+  display: flex;
+  justify-content: space-between;
+  color: #5a5f66;
   font-family: var(--font-mono);
   font-size: 9.5px;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.1em;
 }
 
 /* The screen needs scroll distance of its own; without it the gallery below
@@ -4871,46 +4936,6 @@ html[data-theme="light"] .photo-frame.is-dragging {
    a glitch, so it takes the full row instead. */
 .photo-frame--wide {
   grid-column: 1 / -1;
-}
-
-/* The travelling print. Same stock and shadow language as a grid frame — it
-   is one, in transit — but fixed and transparent to input while it moves.
-   It sits ABOVE the screen (30) on purpose: the print is the screen image
-   pulling back from the edges and turning into paper, so it has to be the
-   thing on top while that happens. Underneath, the screen recedes — see the
-   scale/fade on .photo-screen__img in photos.js. */
-.photo-print {
-  position: fixed;
-  z-index: 31;
-  top: 0;
-  left: 0;
-  margin: 0;
-  padding: 11px 11px 38px;
-  background: #f4f4f1;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.72);
-  opacity: 0;
-  pointer-events: none;
-  will-change: transform, opacity;
-}
-
-.photo-print__img {
-  display: block;
-  width: 100%;
-  max-width: none;
-  height: auto;
-}
-
-.photo-print__cap {
-  position: absolute;
-  right: 11px;
-  bottom: 11px;
-  left: 11px;
-  display: flex;
-  justify-content: space-between;
-  color: #5a5f66;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
 }
 
 /* The lightbox is reparented to <body> while it is open (see photos.js):
@@ -5068,37 +5093,31 @@ body.is-gallery-screen .site-header.is-scrolled {
   transform: translateX(-50%);
 }
 
-/* Reduced motion: the screen stops being a screen and becomes a plain header
-   in the flow. Hiding it outright would take the page's only h1 with it. */
-.gallery.is-static .photo-screen {
-  position: relative;
-  inset: auto;
-  padding: calc(var(--header-height) + 72px) 20px 40px;
-  background: none;
-  will-change: auto;
-}
+/* Reduced motion: no travel, no layers. The screen is dropped and the
+   masthead becomes a plain in-flow page header — hiding the masthead instead
+   would take the page's only h1 with it, and the masthead is now the one
+   element that holds the title from start to finish.
 
-.gallery.is-static .photo-screen__img,
-.gallery.is-static .photo-screen__veil,
-.gallery.is-static .photo-screen__hint {
+   The selector is on <body>, not .gallery.is-static: the masthead is a sibling
+   of .gallery (it has to outlive the screen), so a descendant selector never
+   reached it and the h1 stayed pinned in the corner. */
+body.is-gallery-static .photo-screen,
+body.is-gallery-static .photo-screen__hint,
+body.is-gallery-static .gallery-spacer {
   display: none;
 }
 
-.gallery.is-static .photo-screen__type {
+body.is-gallery-static .photo-masthead {
   position: static;
+  padding: calc(var(--header-height) + 72px) 20px 40px;
+  text-align: center;
   transform: none;
   will-change: auto;
 }
 
-.gallery.is-static .photo-screen__title {
+body.is-gallery-static .photo-masthead__title {
   font-size: clamp(38px, 6.5vw, 82px);
   text-shadow: none;
-}
-
-.gallery.is-static .gallery-spacer,
-.gallery.is-static .photo-corner,
-.gallery.is-static .photo-print {
-  display: none;
 }
 
 .gallery.is-static .photo-main {
@@ -5107,19 +5126,30 @@ body.is-gallery-screen .site-header.is-scrolled {
 
 @media (max-width: 760px) {
   .gallery-board {
-    width: 116px;
+    inset: -12px -12px 0;
   }
 
   .gallery-spacer {
     height: 190vh;
   }
 
-  .photo-screen__title {
-    font-size: clamp(28px, 9vw, 52px);
+  .photo-masthead__title {
+    font-size: 18px;
   }
 
-  .photo-corner strong {
-    font-size: 18px;
+  .photo-screen {
+    padding: 8px 8px 26px;
+  }
+
+  /* The print's caption and mat scale with the box, so on a phone — where
+     the print starts at 2.6× the cell — the desktop 11px/38px becomes a
+     100px white band with the date pushed off the edge. The cell's own
+     padding is 8/8/32, and the print has to match it at scale 1 for the
+     hand-off to be seamless, so the mat is trimmed, not the caption. */
+  .photo-screen__cap {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
   }
 
   .photo-grid {
