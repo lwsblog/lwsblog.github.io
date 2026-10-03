@@ -3088,23 +3088,30 @@ a.archive-row:hover {
   counter-reset: detail-panel;
 }
 
+/* 91/118 -> 56/92 on 2026-10-03: the text column was inset further than the
+   plate needs, so 119px of left padding + 118px on the right left the block
+   reading narrow (23.5 CJK per line) while the slant cut the corner anyway.
+   The ghost index and READ share the 92px right edge (see below). */
 .stream-detail__panel {
   position: relative;
   height: 100%;
-  padding: 42px 118px 40px 91px;
+  padding: 42px 92px 40px 56px;
   overflow: hidden;
   counter-increment: detail-panel;
 }
 
-/* Ghost index fills the quiet top-right corner. It shares READ's 118px right
+/* Ghost index fills the quiet top-right corner. It shares READ's 92px right
    edge, so it has to share its displacement too: one --detail-shift on the
-   panel drives both, and the axis the two sit on can never drift apart. */
+   panel drives both, and the axis the two sit on can never drift apart.
+   Measured: the 54px index occupies y 30-97 inside the panel while the title
+   starts at y ~120, so the two never actually meet — 32px of title inset is
+   clearance, not overlap avoidance. */
 .stream-detail__panel::before {
   content: counter(detail-panel, decimal-leading-zero);
   position: absolute;
   z-index: 1;
   top: 30px;
-  right: 118px;
+  right: 92px;
   color: transparent;
   font-family: var(--font-mono);
   font-size: 54px;
@@ -3148,9 +3155,10 @@ a.archive-row:hover {
 
 .stream-detail__body small {
   /* Trapezoid typesetting: the blocks' left edges descend along the same
-     -7deg lean as the wrapper (56 - 42 - 28 mirrors the left list's slant
-     across the vertical gaps between the blocks). */
-  margin-left: 56px;
+     -7deg lean as the wrapper (40 - 30 - 20 mirrors the left list's slant
+     across the vertical gaps between the blocks; 56/42/28 before 2026-10-03,
+     when the panel's own 91px left padding made the column read too narrow). */
+  margin-left: 40px;
   color: rgba(241, 243, 245, 0.55);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -3160,9 +3168,9 @@ a.archive-row:hover {
 
 .stream-detail__body h4 {
   position: relative;
-  margin: 0 0 0 42px;
-  /* right inset keeps the title's first line clear of the ghost index */
-  padding-right: 64px;
+  margin: 0 0 0 30px;
+  /* right inset clears the ghost index's column (see ::before) */
+  padding-right: 32px;
   padding-bottom: 18px;
   border-bottom: 1px solid rgba(241, 243, 245, 0.16);
   color: #f1f3f5;
@@ -3184,12 +3192,14 @@ a.archive-row:hover {
 }
 
 .stream-detail__body p {
-  margin: 4px 0 0 28px;
+  margin: 4px 0 0 20px;
   max-width: 34em;
   color: rgba(241, 243, 245, 0.78);
   /* 14 -> 16px on 2026-10-03, leading 2.05 -> 1.85 so the block keeps the
      same airiness at the larger size (measured: 4 clamped lines grew 115 ->
-     118px, so the 434px picker still has ~80px of headroom). */
+     118px, so the 434px picker still has ~80px of headroom). The column
+     widened with the panel padding on the same day (376.6 -> 445.6px at
+     1440), which is what lets the excerpt reach 4 full lines. */
   font-size: 16px;
   letter-spacing: 0.01em;
   line-height: 1.85;
@@ -3209,7 +3219,7 @@ a.archive-row:hover {
 .stream-detail__read {
   position: absolute;
   z-index: 1;
-  right: 118px;
+  right: 92px;
   bottom: 34px;
   display: inline-flex;
   align-items: center;
