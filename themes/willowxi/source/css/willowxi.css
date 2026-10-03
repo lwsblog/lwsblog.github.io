@@ -2357,7 +2357,11 @@ html.js body.intro-running .site-search__panel {
   margin-top: 32px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--type-xs);
+  /* 12px was the smallest type left on the site and the date row is the
+     first thing read under the headline. 14px keeps it a caption rather
+     than competing with the 18px prose, without the 700 weight making it
+     look like a footnote. */
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -2371,7 +2375,12 @@ html.js body.intro-running .site-search__panel {
 .article__layout {
   display: grid;
   margin-top: 80px;
-  grid-template-columns: 210px minmax(0, 760px);
+  /* 210 -> 240 on 2026-10-03: the outline is read, not scanned, and at
+     15px two of the six entries wrapped inside the old column. Widening the
+     rail costs the reading column nothing (it is minmax(0, 760px) and
+     stays 760) and the whole grid is centre-clamped, so the only shift is
+     the 15px the rail gives up. */
+  grid-template-columns: 240px minmax(0, 760px);
   justify-content: center;
   gap: clamp(40px, 7vw, 100px);
 }
@@ -2406,8 +2415,10 @@ html.js body.intro-running .site-search__panel {
 
 .article__toc a {
   color: var(--muted);
-  font-size: var(--type-s);
-  line-height: 1.5;
+  /* 13px -> 15px on 2026-10-03. The rail is 240px wide, which is what
+     keeps the longer entries on one line at this size. */
+  font-size: 15px;
+  line-height: 1.62;
   transition: color 180ms ease;
 }
 
@@ -3142,7 +3153,7 @@ a.archive-row:hover {
   margin-left: 56px;
   color: rgba(241, 243, 245, 0.55);
   font-family: var(--font-mono);
-  font-size: var(--type-xs);
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.16em;
 }
@@ -3176,9 +3187,12 @@ a.archive-row:hover {
   margin: 4px 0 0 28px;
   max-width: 34em;
   color: rgba(241, 243, 245, 0.78);
-  font-size: 14px;
+  /* 14 -> 16px on 2026-10-03, leading 2.05 -> 1.85 so the block keeps the
+     same airiness at the larger size (measured: 4 clamped lines grew 115 ->
+     118px, so the 434px picker still has ~80px of headroom). */
+  font-size: 16px;
   letter-spacing: 0.01em;
-  line-height: 2.05;
+  line-height: 1.85;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
