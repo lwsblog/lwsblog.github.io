@@ -5202,21 +5202,23 @@ body.is-gallery-static .photo-masthead__title {
   padding-top: 0;
 }
 
-/* 🔴 The label and the caption are dropped on phones, and the title is not.
-   The heading is scaled up to fill most of the viewport there, so a secondary
-   line cannot survive: measured on a 390px screen, "22 FRAMES / 18 LANDSCAPE /
-   4 PORTRAIT" is 343px at rest — 88% of the viewport before any scaling — and
-   at the heading's 2.08× it runs to 714px, so it rendered 160→504 against a
-   390px viewport and read as "AMES / 18 LANDSCAPE / 4 POR". The alternative was
-   to hold the heading to 1.35× (28px) so the caption would fit, which trades
-   the page's h1 for a tally line nobody came for. The collection total is still
-   on the page: the album header below carries it, and every frame carries its
-   own number in the grid. Desktop keeps all three lines. */
-@media (max-width: 760px) {
-  .photo-masthead__label,
-  .photo-masthead__sub {
-    display: none;
-  }
+/* 🔴 The label and the caption are dropped at every width — the opening is the
+   photograph and the heading, nothing else.
+
+   On a phone they cannot survive at all: measured on a 390px screen,
+   "22 FRAMES / 18 LANDSCAPE / 4 PORTRAIT" is 343px at rest (88% of the viewport
+   before any scaling) and at the heading's 2.08× it runs to 714px, so it
+   rendered 160→504 against a 390px viewport and read as
+   "AMES / 18 LANDSCAPE / 4 POR". On the desktop it fits, but it and the
+   eyebrow are exactly the two secondary lines that stop the heading from being
+   the opening: with them gone the title's own glyphs set the clamp, so the
+   travel is a real enlargement instead of a hedge against a caption.
+
+   Nothing is lost: the collection total lives in the album header below and
+   every frame carries its own number in the grid caption. */
+.photo-masthead__label,
+.photo-masthead__sub {
+  display: none;
 }
 
 @media (max-width: 760px) {

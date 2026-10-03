@@ -281,10 +281,13 @@
           if (originGlyphs.width) rest = originGlyphs;
         }
 
-        // The clamp protects the margin and is measured against the glyphs:
-        // 390×0.88/164.6 = 2.084 on a phone, and 1440×0.88/164.6 = 7.7 on the
-        // desktop, where the wish of 4.2 binds instead.
-        var wish = size.width < 760 ? 2.4 : 4.2;
+        // The clamp protects the margin and is measured against the glyphs.
+        // Desktop wish 6.5 (was 4.2): the eyebrow and the caption are gone from
+        // the opening now, so the heading is the only thing on the photograph
+        // and it should read as the opening rather than as a header. The wish is
+        // only a ceiling — the 0.88-of-viewport clamp still binds whenever the
+        // title is long, which is what keeps a longer title off the edges.
+        var wish = size.width < 760 ? 2.4 : 6.5;
         var bigScale = Math.min(wish, (size.width * 0.88) / rest.width);
 
         masthead.style.transform = 'scale(' + bigScale + ')';
