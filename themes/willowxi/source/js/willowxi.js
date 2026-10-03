@@ -2118,6 +2118,7 @@
     pageObservers.forEach(function (observer) { observer.disconnect(); });
     pageObservers = [];
     teardownComments();
+    teardownGallery();
     while (pickerTeardowns.length) {
       pickerTeardowns.pop()();
     }
@@ -2130,6 +2131,63 @@
     setupCopyButtons();
     setupStreamPickers();
     setupComments();
+    setupGallery();
+  }
+
+  // Gallery (/photos/). photos.js is a separate file because it is the only
+  // page that needs it: the screen, the lightbox and the drag all live there
+  // and would be dead weight on every other route. It is fetched on demand the
+  // first time the gallery is opened and then reused for the session.
+  var galleryInstance = null;
+  var galleryLoading = false;
+
+  function teardownGallery() {
+    if (galleryInstance) {
+      galleryInstance.destroy();
+      galleryInstance = null;
+    }
+  }
+
+  function setupGallery() {
+    var root = document.querySelector('[data-gallery]');
+    if (!root) return;
+
+    if (window.WillowXIGallery) {
+      mountGallery(root);
+      return;
+    }
+
+    // First visit in this session. The grid is already on screen; the script
+    // only adds the screen animation, the lightbox and the drag on top.
+    loadGalleryScript(function () { mountGallery(root); });
+  }
+
+  function mountGallery(root) {
+    // The node can be swapped out by a PJAX navigation while the script is in
+    // flight, so re-read it rather than closing over the stale one.
+    var live = document.querySelector('[data-gallery]');
+    if (!live || galleryInstance) return;
+    galleryInstance = window.WillowXIGallery.create(live, {});
+    galleryInstance.init();
+  }
+
+  function loadGalleryScript(onready) {
+    var existing = document.querySelector('script[data-gallery-script]');
+    if (existing) {
+      if (window.WillowXIGallery) onready();
+      else existing.addEventListener('load', onready, { once: true });
+      return;
+    }
+
+    var script = document.createElement('script');
+    script.src = config.galleryScript;
+    script.async = true;
+    script.setAttribute('data-gallery-script', '');
+    script.onload = onready;
+    // A gallery with no script is still a gallery: the grid is server-rendered
+    // and every frame stays clickable-to-nothing rather than blanking the page.
+    script.onerror = function () { script.remove(); };
+    document.head.appendChild(script);
   }
 
   // Comments (Waline). The widget mounts inside the PJAX container, so it is

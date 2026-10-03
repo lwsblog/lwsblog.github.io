@@ -79,6 +79,9 @@
         parallaxGrid: Number(background.parallax_grid) > 0 ? Number(background.parallax_grid) : 7,
         home: is_home(),
         homePath: url_for('/'),
+        // Loaded on demand by setupGallery(), so no page but /photos/ pays
+        // for it.
+        galleryScript: url_for('/js/photos.js'),
         search: (theme.search && theme.search.enabled !== false) ? {
           // The hash comes from the generator (scripts/search-index.js) and
           // rides on the query string, so an updated index is a new URL and

@@ -75,6 +75,18 @@ REPO = Path(__file__).resolve().parent.parent
 OUT_ROOT = REPO / "source" / "images" / "posts"
 POSTS_DIR = REPO / "source" / "_posts"
 
+# 相册（/photos/）。每张图有三档真身，同一张源、同一套压缩参数，只有尺寸不同：
+#   screen  900px  进场屏风（只收横图；竖图进屏风会被 cover 裁掉大半）
+#   thumb   640px  主体网格 + 灯箱首帧（已在页面里，首帧零请求）
+#   light  1600px  灯箱渐进替换的第二帧
+# 三档都由 prepare() 压，参数不各自写死 —— 壁纸和文章插图走的也是它，
+# 这里要是另起一套，相册就会绕过体积上限那一套逻辑。
+GALLERY_DIR = REPO / "source" / "images" / "photos"
+GALLERY_DATA = REPO / "source" / "_data" / "photos.yml"
+GALLERY_TIERS = (("screen", 900), ("thumb", 640), ("light", 1600))
+# 相册清单里的序号，同时是文件名。id 用两位零填，排序即字典序。
+GALLERY_ID_WIDTH = 2
+
 # 高于这个体积就提醒一下。100KB 是 GitHub Pages 的限速门槛，现在走 Cloudflare
 # 已经不卡这个数，但仍是「一篇文章十几张图」时的合理预算线。
 SOFT_LIMIT = 200 * 1024
@@ -405,6 +417,131 @@ def convert_one(src: Path, slug: str, width: int, quality: int, dry: bool, emit=
     return dst
 
 
+def gallery_next_id() -> str:
+    """相册清单里下一个可用序号。
+
+    只认 GALLERY_DATA 里出现过的 id，不去扫目录 —— 目录里可能有手工放进去的
+    探测文件，而清单才是权威：id 必须和 photos.yml 一一对应，否则页面上会出现
+    一格没有数据、或一格数据指向不存在的图。
+    """
+    used = set()
+    if GALLERY_DATA.is_file():
+        for line in GALLERY_DATA.read_text(encoding="utf-8").splitlines():
+            # 只认行首的 "- id: 'xx'"，缩进注释和正文里的同名字串不算
+            stripped = line.strip()
+            if stripped.startswith("- id:"):
+                value = stripped.split(":", 1)[1].strip().strip("'\"")
+                if value:
+                    used.add(value)
+    n = 1
+    while str(n).zfill(GALLERY_ID_WIDTH) in used:
+        n += 1
+    return str(n).zfill(GALLERY_ID_WIDTH)
+
+
+def gallery_exif_date(src: Path, im) -> str:
+    """取拍摄日期，取不到就空着 —— 不用文件 mtime 冒充，那会把复制过的时间
+    当成拍摄时间。返回 YYYY-MM-DD 或空串。"""
+    try:
+        exif = im.getexif()
+    except Exception:
+        return ""
+    # 36867 = DateTimeOriginal，37521 = CreateDate（部分机型只写后者）
+    for tag in (36867, 37521, 306):
+        raw = exif.get(tag)
+        if not raw:
+            continue
+        text = str(raw)
+        if len(text) >= 10 and text[4] == ":" and text[7] == ":":
+            return f"{text[0:4]}-{text[5:7]}-{text[8:10]}"
+    return ""
+
+
+def append_gallery_entry(pid: str, date: str, w: int, h: int, emit=print) -> bool:
+    """往 source/_data/photos.yml 追加一条。按行追加，不做 YAML 回写 ——
+    PyYAML 一个 dump 就把注释、引号风格和字段顺序全重排了，而这个文件里的
+    注释是它的一半价值。"""
+    block = (f"- id: '{pid}'\n"
+             f"  date: '{date}'\n"
+             f"  w: {w}\n"
+             f"  h: {h}\n")
+    try:
+        existing = GALLERY_DATA.read_text(encoding="utf-8") if GALLERY_DATA.is_file() else ""
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        GALLERY_DATA.parent.mkdir(parents=True, exist_ok=True)
+        GALLERY_DATA.write_text(existing + block, encoding="utf-8")
+    except Exception as exc:
+        emit(f"  x 写不进 {GALLERY_DATA.name}：{exc}")
+        emit(f"    三档图已落盘，手动往清单里补一条：{block.strip()}")
+        return False
+    return True
+
+
+def convert_gallery(src: Path, quality: int, dry: bool, emit=print):
+    """压一张图进相册：三档真身 + 追加一条清单。
+
+    单档失败就整张放弃：宁可少一张，也不能让清单里存在一个缺档的 id ——
+    屏风抽到缺档的图会直接空屏。
+    """
+    if not src.is_file():
+        emit(f"  x 找不到文件：{src}")
+        return None
+
+    try:
+        probe = Image.open(src)
+        probe.load()
+    except Exception as exc:
+        emit(f"  x 读不了 {src.name}：{exc}")
+        emit("    （HEIC 需要先转成 JPG/PNG；Pillow 原生不支持 HEIC）")
+        return None
+    date = gallery_exif_date(src, probe)
+    probe.close()
+
+    pid = gallery_next_id()
+    made = []
+    sizes = {}
+
+    for tier, width in GALLERY_TIERS:
+        got = prepare(src, width, quality, 0, emit)
+        if got is None:
+            emit(f"  x {src.name} 的 {tier} 档压不出来，整张放弃")
+            for path in made:
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+            return None
+        data, im = got["data"], got["im"]
+        dst = GALLERY_DIR / f"{pid}-{tier}.webp"
+        if not dry:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(data)
+        made.append(dst)
+        sizes[tier] = (im.size, len(data))
+
+    thumb_size, thumb_bytes = sizes["thumb"]
+
+    emit(f"  {src.name}")
+    for tier, _ in GALLERY_TIERS:
+        (tw, th), by = sizes[tier]
+        emit(f"      {tier:<6} {tw:>4}x{th:<4} {human(by):>8}")
+    emit(f"      拍摄日期 {date or '(无 EXIF)'}    id {pid}")
+
+    if not dry:
+        if not append_gallery_entry(pid, date, thumb_size[0], thumb_size[1], emit):
+            return made[0]
+        emit(f"      source/_data/photos.yml  + {pid}")
+    if sizes["screen"][0][0] < sizes["screen"][0][1]:
+        emit("      · 竖图：不会进屏风随机池（屏风只收横图），只在网格和灯箱里出现")
+
+    light_bytes = sizes["light"][1]
+    if light_bytes > SOFT_LIMIT:
+        emit(f"      · 灯箱档 {human(light_bytes)} 超过 {human(SOFT_LIMIT)}，"
+             "靠渐进替换消化：先上已缓存的缩略，大图后台换")
+    return made[0]
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="把插图压成 WebP 放进 Hexo 站点，并打印 Markdown 引用。",
@@ -419,6 +556,9 @@ def main():
     ap.add_argument("--quality", type=int, default=82, help="WebP 质量 1-100，默认 82")
     ap.add_argument("--max-size", type=int, default=0, metavar="KB",
                     help="压缩后文件大小上限（KB）；给了就自动降质量/缩尺寸去够它，0=不限")
+    ap.add_argument("--gallery", action="store_true",
+                    help="进相册：同一张图压出 900/640/1600 三档，落进 source/images/photos/，"
+                         "并往 source/_data/photos.yml 追加一条清单（不认 --slug）")
     ap.add_argument("--dry-run", action="store_true", help="只报告体积，不写文件")
     args = ap.parse_args()
 
@@ -437,7 +577,48 @@ def main():
         print("x 没有指定图片。给个路径，或用 --paste 从剪贴板取。")
         print("  例：python tools/add-image.py 图.png --slug my-post")
         print("      python tools/add-image.py --paste")
+        print("      python tools/add-image.py 图.png --gallery")
         return 1
+
+    # ---- 相册：独立落点，不猜 slug，也不吃 --max-size ----
+    # --max-size 在这里是错的口子：三档的尺寸是页面写死的（900/640/1600），
+    # 压到某个体积以下必然要缩尺寸，一缩就和 CSS 里的 aspect-ratio 对不上。
+    if args.gallery:
+        if args.slug:
+            print("x --gallery 和 --slug 不能一起用：相册的落点由清单决定，不按文章分目录。")
+            return 1
+        if args.max_size > 0:
+            print("x --gallery 不接受 --max-size。")
+            print("  相册三档的尺寸是页面写死的，压体积就得缩尺寸，一缩就和版式对不上。")
+            return 1
+
+        print()
+        print(f"目标目录：source/images/photos/（三档：{' / '.join(t for t, _ in GALLERY_TIERS)}）")
+        print(f"清单：source/_data/photos.yml    质量 {args.quality}"
+              + ("（dry-run，不写盘）" if args.dry_run else ""))
+        print()
+
+        g_ok, g_fail = 0, 0
+        for src in sources:
+            if convert_gallery(src, args.quality, args.dry_run):
+                g_ok += 1
+            else:
+                g_fail += 1
+
+        if args.paste and sources and sources[0].name.startswith("wb-clipboard-"):
+            try:
+                sources[0].unlink()
+            except Exception:
+                pass
+
+        print(f"完成：{g_ok} 张成功" + (f"，{g_fail} 张失败" if g_fail else ""))
+        if g_ok and not args.dry_run:
+            print()
+            print("下一步：")
+            print("    1. 确认 source/_data/photos.yml 里的 date（没 EXIF 的要手填）")
+            print("    2. git add source/images/photos/ source/_data/photos.yml")
+            print('    3. bash publish.sh --push "说明"')
+        return 0 if g_fail == 0 else 1
 
     # ---- slug：参数优先，否则取最近改动的文章 ----
     if args.slug:

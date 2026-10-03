@@ -4570,6 +4570,580 @@ html.js body.route-leaving .site-header {
   }
 }
 
+/* --- Gallery (/photos/) ---------------------------------------------------
+   The screen is scroll-driven, so almost every moving part here is written by
+   JS every frame. Two rules came out of the prototypes and are load-bearing:
+
+   1. The veil must NOT carry backdrop-filter. Blurring the veil blurs the
+      title sitting on top of it and drops the contrast to unreadable; the
+      only blur in this scene is the scene background's own 46px, which is
+      already there.
+   2. .gallery-board stays at opacity 1 forever. Anything below opacity 1
+      becomes the backdrop root, and a backdrop-filter can then only sample
+      inside itself — the board's own blur would die (same trap as
+      .stream-picker on the home page). The fade-out is on the screen layer.
+
+   will-change appears three times in this block, which is the one documented
+   exception to the site rule. The animation re-writes transform/opacity on
+   these nodes on every scroll frame; without the hint the compositor
+   re-rasterises the whole gallery each frame. It is scoped to elements that
+   exist only while the screen animation runs, and JS drops the screen from
+   the layer tree once it lands (see photos.js). */
+.gallery {
+  position: relative;
+}
+
+.gallery-board {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 200px;
+  transform: translateX(-50%);
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(20, 25, 34, 0.66) 26%,
+    rgba(20, 25, 34, 0.66) 74%,
+    transparent
+  );
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+html[data-theme="light"] .gallery-board {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(226, 229, 231, 0.7) 26%,
+    rgba(226, 229, 231, 0.7) 74%,
+    transparent
+  );
+}
+
+/* The screen is a photograph under a veil, so its own palette is fixed
+   regardless of the site theme — it is an image, not a page. The type on it
+   is light and the veil is dark in BOTH themes. Inheriting --paper here is
+   what made the light theme render dark text on a dark photo (measured: the
+   title sat at roughly 1.6:1 against the veil). Only the header bar, which
+   sits on top of the screen, follows the theme. */
+.photo-screen {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  overflow: hidden;
+  background: #090b0f;
+  will-change: opacity;
+}
+
+.photo-screen__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  object-fit: cover;
+  will-change: transform;
+}
+
+.photo-screen__veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 11, 15, 0.72);
+  will-change: opacity;
+}
+
+.photo-screen__type {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  text-align: center;
+  /* The title's size lives here and nowhere else. JS used to write
+     style.fontSize every frame, which pinned it at 118px and pushed
+     "WillowXI's Gallery" past the right edge. */
+  transform: translate(-50%, -50%);
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.photo-screen__label {
+  display: block;
+  color: #d6f0ff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  opacity: 0.82;
+}
+
+.photo-screen__title {
+  margin: 16px 0 0;
+  color: #f1f3f5;
+  font-family: var(--font-mono);
+  font-size: clamp(30px, 7vw, 96px);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.06;
+  white-space: nowrap;
+  text-shadow: 0 0 44px rgba(9, 11, 15, 0.7);
+}
+
+.photo-screen__sub {
+  margin: 16px 0 0;
+  color: #b8bec8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+}
+
+.photo-screen__hint {
+  position: absolute;
+  z-index: 2;
+  bottom: 28px;
+  left: 50%;
+  margin: 0;
+  color: #b8bec8;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.28em;
+  transform: translateX(-50%);
+}
+
+/* The corner label takes over once the screen has left. It sits below the
+   fixed bar, so it reads as page furniture rather than a second header.
+   Unlike the screen's own type this one lives on the themed ground, so it
+   does follow --paper — and its shadow has to flip with it, or a dark halo
+   rings dark text in light mode. */
+.photo-corner {
+  position: fixed;
+  z-index: 26;
+  top: calc(var(--header-height) + 30px);
+  left: clamp(20px, 4vw, 64px);
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+.photo-corner strong {
+  display: block;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-shadow: 0 0 20px rgba(9, 11, 15, 0.8);
+}
+
+html[data-theme="light"] .photo-corner strong {
+  text-shadow: 0 0 18px rgba(244, 245, 242, 0.9);
+}
+
+.photo-corner small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+}
+
+/* The screen needs scroll distance of its own; without it the gallery below
+   only offers a couple of hundred pixels of travel and the animation is over
+   before it starts. */
+.gallery-spacer {
+  height: 240vh;
+}
+
+.photo-main {
+  position: relative;
+  z-index: 2;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0 0 150px;
+}
+
+.photo-main__header {
+  max-width: 900px;
+  margin: 0 auto 44px;
+  padding-top: 40px;
+  text-align: center;
+}
+
+.photo-main__header .micro-label {
+  justify-content: center;
+}
+
+.photo-main__header p {
+  margin: 18px 0 0;
+  color: var(--paper-dim);
+  font-size: 14px;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 26px;
+  align-items: start;
+}
+
+/* Zero radius: rounded corners belong to prose only, and a print pinned to a
+   wall does not have any. The shadow is doing two jobs — it lifts the print off
+   the acrylic, and on the pale ground it is the only thing separating white
+   paper from white background, so it has to be darker there. */
+.photo-frame {
+  position: relative;
+  margin: 0;
+  padding: 11px 11px 38px;
+  background: #f4f4f1;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  transition: transform 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
+  will-change: transform;
+}
+
+html[data-theme="light"] .photo-frame {
+  box-shadow: 0 12px 34px rgba(13, 27, 36, 0.2), 0 2px 6px rgba(13, 27, 36, 0.12);
+}
+
+.photo-frame:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.66), 0 0 24px var(--control-glow);
+}
+
+html[data-theme="light"] .photo-frame:hover {
+  box-shadow: 0 20px 48px rgba(13, 27, 36, 0.26), 0 0 22px rgba(13, 27, 36, 0.14);
+}
+
+/* Dragging is a toy for this session only — it is deliberately not written to
+   the post or to any storage, so a reload restores the authored order. */
+.photo-frame.is-dragging {
+  z-index: 3;
+  transition: none;
+  cursor: grabbing;
+  opacity: 0.92;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.7), 0 0 28px var(--control-glow);
+}
+
+html[data-theme="light"] .photo-frame.is-dragging {
+  box-shadow: 0 26px 56px rgba(13, 27, 36, 0.3), 0 0 24px rgba(13, 27, 36, 0.16);
+}
+
+.photo-frame__hit {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #0d1117;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.photo-frame__img {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  /* The ratio comes from the data file, so the frame holds its shape before
+     the bytes land and the grid does not jump. */
+  aspect-ratio: var(--ratio);
+  object-fit: cover;
+}
+
+.photo-frame__cap {
+  position: absolute;
+  right: 11px;
+  bottom: 11px;
+  left: 11px;
+  display: flex;
+  justify-content: space-between;
+  color: #5a5f66;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+/* #08 is a 2.70 panorama. Left in a 210px column it is 78px tall and reads as
+   a glitch, so it takes the full row instead. */
+.photo-frame--wide {
+  grid-column: 1 / -1;
+}
+
+/* The travelling print. Same stock and shadow language as a grid frame — it
+   is one, in transit — but fixed and transparent to input while it moves.
+   It sits ABOVE the screen (30) on purpose: the print is the screen image
+   pulling back from the edges and turning into paper, so it has to be the
+   thing on top while that happens. Underneath, the screen recedes — see the
+   scale/fade on .photo-screen__img in photos.js. */
+.photo-print {
+  position: fixed;
+  z-index: 31;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 11px 11px 38px;
+  background: #f4f4f1;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.photo-print__img {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+}
+
+.photo-print__cap {
+  position: absolute;
+  right: 11px;
+  bottom: 11px;
+  left: 11px;
+  display: flex;
+  justify-content: space-between;
+  color: #5a5f66;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+/* The lightbox is reparented to <body> while it is open (see photos.js):
+   .app-shell is a stacking context at z-index 1, so a layer left inside it can
+   never climb over the frozen bar at 261 no matter what z-index it carries.
+   As a child of the body it only has to outrank the bar, which is why its
+   z-index here is 280. */
+.photo-lightbox {
+  position: fixed;
+  z-index: 280;
+  inset: 0;
+}
+
+.photo-lightbox[hidden] {
+  display: none;
+}
+
+.photo-lightbox__veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 11, 15, 0.9);
+  animation: photo-lightbox-veil 240ms var(--ease-out) both;
+}
+
+@keyframes photo-lightbox-veil {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The frame grows out of its own cell rather than popping in as an overlay:
+   the stage starts at the thumbnail's box and settles to the fitted size. */
+.photo-lightbox__stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  padding: 11px 11px 38px;
+  background: #f4f4f1;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.75);
+  transform: translate(-50%, -50%);
+}
+
+.photo-lightbox__img {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  background: #0d1117;
+  object-fit: contain;
+}
+
+.photo-lightbox__cap {
+  position: absolute;
+  right: 11px;
+  bottom: 11px;
+  left: 11px;
+  display: flex;
+  justify-content: space-between;
+  color: #5a5f66;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+/* The bar is themed, the screen is not. In light mode the bar's text is dark
+   ink, which is unreadable on a dark photograph — so while the screen is up
+   the whole bar goes light-on-dark. It stays visible and clickable on purpose:
+   the home intro hides the bar because it is a curtain you must pass through,
+   but here a visitor may have come to /photos/ only to reach something else,
+   and stranding them would be worse than a slightly restyled bar. */
+body.is-gallery-screen .site-header {
+  color: #f1f3f5;
+}
+
+body.is-gallery-screen .site-header .brand__text strong,
+body.is-gallery-screen .site-header .brand__text small,
+body.is-gallery-screen .site-header .site-nav__link,
+body.is-gallery-screen .site-header .site-nav__icon,
+body.is-gallery-screen .site-header .site-search__input {
+  color: #f1f3f5;
+}
+
+body.is-gallery-screen .site-header .site-search__field,
+body.is-gallery-screen .site-header .theme-toggle {
+  border-color: rgba(241, 243, 245, 0.34);
+  /* The toggle carries its own color and its own --control-edge, so the bar
+     rules above do not reach it — without this the sun/moon glyph is dark ink
+     on a dark photograph in light mode. */
+  color: #f1f3f5;
+  box-shadow: 0 0 12px rgba(214, 240, 255, 0.28);
+}
+
+body.is-gallery-screen .site-header .site-search__input::placeholder {
+  color: rgba(241, 243, 245, 0.62);
+}
+
+body.is-gallery-screen .site-header.is-scrolled {
+  background: rgba(9, 11, 15, 0.88);
+  border-color: rgba(241, 243, 245, 0.16);
+}
+
+.photo-lightbox__nav,
+.photo-lightbox__close {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  width: 46px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  /* The veil is always the dark plate, so the controls on it are too —
+     light-on-dark in both themes. Taking them from the theme variables made
+     them near-invisible against the veil in light mode. */
+  background: rgba(9, 11, 15, 0.6);
+  color: #f1f3f5;
+  cursor: pointer;
+  transition: border-color 200ms var(--ease-out), color 200ms var(--ease-out);
+}
+
+.photo-lightbox__nav:hover,
+.photo-lightbox__close:hover {
+  border-color: #d6f0ff;
+  color: #d6f0ff;
+}
+
+.photo-lightbox__nav--prev {
+  top: 50%;
+  left: 24px;
+  transform: translateY(-50%);
+}
+
+.photo-lightbox__nav--next {
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+}
+
+/* Below the bar, not under it. The bar is z-index 261 and frozen above every
+   overlay by design, so a close button at 22px would be unreachable. */
+.photo-lightbox__close {
+  top: calc(var(--header-height) + 22px);
+  right: 22px;
+}
+
+.photo-lightbox__hint {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  margin: 0;
+  color: #7e8794;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  transform: translateX(-50%);
+}
+
+/* Reduced motion: the screen stops being a screen and becomes a plain header
+   in the flow. Hiding it outright would take the page's only h1 with it. */
+.gallery.is-static .photo-screen {
+  position: relative;
+  inset: auto;
+  padding: calc(var(--header-height) + 72px) 20px 40px;
+  background: none;
+  will-change: auto;
+}
+
+.gallery.is-static .photo-screen__img,
+.gallery.is-static .photo-screen__veil,
+.gallery.is-static .photo-screen__hint {
+  display: none;
+}
+
+.gallery.is-static .photo-screen__type {
+  position: static;
+  transform: none;
+  will-change: auto;
+}
+
+.gallery.is-static .photo-screen__title {
+  font-size: clamp(38px, 6.5vw, 82px);
+  text-shadow: none;
+}
+
+.gallery.is-static .gallery-spacer,
+.gallery.is-static .photo-corner,
+.gallery.is-static .photo-print {
+  display: none;
+}
+
+.gallery.is-static .photo-main {
+  padding-top: 0;
+}
+
+@media (max-width: 760px) {
+  .gallery-board {
+    width: 116px;
+  }
+
+  .gallery-spacer {
+    height: 190vh;
+  }
+
+  .photo-screen__title {
+    font-size: clamp(28px, 9vw, 52px);
+  }
+
+  .photo-corner strong {
+    font-size: 18px;
+  }
+
+  .photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 18px;
+  }
+
+  .photo-frame {
+    padding: 8px 8px 32px;
+  }
+
+  .photo-lightbox__nav--prev {
+    left: 12px;
+  }
+
+  .photo-lightbox__nav--next {
+    right: 12px;
+  }
+
+  .photo-lightbox__hint {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

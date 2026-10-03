@@ -1,0 +1,108 @@
+<%
+  // 相册。图片清单在 source/_data/photos.yml（三档真身：screen/thumb/light）。
+  // 屏风只从横屏图里随机抽一张，竖图不进池；抽中的那张同时是主体网格的
+  // 第一格，所以屏风退场时相纸落回自己的位置，而不是落到别的图上。
+  const photos = (site.data && site.data.photos) ? site.data.photos : [];
+  const pool = photos.filter(function (p) { return Number(p.w) > Number(p.h); });
+  // The screen only ever shows a landscape frame, and whichever one it picks
+  // is moved to the head of the grid. The print therefore lands on its own
+  // photo instead of on an unrelated one, and the head of the grid is also
+  // the first thing under the screen at the end of the travel.
+  const cover = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  const ordered = cover
+    ? [cover].concat(photos.filter(function (p) { return p !== cover; }))
+    : photos.slice();
+  const stamp = function (value) {
+    if (!value) return '—';
+    const parts = String(value).split('-');
+    return parts.length === 3 ? parts[0] + '.' + parts[1] + '.' + parts[2] : String(value);
+  };
+  const photoUrl = function (id, tier) {
+    return url_for('/images/photos/' + id + '-' + tier + '.webp');
+  };
+  const landscape = photos.filter(function (p) { return Number(p.w) > Number(p.h); }).length;
+%>
+<!-- The screen is a fixed layer, so it lives outside .photo-main and is never
+     inside the scrolling flow. .gallery-board must stay at opacity 1 (see the
+     backdrop-root note in the CSS) or its own blur dies with it. -->
+<div class="gallery" data-gallery>
+  <div class="gallery-board" aria-hidden="true"></div>
+
+  <div class="photo-screen" data-photo-screen>
+    <% if (cover) { %>
+      <img class="photo-screen__img" data-photo-screen-img
+        src="<%- photoUrl(cover.id, 'screen') %>" alt="" decoding="async">
+    <% } %>
+    <div class="photo-screen__veil" data-photo-screen-veil></div>
+    <div class="photo-screen__type" data-photo-screen-type>
+      <span class="photo-screen__label">CONTACT SHEET</span>
+      <h1 class="photo-screen__title"><%= page.title %></h1>
+      <p class="photo-screen__sub">
+        <%= photos.length %> 帧 · 横 <%= landscape %> 竖 <%= photos.length - landscape %>
+      </p>
+    </div>
+    <p class="photo-screen__hint" data-photo-screen-hint>SCROLL</p>
+  </div>
+
+  <div class="photo-corner" data-photo-corner>
+    <strong><%= page.title %></strong>
+    <small>CONTACT / <%= String(photos.length).padStart(2, '0') %> / <%= photos.length ? stamp(photos[0].date).slice(0, 4) : '' %></small>
+  </div>
+
+  <div class="gallery-spacer" data-gallery-spacer></div>
+
+  <div class="photo-main" data-photo-main>
+    <header class="photo-main__header">
+      <span class="micro-label">ALBUM / <%= page.title %></span>
+      <% if (page.description) { %><p><%= page.description %></p><% } %>
+    </header>
+
+    <div class="photo-grid" data-photo-grid>
+      <% ordered.forEach(function (photo, index) { %>
+        <%
+          const ratio = (Number(photo.w) / Number(photo.h)).toFixed(4);
+          const wide = Number(photo.w) / Number(photo.h) > 2;
+        %>
+        <figure class="photo-frame<%= wide ? ' photo-frame--wide' : '' %>" data-photo-frame
+          data-index="<%= index %>" data-id="<%= photo.id %>"
+          style="--ratio: <%= ratio %>">
+          <button class="photo-frame__hit" type="button"
+            aria-label="放大第 <%= index + 1 %> 帧：<%= stamp(photo.date) %>">
+            <img class="photo-frame__img" data-photo-frame-img
+              src="<%- photoUrl(photo.id, 'thumb') %>"
+              alt="<%= stamp(photo.date) %>" loading="lazy" decoding="async"
+              width="<%= photo.w %>" height="<%= photo.h %>"
+              data-light-src="<%- photoUrl(photo.id, 'light') %>">
+          </button>
+          <figcaption class="photo-frame__cap">
+            <span><%= stamp(photo.date) %></span>
+            <span><%= String(index + 1).padStart(2, '0') %></span>
+          </figcaption>
+        </figure>
+      <% }) %>
+    </div>
+  </div>
+
+  <div class="photo-lightbox" data-photo-lightbox hidden>
+    <div class="photo-lightbox__veil" data-photo-lightbox-veil></div>
+    <figure class="photo-lightbox__stage" data-photo-lightbox-stage>
+      <img class="photo-lightbox__img" data-photo-lightbox-img alt="" decoding="async">
+      <figcaption class="photo-lightbox__cap">
+        <span data-photo-lightbox-label></span>
+        <span data-photo-lightbox-index></span>
+      </figcaption>
+    </figure>
+    <button class="photo-lightbox__nav photo-lightbox__nav--prev" type="button"
+      data-photo-lightbox-prev aria-label="上一帧">
+      <%- partial('_partial/icons', {name: 'arrow-left', size: 22}) %>
+    </button>
+    <button class="photo-lightbox__nav photo-lightbox__nav--next" type="button"
+      data-photo-lightbox-next aria-label="下一帧">
+      <%- partial('_partial/icons', {name: 'arrow-right', size: 22}) %>
+    </button>
+    <button class="photo-lightbox__close" type="button" data-photo-lightbox-close aria-label="关闭">
+      <%- partial('_partial/icons', {name: 'x', size: 20}) %>
+    </button>
+    <p class="photo-lightbox__hint" data-photo-lightbox-hint>&larr; &rarr; 切换 · ESC 关闭</p>
+  </div>
+</div>
