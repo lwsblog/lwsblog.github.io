@@ -125,7 +125,15 @@
                   <div class="stream-detail" data-stream-detail>
                     <div class="stream-detail__track" data-stream-track>
                       <% posts.forEach(function(post) {
-                        const EXCERPT_LIMIT = 112;
+                        /* 140 -> 112 -> 88 on 2026-10-03. The preview column
+                           narrowed twice (panel padding 118/91 -> 92/56 ->
+                           150/90) while the line indent eats ~21px of travel,
+                           so fewer characters fit in the same 4 clamped
+                           lines. 88 is the measured ceiling at 1440px: every
+                           one of the 8 excerpts lands on <=4 lines, and the
+                           tightest one sits exactly on 4. Raising it puts
+                           back the clamp truncation. */
+                        const EXCERPT_LIMIT = 88;
                         const excerptText = strip_html(post.excerpt || post.content || '').replace(/\s+/g, ' ').trim().slice(0, EXCERPT_LIMIT);
                         const coverValue = post.wallpaper || coverFallback;
                         const cover = coverValue

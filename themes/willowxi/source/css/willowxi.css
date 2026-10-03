@@ -3088,19 +3088,20 @@ a.archive-row:hover {
   counter-reset: detail-panel;
 }
 
-/* 91/118 -> 56/92 on 2026-10-03: the text column was inset further than the
-   plate needs, so 119px of left padding + 118px on the right left the block
-   reading narrow (23.5 CJK per line) while the slant cut the corner anyway.
-   The ghost index and READ share the 92px right edge (see below). */
+/* 91/118 -> 56/92 on 2026-10-03 (the text column was inset further than the
+   plate needs), then 56/92 -> 90/150 the same day: at 92 the measured VISUAL
+   right gap was -1.3px — the excerpt's right edge sat ON the slanted mask,
+   because the 92px padding is measured from the panel's rectangular box while
+   the mask cuts 54px of run off the corner. 150 clears it by ~55px. */
 .stream-detail__panel {
   position: relative;
   height: 100%;
-  padding: 42px 92px 40px 56px;
+  padding: 42px 150px 40px 90px;
   overflow: hidden;
   counter-increment: detail-panel;
 }
 
-/* Ghost index fills the quiet top-right corner. It shares READ's 92px right
+/* Ghost index fills the quiet top-right corner. It shares READ's 150px right
    edge, so it has to share its displacement too: one --detail-shift on the
    panel drives both, and the axis the two sit on can never drift apart.
    Measured: the 54px index occupies y 30-97 inside the panel while the title
@@ -3111,7 +3112,7 @@ a.archive-row:hover {
   position: absolute;
   z-index: 1;
   top: 30px;
-  right: 92px;
+  right: 150px;
   color: transparent;
   font-family: var(--font-mono);
   font-size: 54px;
@@ -3192,14 +3193,15 @@ a.archive-row:hover {
 }
 
 .stream-detail__body p {
-  margin: 4px 0 0 20px;
+  /* -1px, not the 20px the other blocks get: the ::before float below already
+     carries the first line out to the block's 110px edge, and the remaining
+     lines travel further LEFT (see the shape-outside note). */
+  margin: 4px 0 0 -1px;
   max-width: 34em;
   color: rgba(241, 243, 245, 0.78);
   /* 14 -> 16px on 2026-10-03, leading 2.05 -> 1.85 so the block keeps the
      same airiness at the larger size (measured: 4 clamped lines grew 115 ->
-     118px, so the 434px picker still has ~80px of headroom). The column
-     widened with the panel padding on the same day (376.6 -> 445.6px at
-     1440), which is what lets the excerpt reach 4 full lines. */
+     118px, so the 434px picker still has ~80px of headroom). */
   font-size: 16px;
   letter-spacing: 0.01em;
   line-height: 1.85;
@@ -3207,6 +3209,32 @@ a.archive-row:hover {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+/* Per-line diagonal indent — the same -7deg lean, continued INSIDE the excerpt.
+   The block staircase above (small 130 -> h4 120) descends leftward because
+   the wrapper leans left; the excerpt's own lines used to all start flush,
+   which broke the line halfway down. An empty float with a triangular
+   shape-outside pushes each line further left as it descends: measured
+   110 / 104.8 / 99.5 / 94.3, i.e. -5.3px per line, continuing the staircase
+   (and the frame's own slope is 5.3px per 29.6px line = 10.2deg, close to
+   the 7deg lean the wrapper applies to the whole column).
+
+   Two things NOT to "simplify" here:
+   - height must be the EXPLICIT 4-line height, never `100%`. The float's
+     height would then depend on the text it is shaping — cyclic — and
+     Chromium collapses it, which silently flattens the staircase.
+   - the triangle is the UPPER-left one (`0 0, 100% 0, 0 100%`). The mirrored
+     lower-left triangle shifts every line RIGHT instead, which fights the
+     wrapper's lean. */
+.stream-detail__body p::before {
+  content: '';
+  float: left;
+  /* 21px = 4 steps x 5.3px, the whole staircase's travel */
+  width: 21px;
+  height: calc(4 * 1.85em);
+  shape-outside: polygon(0 0, 100% 0, 0 100%);
+  shape-margin: 0;
 }
 
 /* READ as a slanted solid plate — the same -7deg block language as the
@@ -3219,7 +3247,7 @@ a.archive-row:hover {
 .stream-detail__read {
   position: absolute;
   z-index: 1;
-  right: 92px;
+  right: 150px;
   bottom: 34px;
   display: inline-flex;
   align-items: center;
@@ -3357,6 +3385,13 @@ a.archive-row:hover {
   .stream-detail__body h4,
   .stream-detail__body p {
     margin-left: 0;
+  }
+
+  /* No slant on mobile: the plate drops its clip-path here, so there is no
+     -7deg edge for the staircase to follow — the float would just indent the
+     first line for nothing. */
+  .stream-detail__body p::before {
+    content: none;
   }
 
   .stream-detail__panel::before {
