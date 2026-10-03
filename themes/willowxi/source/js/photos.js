@@ -186,13 +186,23 @@
       if (screenVeil) screenVeil.style.opacity = String(1 - veilT);
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
-      // The print: 0.18 -> 0.92, one scale, one position, both interpolated
+      // The print: 0.18 -> 1, one scale, one position, both interpolated
       // linearly in the same eased parameter. Nothing else is written, so the
       // photograph is the same photograph at every frame — including t=0,
       // where the transform still has to be written, because the element's
       // own top-left is 0,0 and an unwritten transform leaves a 215px print
       // sitting in the corner of the screen.
-      var printT = segment(t, 0.18, 0.92);
+      //
+      // The travel has to END at t=1, not short of it. The print's target is
+      // a projection — the place the cell WILL be when the travel ends — so
+      // any printT that reaches 1 before t=1 parks the print at that spot
+      // while the cell is still travelling towards it, and the last stretch
+      // of scrolling shows the print hanging in mid-air with the cell sliding
+      // up underneath. At 0.92 that was a 97px gap over 155px of scroll, and
+      // the snap only happened because the print was display:none'd on arrival.
+      // Ending both at t=1 makes the two coincide at every frame's end and
+      // leaves no stall to hide.
+      var printT = segment(t, 0.18, 1);
       var size = viewport();
       var scale = lerp(startScale, 1, printT);
       var x = lerp((size.width - cell.width * startScale) / 2, cell.x, printT);
