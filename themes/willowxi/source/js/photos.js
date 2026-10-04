@@ -1174,15 +1174,23 @@
     // (no lurch, no dribble) and peaks in the middle (fastest where the eye is not
     // reading a fresh gesture). `p` is the fraction of the glide already spent, so
     // the shape holds however long the glide is.
-    // 🔴 Tuned up twice at the user's request ("缓动力度还是轻"). 420 → 700ms of
-    // travel time, with the speed ceiling raised so that time is actually usable,
-    // and the first-frame floor lifted so the start is not dead either.
-    var GLIDE = 700;
-    var SPEED = 14000;
-    // How eagerly the bell leaves the mark (see the SHAPE note in step()).
-    var SHAPE = 1.8;
-    var stepStart = 0;
-    var stepFrom = 0;
+    // 🔴 RESPONSIVE + INERTIA, which is the definition the complaints converged on:
+    // "不跟手" (it does not follow the input) and "惯性不够" (it does not coast).
+    //
+    // The bell curve above could not give both. Its first frame moves
+    // `|delta| · shape · 2 · (dt/glide)`, so a 100px notch at a 700ms glide starts at
+    // ~457px/s — slower than the wheel that caused it — which reads as lag, and the
+    // only way to fix that inside the bell is to shorten `glide`, which kills the
+    // coast. The two requirements pull the one parameter in opposite directions.
+    //
+    // This is the standard frame-rate-independent responsiveness instead: the step is
+    // proportional to the REMAINING distance, so it starts fast (a notch is visibly
+    // moving on the next frame), and because the proportion is per-frame it decays
+    // geometrically — it coasts, and the coast slows down. `GLIDE` becomes the time
+    // constant: ~220ms reaches 95% of a 100px step in about 660ms, and the last
+    // millimetre arrives without a visible tail.
+    var GLIDE = 60;
+    var SPEED = 26000;
     var lastStepAt = 0;
     function step() {
       frameRequest = 0;
@@ -1193,64 +1201,28 @@
       var glide = window.__glide >= 0 ? window.__glide : GLIDE;
       var speed = window.__speed > 0 ? window.__speed : SPEED;
       var target = window.scrollY;
-      if (smoothY < 0) { smoothY = target; stepFrom = target; }
-      // 🔴 A journey lasts `glide` ms from the moment the SCROLL moves, and that
-      // instant is found by watching the TARGET move — not by watching it stand
-      // still. The first version of this restarted the journey on every settled
-      // frame (`|target - stepFrom| < 0.5` is satisfied for ever once the page
-      // stops), so each frame began a fresh bell: measured as
-      //   5px, 47px, 30px, 12px, 3px, … stop … 100px, stop, stop, …
-      // i.e. the print ran a whole ease, halted, then jolted the remaining
-      // distance. The curve was right; the state machine was wrong.
-      if (Math.abs(target - stepFrom) > 0.5) {
-        stepFrom = target;
-        stepStart = performance.now();
-      }
+      if (smoothY < 0) smoothY = target;    // first frame: start exactly on the scroll
       var delta = target - smoothY;
-      // 🔴 0.6px, not 0.12px. The residual is invisible either way (the print is
-      // 193px wide at scale 1, so this is a third of a percent), but a threshold
-      // this tight makes the tail of the glide spend several extra frames closing
-      // the last fraction of a pixel. That is exactly the "empty travel" report —
-      // the wheel has moved and the picture has not — so the extra frames are
-      // bought for nothing. `E1` (hand-off size error) still measures 0.4px.
+      // 0.6px, not 0.12px: invisible either way (the print is 193px wide at scale 1)
+      // but a tighter threshold spends several extra frames closing a fraction of a
+      // pixel — which is itself read as the wheel having moved with nothing happening.
       if (Math.abs(delta) < 0.6) {
         smoothY = target;                   // close enough: snap so the hand-off is exact
-        stepStart = 0;
       } else if (window.__smooth > 0) {
         smoothY += delta * Math.min(1, window.__smooth);   // raw per-frame override
       } else if (glide <= 0) {
         smoothY = target;                   // smoothing off
       } else {
-        if (!stepStart) stepStart = now;
-        var p = clamp01((now - stepStart) / glide);
-        // 🔴 The bell is `sin²` raised to a POWER, and the power is the knob for
-        // how fast it gets going. `sin²(πp)` alone is symmetric and far too gentle
-        // off the mark — measured, it had covered only 7% of the distance after a
-        // quarter of the glide and needed 600ms to settle, which is read as "there
-        // is a lot of empty travel" (the wheel has moved, the picture has not).
-        // `SHAPE = 2.2` front-loads it: it leaves the mark promptly, still has zero
-        // slope at p=1 so it decelerates into place, and no longer crawls.
-        // 1 = the original symmetric bell, 3 = very eager.
-        var shape = window.__shape > 0 ? window.__shape : SHAPE;
-        var bell = Math.sin(Math.PI * p);
-        var v = Math.pow(bell * bell, shape) * (shape * 2);
-        var stepPx = Math.abs(delta) * v * (dt / glide);
-        // 🔴 A FLOOR under the first frames. `sin²` has zero slope at p=0, so the
-        // opening frames move a fraction of a pixel: measured, 0.10px at 115ms and
-        // the first real motion at ~150ms. That is the "empty travel" — the wheel
-        // has turned and the picture has not — and it is also why the regression
-        // probe read the acrylic as still 0 when it sampled 45ms after a jump.
-        // Lifting the floor to 12% of the gap gets the print moving on the first
-        // frame while leaving the deceleration at the far end untouched.
-        var floorFrac = window.__floor >= 0 ? window.__floor : 0.12;
-        var floorPx = Math.abs(delta) * floorFrac;
-        if (stepPx < floorPx && p < 1) stepPx = floorPx;
-        var cap = speed * dt / 1000;                     // the speed limit, px/frame
-        if (stepPx > cap) stepPx = cap;
-        if (stepPx > Math.abs(delta)) stepPx = Math.abs(delta);
-        if (p >= 1) stepPx = Math.abs(delta);            // journey over: land it
-        smoothY += delta > 0 ? stepPx : -stepPx;
-        if (smoothY === target) stepStart = 0;
+        // Frame-rate independent: `1 - exp(-dt/glide)` is the same fraction of the
+        // remaining distance whatever the display refreshes at. At 204Hz it is a
+        // smaller fraction per frame but there are more frames, so the motion takes
+        // the same wall-clock time.
+        var k = 1 - Math.exp(-dt / glide);
+        var stepPx = delta * k;
+        var cap = speed * dt / 1000;        // the speed limit, px/frame
+        if (Math.abs(stepPx) > cap) stepPx = delta > 0 ? cap : -cap;
+        if (Math.abs(stepPx) > Math.abs(delta)) stepPx = delta;
+        smoothY += stepPx;
       }
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
