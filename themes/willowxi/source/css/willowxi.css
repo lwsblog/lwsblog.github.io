@@ -4762,6 +4762,24 @@ html[data-theme="light"] .photo-acrylic {
   text-shadow: 0 0 calc(20px / var(--mast-s, 1)) rgba(9, 11, 15, 0.8);
 }
 
+/* The typewriter's caret. A real underscore glyph rather than a CSS border, at the
+   user's request ("光标采用下划线闪动"), sized to one character of the same monospace
+   face so the line does not jog as it types. The blink reuses the theme's own
+   `blink-mark` keyframes (see .home-hero__name::after), so nothing new is animated. */
+.photo-masthead__caret {
+  display: inline-block;
+  width: 0.6em;
+  color: var(--paper);
+  animation: blink-mark 1.5s steps(1, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .photo-masthead__caret {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 .photo-masthead__sub {
   margin: 8px 0 0;
   color: var(--muted);

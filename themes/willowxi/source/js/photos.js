@@ -183,6 +183,12 @@
     // by `ALT_RANGE` px. User picked "half the travel"; the travel is ~2440px at
     // 1440x900, so 1200px. Overridable live with `window.__altRange`.
     var ALT_RANGE = 1200;
+    // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
+    // huge, which is the current brief). `window.__titleFrom` overrides it live.
+    var TITLE_FROM = 1;
+    // 🎛️ The fraction of the travel at which coming back UP re-types the title.
+    // 0.5 = half way, the user's "上滑到一半之后就打".
+    var TITLE_AT = 0.5;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -619,10 +625,36 @@
       // label and the tally leave, and they leave early — they belong to the
       // splash, not to the header.
       if (masthead && mastFrom && mastTo) {
-        var titleT = segment(t, 0.18, 0.62);
+        // 🎛️ `TITLE_FROM` is where the title starts flying to its corner. The user's
+        // brief is that the title stays CENTRED and huge for the whole page and only
+        // the particles take it away, so the fly is off by default: the interpolation
+        // is pinned at its start (`titleT = 0`), which is "centred glyphs at bigScale".
+        // Raising this constant (or `window.__titleFrom`) restores the original
+        // centre → top-left travel without any other change.
+        var titleFrom = window.__titleFrom >= 0 ? window.__titleFrom : TITLE_FROM;
+        var titleT = titleFrom >= 1 ? 0 : segment(t, titleFrom, 0.62);
         var mScale = lerp(mastFrom.scale, mastTo.scale, titleT);
         var mx = lerp(mastFrom.x, mastTo.x, titleT);
-        var my = lerp(mastFrom.y, mastTo.y, titleT);
+        if (titleSettled) {
+          // Anchored to the viewport at the moment of the re-type; `- scrollY` then
+          // makes it ride the page like a placed object. Deliberately the OPENING
+          // scale, per "标题就是巨大，不缩小".
+          mx = 0;
+        }
+        // 🔴 The vertical offset follows the SCROLL, the horizontal one does not — and the
+        // sign is MINUS.
+        //
+        // "跟随滚动上下位移" = the title should ride UP the screen as the page scrolls
+        // down, like something standing on the document rather than pinned to the
+        // viewport. `masthead` is `position: fixed`, so nothing moves it on its own; the
+        // transform has to cancel the scroll, which is `- scrollY`. Written as `+` it
+        // drove the title DOWN the screen while the page scrolled up — the user's
+        // "初次下滑的时候为什么标题往下跑了".
+        //
+        // `mastFrom.x` is deliberately left alone: the title's centring must not drift
+        // sideways.
+        var my = (titleSettled ? 0 : lerp(mastFrom.y, mastTo.y, titleT))
+          - (titleT === 0 ? window.scrollY : 0);
         masthead.style.transform = 'translate(' + mx + 'px, ' + my + 'px) scale(' + mScale + ')';
         masthead.style.setProperty('--mast-s', mScale.toFixed(4));
         if (mastLabel) mastLabel.style.opacity = String(1 - segment(t, 0.04, 0.26));
@@ -796,6 +828,8 @@
         // worth another bug.
         acrylic.style.visibility = '';
       }
+
+      tickTitle();
 
       // The cell the print is flying towards is EMPTY until the print is
       // sitting on it: with its own photograph on show there, the travel reads
@@ -1854,10 +1888,137 @@
       window.addEventListener('pointercancel', endDrag);
     }
 
+    /* ---- 5. the title: typewriter + cursor ------------------------------ */
+
+    // 🔴 The title TYPES itself in, at the user's request.
+    //
+    //   * "标题打字是加载好网页就开始，也就是从别的地方点进来那个双斜杠扫屏动画做完
+    //     后开始" — so the cue is `body.route-ready`, which the route transition adds
+    //     when the slash sweep finishes (and which is added almost immediately on a
+    //     direct load, since there is no sweep to wait for).
+    //   * "上滑到一半之后就打，然后就不动了，跟随滚动上下位移" — one more type-in when the
+    //     visitor comes back up past `TITLE_AT` (half of the travel), and after that the
+    //     title is never animated again: it only tracks the scroll.
+    //   * "光标采用下划线闪动" — a real `_` span that blinks, reusing the theme's own
+    //     `blink-mark` keyframes.
+    //
+    // It is deliberately independent of `render()`: the typewriter is a time-based
+    // reveal, not a scroll-driven one, so it must not be re-entered every frame.
+    var titleCaret = null;
+    var titleTimer = 0;
+    var titlePlaying = false;
+    var titleDone = false;
+    // Guarded so a second entry (the scroll-up re-type) cannot stack timers.
+    function startTyping() {
+      if (titlePlaying) return;
+      if (!mastTitle) return;
+      var full = mastTitle.getAttribute('data-full');
+      if (full === null) {
+        full = mastTitle.textContent;
+        mastTitle.setAttribute('data-full', full);
+      }
+      mastTitle.textContent = '';
+      if (!titleCaret) {
+        titleCaret = document.createElement('span');
+        titleCaret.className = 'photo-masthead__caret';
+        titleCaret.setAttribute('aria-hidden', 'true');
+        titleCaret.textContent = '_';
+      }
+      mastTitle.appendChild(titleCaret);
+      titlePlaying = true;
+      titleDone = false;
+      masthead.classList.add('is-typing');
+      var i = 0;
+      // 🎛️ 70ms per character; "Willow's Gallery" is 16 characters, so ~1.1s.
+      var speed = window.__typeSpeed > 0 ? window.__typeSpeed : 70;
+      titleTimer = window.setInterval(function () {
+        i++;
+        // Re-inserted each step: the caret must stay last, and `textContent` would
+        // otherwise wipe it.
+        mastTitle.textContent = full.slice(0, i);
+        mastTitle.appendChild(titleCaret);
+        if (i >= full.length) {
+          window.clearInterval(titleTimer);
+          titleTimer = 0;
+          titlePlaying = false;
+          titleDone = true;
+          // "打完就不动了" — the caret stays as the resting state's signal.
+          masthead.classList.remove('is-typing');
+        }
+      }, speed);
+      detachers.push(function () {
+        if (titleTimer) window.clearInterval(titleTimer);
+        titleTimer = 0;
+        titlePlaying = false;
+      });
+    }
+
+    // 🔴 The cue is polled from the existing frame loop rather than wired to a new
+    // event. `route-ready` is written by a different script (`willowxi.js`) and there is
+    // no dispatched event to listen for (the theme emits none), so observing the class
+    // is the only option — and polling it inside `render` costs nothing because that
+    // already runs on every frame that matters.
+    var titleArmed = false;
+    // Latch for the second trigger. Without it the re-type fires on EVERY frame spent
+    // below the threshold (`titleDone` stays true for ever once the first run ends), so
+    // the title would restart its typewriter continuously while the visitor sits there.
+    var titleReTyped = false;
+    // 🔴 Set once the title has typed its SECOND time (on the way back up). From then
+    // on it is anchored where the visitor was, not at the opening's viewport centre.
+    // Without this the re-type snapped the title back to `scale(bigScale)` centred on
+    // screen — a full-viewport flash of giant text that read as "屏风突然不见了字突然
+    // 变糊了". Both triggers now consume the same state, so they cannot disagree.
+    var titleSettled = false;
+    function tickTitle() {
+      if (!masthead || !mastTitle) return;
+      if (!titleArmed && document.body.classList.contains('route-ready')) {
+        titleArmed = true;
+        startTyping();
+      }
+      if (!titleArmed) return;
+      // ⚠️ `window.scrollY`, not `smoothY`: the title re-types once per upward crossing,
+      // and the target position is the honest measure of where the visitor is.
+      //
+      // 🔴 The threshold is in VIEWPORT TERMS: "上滑到一半" means half the SCREEN, so it
+      // is `0.5 * innerHeight` of scroll remaining. Using a fraction of `landScroll`
+      // would mean a different physical point on every layout and on every landing cell.
+      var reTypeBelow = Math.round(landScroll) - Math.round(size.height * TITLE_AT);
+      if (!titleReTyped && printRetiredAt >= 0 && window.scrollY <= reTypeBelow) {
+        titleReTyped = true;
+        titleSettled = true;
+        startTyping();
+      } else if (titleReTyped && window.scrollY > reTypeBelow + 40) {
+        // Re-armed only once the visitor is clearly back below the (hysteresis-padded)
+        // threshold, so jitter around the line cannot re-trigger it.
+        titleReTyped = false;
+      }
+    }
+
+    function initTitle() {
+      if (reduced) return;            // static title in reduced-motion
+      if (!masthead || !mastTitle) return;
+      mastTitle.setAttribute('data-full', mastTitle.textContent);
+      // 🔴 Emptied now, not when the typing starts.
+      //
+      // The title is server-rendered in full, so waiting for `route-ready` (up to 1.71s
+      // while the slash sweep plays) would show the finished title first and then blank
+      // it — a flicker. Blanking it here means the typewriter is the only thing that
+      // ever puts those characters on screen.
+      mastTitle.textContent = '';
+      if (!titleCaret) {
+        titleCaret = document.createElement('span');
+        titleCaret.className = 'photo-masthead__caret';
+        titleCaret.setAttribute('aria-hidden', 'true');
+        titleCaret.textContent = '_';
+      }
+      mastTitle.appendChild(titleCaret);
+    }
+
     function init() {
       initScreen();
       initLightbox();
       initDrag();
+      initTitle();
     }
 
     function destroy() {
@@ -1898,10 +2059,24 @@
       spacerHeight0 = -1;
       // The masthead lives outside .gallery, so a PJAX navigation that
       // replaces the shell would otherwise leave it stranded on the page.
+      if (titleTimer) { window.clearInterval(titleTimer); titleTimer = 0; }
+      titlePlaying = false;
+      titleDone = false;
+      titleArmed = false;
+      titleReTyped = false;
+      titleSettled = false;
       if (masthead) {
+        masthead.classList.remove('is-typing');
         masthead.style.transform = '';
         masthead.style.removeProperty('--mast-s');
         if (mastLabel) mastLabel.style.opacity = '';
+        if (mastTitle) {
+          var fullText = mastTitle.getAttribute('data-full');
+          if (fullText !== null) {
+            mastTitle.textContent = fullText;
+            mastTitle.removeAttribute('data-full');
+          }
+        }
         if (mastSub) mastSub.style.opacity = '';
       }
       screen.style.display = '';
