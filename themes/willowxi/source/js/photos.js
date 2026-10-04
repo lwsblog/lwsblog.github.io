@@ -338,6 +338,7 @@
       // A real resize invalidates the latched pin — every input to it is
       // re-derived from the document height here.
       pinY = -1;
+      smoothY = -1;                       // a resize restarts the chase on the scroll
       // The spacer's authored height, captured BEFORE any shrink so the pin's
       // subtraction has a stable base.
       spacerLocked = false;
@@ -761,6 +762,10 @@
     // The spacer's authored height, captured in measure() (before any shrink), so
     // the subtraction has a stable base. -1 = not measured yet.
     var spacerHeight0 = -1;
+    // The position the ANIMATION is drawn at: it chases `scrollY` over a few frames
+    // so a discrete wheel notch does not move the print in one jump. -1 = unset.
+    // See step(); the pin and every scroll rule still read the real `scrollY`.
+    var smoothY = -1;
 
     function pinLimit() {
       return pinY >= 0 ? pinY : Math.round(landScroll + Math.max(1, acrylicTail));
@@ -977,13 +982,48 @@
         engagePin();
         return;
       }
+      // 🔴 The animation is driven by `smoothY`, which CHASES the scroll position
+      // over a few frames, instead of by `scrollY` directly.
+      //
+      // A wheel notch on Windows is a discrete step: measured, one notch moved
+      // `scrollY` 100px in a single frame, and the print's scale is linear in that
+      // position — so the whole 0.44 of scale happened inside one frame and the
+      // travel read as a series of jumps ("the animation is stuttering") even
+      // though every other part of it is smooth. This is the usual remedy on
+      // scroll-driven sites: the page still scrolls in steps, the animation glides.
+      //
+      // ⚠️ Only the RENDERED position is smoothed. The pin, the limit and the
+      // layers' retirement all still read the real `scrollY`, so nothing about the
+      // scroll rules changes.
       if (frameRequest) return;
-      frameRequest = window.requestAnimationFrame(function () {
-        frameRequest = 0;
-        var t = clamp01(window.scrollY / scrollRange);
-        if (settings.onProgress) settings.onProgress(t);
-        render(t);
-      });
+      frameRequest = window.requestAnimationFrame(step);
+    }
+
+    // Measured step size for the chase, in units of the remaining distance per
+    // frame: 0.22 converges to within 1px of a 100px step in ~20 frames (~330ms),
+    // which reads as inertia rather than as lag. The snap below is what keeps the
+    // hand-off exact — without it the print would still be a fraction of a pixel
+    // short of its cell on the frame the pin engages.
+    var SMOOTH = 0.22;
+    function step() {
+      frameRequest = 0;
+      if (pinEngaged) return;               // the print is retired; nothing to animate
+      // 🎛️ TUNABLE FROM THE CONSOLE: how much of the remaining distance is covered
+      // each frame. 1 = no smoothing (the old, steppy behaviour), 0.1 = long glide.
+      //     window.__smooth = 0.35
+      var k = window.__smooth > 0 ? Math.min(1, window.__smooth) : SMOOTH;
+      var target = window.scrollY;
+      if (smoothY < 0) smoothY = target;    // first frame: start exactly on the scroll
+      var delta = target - smoothY;
+      if (Math.abs(delta) < 0.12) {
+        smoothY = target;
+      } else {
+        smoothY += delta * k;
+      }
+      var t = clamp01(smoothY / scrollRange);
+      if (settings.onProgress) settings.onProgress(t);
+      render(t);
+      if (smoothY !== target) frameRequest = window.requestAnimationFrame(step);
     }
 
     function onResize() {
@@ -1391,6 +1431,7 @@
       pinY = -1;
       holding = false;
       lastRawY = 0;
+      smoothY = -1;
       if (spacer) spacer.style.removeProperty('height');
       spacerLocked = false;
       spacerHeight0 = -1;
