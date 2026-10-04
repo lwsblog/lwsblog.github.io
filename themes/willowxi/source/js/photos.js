@@ -129,10 +129,19 @@
     var mastFrom = null;
     var mastTo = null;
     // Not "the screen has landed" but "the screen has been retired": the print
-    // stays in the layer tree once it lands so the whole travel can play again
-    // on the way up. See the tail of render().
+    // stays in the layer tree at rest so the page can hand over to the grid.
     var retired = false;
     var vacant = false;
+    // The pin. Once the acrylic has dissolved there is nothing left for the
+    // travel to do, so the page is held there and the animation's layers are
+    // erased for good — no reverse playback, so the print can never "suddenly
+    // come back and grow" when the visitor scrolls up. `pinEngaged` is the
+    // one-way door; `atLimit` is the live lock, released by scrolling down away
+    // from the limit and re-armed by coming back up to it.
+    var pinEngaged = false;
+    var atLimit = false;
+    // Last observed scroll position, so the pin can tell UP from DOWN.
+    var pinPrevY = 0;
     // Latched by the font re-measure and by teardown, so the fonts.ready
     // callback can run at most once per page and never after a PJAX navigation.
     var hasReseat = false;
@@ -444,30 +453,130 @@
       // Once the print is down it is taken off the layer tree with
       // `visibility: hidden`, which is what retires its will-change layer: the
       // layer exists for the animation and leaving it promoted afterwards is
-      // pure waste. It used to be `display: none` plus a `return` in onScroll,
-      // which is what made the travel a one-way trip — after landing there was
-      // no print and no listener left, so scrolling back up showed a still
-      // page. visibility (not display) keeps the element in the layout and
-      // keeps the frame loop running, so the same code both keeps it retired at
-      // rest and brings it back the moment the visitor scrolls up: the print
-      // rises out of its cell, the cell empties again and the plate closes over
-      // the grid before the print is clear of it.
-      var wantRetired = after >= tailRange;
+      // pure waste. `visibility` (not `display`) keeps the element in the layout
+      // and keeps the frame loop running so the plate can finish dissolving.
+      //
+      // 🔴 One-way. It used to come back on the way up (the whole travel was
+      // replayable), which is what produced "the print suddenly reappears and
+      // grows". The page is pinned at the end of the dissolve (see engagePin),
+      // so once that has happened the layers are erased for good.
+      var wantRetired = after >= tailRange - 0.001 || pinEngaged;
       if (wantRetired !== retired) {
         retired = wantRetired;
         screen.style.visibility = retired ? 'hidden' : '';
         // The plate's last job is covering the print's own cell on the way
         // down; once the print is retired there is nothing left for it to hide.
-        // Dropped so it cannot sit over the grid while the visitor reads it —
-        // and it is put back before the print comes out again, because the
-        // class only goes away at rest.
         if (acrylic) acrylic.style.visibility = retired ? 'hidden' : '';
         if (screenHint) screenHint.style.visibility = retired ? 'hidden' : '';
         document.body.classList.toggle('is-gallery-screen', !retired);
       }
     }
 
+    /* ---- the pin: no way back into the animation ------------------------ */
+
+    // Where the page is held.
+    //
+    // 🔴 One pixel past the end of the tail, and the reason is rounding.
+    // `landScroll` is fractional (1936.5 here) while `scrollY` is an integer, so
+    // at a limit of exactly `landScroll + tailRange` the closest the page can get
+    // is 0.5px short of it — `after` stalled at 259.5 of 260, which left the
+    // plate at k=0.20 instead of 0. The pin therefore sits at ceil(landScroll +
+    // tail) and the erase test uses the same generous comparison.
+    //
+    // It is NOT scrollRange + tailRange: `tailRange` is clamped to whatever
+    // scroll the document has left (`reachable - scrollRange` measured 450px
+    // against a requested 260), so adding the raw TAIL could pin past the end of
+    // the document — which silently disables the pin, because the browser clamps
+    // scrollY to the document end before any handler runs.
+    function pinLimit() {
+      return Math.ceil(landScroll + Math.min(TAIL, tailRange));
+    }
+
+    function engagePin() {
+      pinEngaged = true;
+      atLimit = true;
+      pinPrevY = window.scrollY;
+      erase();
+    }
+
+    // Erase the travel's layers for good. Nothing puts them back: this runs once.
+    function erase() {
+      retired = true;
+      screen.style.visibility = 'hidden';
+      if (acrylic) {
+        acrylic.style.visibility = 'hidden';
+        // Back to its neutral value as well as off screen: the element is out of
+        // the layer tree either way, and a stale 0.2 left on it is a trap for
+        // anything that measures the plate instead of looking at it.
+        acrylic.style.setProperty('--acrylic-k', '0');
+      }
+      if (screenHint) screenHint.style.visibility = 'hidden';
+      document.body.classList.remove('is-gallery-screen');
+      if (masthead) masthead.style.transform = '';
+      if (mastLabel) mastLabel.style.opacity = '';
+      if (mastSub) mastSub.style.opacity = '';
+    }
+
+    // Holding the page is the one interaction that cannot be done by writing
+    // styles: every scroll gesture defaults to moving the viewport. There are no
+    // global wheel listeners on this site (verified), so a non-passive listener
+    // on window can consume the gesture before the browser scrolls — which a
+    // `scroll`-event handler cannot, since by then the viewport has already moved
+    // and the only cure would be a visible snap back.
+    //
+    // One atomic action per crossing gesture: swallow it and put the page on the
+    // limit. Letting the browser apply the part of the step that fits leaves the
+    // page a few pixels above the limit (measured 2200 against 2197), and a
+    // separate clamp in the scroll handler cannot land it exactly either, because
+    // by then the gesture has already been consumed.
+    function onWheel(event) {
+      if (!atLimit) return;
+      if ((event.deltaY || 0) >= 0) return;            // downward is free
+      var lim = pinLimit();
+      if (window.scrollY - Math.abs(event.deltaY) < lim) {
+        event.preventDefault();
+        window.scrollTo(0, lim);
+        pinPrevY = lim;
+      }
+    }
+
+    // The keyboard reaches the same place without a wheel: Home, PageUp and the
+    // arrows all scroll up. Blocked only while the lock is armed, so they behave
+    // normally anywhere else on the page.
+    function onPinKey(event) {
+      if (!atLimit || event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      var k = event.key;
+      if (k === 'Home' || k === 'PageUp' || k === 'ArrowUp') {
+        event.preventDefault();
+      }
+    }
+
     function onScroll() {
+      // 🔴 The pin is checked HERE, on the event, not inside the animation frame.
+      // render() only runs on the first frame after a burst of scroll events
+      // (`frameRequest` coalesces them), so a check living there never fired for
+      // the frame that actually crossed the limit: measured, the page sailed on
+      // to y=3000 while the pin sat at 2197 and nothing was ever blocked.
+      if (pinEngaged) {
+        // The limit constrains UPWARD motion only — it is a "you cannot go back
+        // into the animation" rule, not a position the page is glued to:
+        //   - scrolling DOWN, past the limit is where the visitor wants to be
+        //     (the gallery continues under the fold), so nothing happens;
+        //   - scrolling UP, the page is brought back onto the limit and held.
+        var y = window.scrollY;
+        if (y > pinLimit() && y < pinPrevY) {
+          window.scrollTo(0, pinLimit());
+          y = pinLimit();
+        }
+        pinPrevY = y;
+        atLimit = y <= pinLimit() + 1;
+        return;                          // nothing left to animate
+      }
+      if (window.scrollY >= pinLimit()) {
+        engagePin();
+        return;
+      }
       if (frameRequest) return;
       frameRequest = window.requestAnimationFrame(function () {
         frameRequest = 0;
@@ -549,9 +658,14 @@
 
       window.addEventListener('scroll', onScroll, { passive: true });
       window.addEventListener('resize', onResize, { passive: true });
+      // Not passive: this one has to be able to consume the gesture (see onWheel).
+      window.addEventListener('wheel', onWheel, { passive: false });
+      document.addEventListener('keydown', onPinKey);
       detachers.push(function () {
         window.removeEventListener('scroll', onScroll);
         window.removeEventListener('resize', onResize);
+        window.removeEventListener('wheel', onWheel);
+        document.removeEventListener('keydown', onPinKey);
       });
 
       // A deep link or a restored scroll position can land past the screen
@@ -589,6 +703,13 @@
     var lbStage = lightbox ? lightbox.querySelector('[data-photo-lightbox-stage]') : null;
     var lbLabel = lightbox ? lightbox.querySelector('[data-photo-lightbox-label]') : null;
     var lbIndex = lightbox ? lightbox.querySelector('[data-photo-lightbox-index]') : null;
+
+    // Set once here rather than in the template: this is the only image whose src
+    // is written by JS, so its markup cannot carry draggable="false" (it has no
+    // src until a frame is opened). An <img> is a native drag source, and a
+    // press-and-move on it starts an image drag that opens the file in a new tab
+    // instead of doing nothing — the same thing the grid images needed.
+    if (lbImg) lbImg.draggable = false;
 
     function frameImage(index) {
       return frames[index] ? frames[index].querySelector('[data-photo-frame-img]') : null;
@@ -812,6 +933,11 @@
       });
       vacant = false;
       retired = false;
+      // The pin is state for THIS visit to the gallery: a PJAX navigation must
+      // not leave the next page unable to scroll up.
+      pinEngaged = false;
+      atLimit = false;
+      pinPrevY = 0;
       // The masthead lives outside .gallery, so a PJAX navigation that
       // replaces the shell would otherwise leave it stranded on the page.
       if (masthead) {

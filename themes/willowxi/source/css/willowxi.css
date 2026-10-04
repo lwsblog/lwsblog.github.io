@@ -4980,18 +4980,34 @@ html[data-theme="light"] .photo-frame.is-dragging {
   object-fit: cover;
 }
 
-/* --- captions are not text ------------------------------------------------
-   The date and the frame number are part of the print, not prose, and the
-   frames are draggable: a drag that starts on a caption selected the date and
-   the browser then offered its search-on-selection bubble, which is what the
-   "dragging a photo keeps triggering search" report was. One rule covers the
-   grid caption, the print's own caption and the lightbox's — the three places
-   the same two strings are printed. The images were never selectable
-   (user-select does not apply to replaced content), so this closes the gap
-   rather than changing how the frames behave. */
+/* --- captions are not text, and photographs are not drag sources ---------
+   Two separate browser behaviours, both hit by the same gesture:
+
+   1. The date and the frame number are part of the print, not prose, and the
+      frames are draggable: a drag that starts on a caption selected the date
+      and the browser then offered its search-on-selection bubble.
+   2. An <img> is a native drag source, so a press-and-move on a photograph
+      started an image drag and dropping it (or releasing over a tab strip)
+      opened the file in a new tab — the caption fix never covered this, because
+      it is the image that is draggable, not the text. `draggable="false"` on the
+      elements plus `-webkit-user-drag: none` here; the same pair is already used
+      on `.wl-emoji-popup img` for the identical reason (a real pointer starts a
+      native image drag where a synthesised click never can).
+
+   This does NOT remove the frames' own drag-to-rearrange: that is driven by
+   `pointerdown` on `.photo-frame`, which still fires — only the browser's
+   built-in image drag is switched off. */
 .photo-frame__cap,
 .photo-screen__cap,
 .photo-lightbox__cap {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.photo-frame__img,
+.photo-screen__img,
+.photo-lightbox__img {
+  -webkit-user-drag: none;
   user-select: none;
   -webkit-user-select: none;
 }
