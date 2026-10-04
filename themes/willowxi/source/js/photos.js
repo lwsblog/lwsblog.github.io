@@ -177,7 +177,7 @@
     // 0.35 is just past the point the print visibly starts to shrink, so the
     // background is already clearing through the whole second half — which is
     // what makes the two layers descend together instead of one after the other.
-    var ACRYLIC_PEAK = 0.10;
+    var ACRYLIC_PEAK = 0.45;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -655,7 +655,18 @@
         var plateT = posT <= acrPeak
           ? clamp01((posT - aFrom) / (acrPeak - aFrom))
           : 1 - clamp01((posT - acrPeak) / (aTo - acrPeak));
-        var start = Math.cbrt(Math.max(0, Math.min(1, plateT)));
+        // 🔴 LINEAR, not `Math.cbrt`. The cube root has an infinite slope at zero,
+        // so the plate went from nothing to a third of its strength in a few pixels
+        // — measured, 0.000 at y=446 climbing straight to 1.000 by y=512, i.e. the
+        // whole acrylic arriving inside 80px of scroll. That is the jolt: the blur
+        // and the tint appear as a step rather than as the plate sliding in, which
+        // reads as the content underneath twitching.
+        //
+        // The cube root was there to match the *original* plate's measured curve,
+        // but that curve only ever existed over a 0.06..0.22 window; now that the
+        // plate rises across most of the approach, a straight line is both smoother
+        // and closer to a physical "the pane slides over the grid".
+        var start = Math.max(0, Math.min(1, plateT));
         // The dissolve runs over `acrylicTail` (= tailRange, see TAIL) and it is
         // LINEAR in the scroll, not eased.
         //
