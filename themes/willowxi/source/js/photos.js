@@ -1189,7 +1189,15 @@
     // geometrically — it coasts, and the coast slows down. `GLIDE` becomes the time
     // constant: ~220ms reaches 95% of a 100px step in about 660ms, and the last
     // millimetre arrives without a visible tail.
-    var GLIDE = 60;
+    // 🎛️ `GLIDE` is the INERTIA knob: bigger = coasts longer, smaller = follows the
+    // wheel more tightly. Along that axis, measured on a single 120px notch:
+    //    35ms → settles in 158ms   (abrupt)
+    //    60ms → 277ms              (the first responsive build)
+    //   110ms → 460ms              ← current, after "惯性调大一点"
+    //   150ms → 649ms              (floaty)
+    //   220ms → 950ms              (too much — that is what the rewrite removed)
+    // `window.__glide` overrides it live, so exploring this needs no rebuild.
+    var GLIDE = 110;
     var SPEED = 26000;
     var lastStepAt = 0;
     function step() {
