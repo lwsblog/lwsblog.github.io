@@ -1315,7 +1315,22 @@
       // ⚠️ Only the RENDERED position is smoothed. The pin, the limit and the
       // layers' retirement all still read the real `scrollY`, so nothing about the
       // scroll rules changes.
-      if (frameRequest) return;
+      // 🔴 The guard needs its OWN flag, not `frameRequest`.
+      //
+      // `step()` opens with `frameRequest = 0`, and this handler calls `step()`
+      // SYNCHRONOUSLY (through the render at the end of it). So for the whole duration
+      // of a step — including the frames of it that run during a scroll burst — the
+      // shared variable reads 0, this guard falls through, and a SECOND frame is
+      // scheduled on top of the one already pending. When one of the two then runs, it
+      // zeroes `frameRequest`, and the chain that the other one owns is orphaned: the
+      // chase stops mid-flight. Measured: `smoothY` froze at 472.2 with `scrollY` at
+      // 720, and the frame counter stopped dead at 3 — which is the "惯性动画没了" and,
+      // because the print never reaches its cell, feeds the disappearance reports too.
+      //
+      // `stepPending` is the truth about "is a frame already queued"; `frameRequest` is
+      // only ever the handle used to cancel it. `step()` clears the flag when it runs.
+      if (stepPending) return;
+      stepPending = true;
       frameRequest = window.requestAnimationFrame(step);
     }
 
@@ -1389,6 +1404,7 @@
     var lastStepAt = 0;
     function step() {
       frameRequest = 0;
+      stepPending = false;
       if (pinEngaged) return;               // the print is retired; nothing to animate
       var now = performance.now();
       var dt = lastStepAt ? Math.min(64, now - lastStepAt) : 16;
@@ -1422,7 +1438,10 @@
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
       render(t);
-      if (smoothY !== target) { frameRequest = window.requestAnimationFrame(step); }
+      if (smoothY !== target) {
+        stepPending = true;
+        frameRequest = window.requestAnimationFrame(step);
+      }
       else { lastStepAt = 0; }
     }
 
@@ -2036,7 +2055,29 @@
       mastTitle.appendChild(titleCaret);
     }
 
+    // 🔴 Diagnostic surface. The gallery's state is entirely closure-local, which
+    // made every report of "it disappeared" impossible to check from the console —
+    // reading it meant guessing which of a dozen flags was wrong. These are getters,
+    // not copies, so they cannot go stale.
+    function exposeState() {
+      window.__gal = {
+        get scrollY() { return window.scrollY; },
+        get smoothY() { return smoothY; },
+        get retired() { return retired; },
+        get landScroll() { return landScroll; },
+        get scrollRange() { return scrollRange; },
+        get pinLimit() { return pinLimit(); },
+        get printRetiredAt() { return printRetiredAt; },
+        get altArmed() { return altArmed; },
+        get titleSettled() { return titleSettled; },
+        get titleReTyped() { return titleReTyped; },
+        get titleArmed() { return titleArmed; },
+        get landing() { return landingFrame ? landingFrame.getAttribute('data-id') : null; }
+      };
+    }
+
     function init() {
+      exposeState();
       initScreen();
       initLightbox();
       initDrag();
@@ -2048,6 +2089,7 @@
         window.cancelAnimationFrame(frameRequest);
         frameRequest = 0;
       }
+      stepPending = false;
       detachers.forEach(function (fn) { fn(); });
       detachers = [];
       closeLightbox();
