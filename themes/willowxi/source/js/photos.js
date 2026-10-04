@@ -189,6 +189,9 @@
     // 🎛️ The fraction of the travel at which coming back UP re-types the title.
     // 0.5 = half way, the user's "上滑到一半之后就打".
     var TITLE_AT = 0.5;
+    // 🎛️ Milliseconds per character. 70 read as too fast, so 110 (~1.8s for the
+    // 16-character title). `window.__typeSpeed` overrides it live.
+    var TYPE_SPEED = 110;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -896,12 +899,16 @@
       // "删掉屏风倒放动画", but the value below was left reversible, so scrolling back up
       // ran the whole travel backwards: "没变化啊，还是屏风图倒放".
       //
-      // `retired || ...` latches it: the first frame at or past the landing puts the
-      // print away for good on this visit. What happens on the way back up is the
-      // acrylic plate's substitute blur plus the title (see `altArmed`), NOT the print.
-      // `measure()` and `destroy()` clear `retired`, so re-entering the gallery — or a
-      // resize — starts the opening animation again.
-      var wantRetired = retired || smoothY >= landScroll + LAND_RETIRE - 0.5;
+      // ⚠️ `smoothY >= 0` guards the LATCH against the warm-up frame. `smoothY` starts
+      // at -1 and `step()` only rewrites it to `scrollY` AFTER it has already computed
+      // `t = smoothY / scrollRange` and called render with that — so the very first
+      // frame renders at t ≈ -0.0004, which is below the landing test... except that a
+      // NEGATIVE value is not below it, it is *above*: `-1 >= landScroll` is false, so
+      // this looked safe. The damage came from the caller, which passes `smoothY = -1`
+      // straight through on that frame. Whatever the route, the latch must not be
+      // allowed to fire before the chase has started, because it can never be undone
+      // without a re-measure — that is the "首页加载好之后屏风自动消失了".
+      var wantRetired = retired || (smoothY >= 0 && smoothY >= landScroll + LAND_RETIRE - 0.5);
       if (wantRetired !== retired) {
         retired = wantRetired;
         // 🔴 Recorded HERE, not in `erase()`. `erase()` is reachable only from
@@ -1929,15 +1936,30 @@
       titleDone = false;
       masthead.classList.add('is-typing');
       var i = 0;
-      // 🎛️ 70ms per character; "Willow's Gallery" is 16 characters, so ~1.1s.
-      var speed = window.__typeSpeed > 0 ? window.__typeSpeed : 70;
+      var speed = window.__typeSpeed > 0 ? window.__typeSpeed : TYPE_SPEED;
+      var n = full.length;
+      // 🔴 FROM THE MIDDLE OUTWARDS, and centred at every step.
+      //
+      // A left-to-right reveal (`full.slice(0, i)`) grows the line to the right, so the
+      // visitor reads the title as "fixed somewhere and being written" — the user's
+      // "不是字固定好位置从左到右依次显现". Growing the run symmetrically about its own
+      // midpoint makes each state a centred substring, which is the "从中间冒出来" they
+      // asked for; the CSS keeps the line centred in the viewport (`text-align: center`
+      // on a full-width masthead), so the visual centre never moves.
+      //
+      // Alternating which side grows by one keeps the two halves within one character of
+      // each other, and the odd step takes its extra character on the right so the run
+      // stays centred on the same pixel.
       titleTimer = window.setInterval(function () {
         i++;
+        var left = Math.floor(i / 2);
+        var right = i - left;
+        var start = Math.max(0, Math.floor((n - right - left) / 2));
+        mastTitle.textContent = full.slice(start, start + left + right);
         // Re-inserted each step: the caret must stay last, and `textContent` would
         // otherwise wipe it.
-        mastTitle.textContent = full.slice(0, i);
         mastTitle.appendChild(titleCaret);
-        if (i >= full.length) {
+        if (i >= n) {
           window.clearInterval(titleTimer);
           titleTimer = 0;
           titlePlaying = false;

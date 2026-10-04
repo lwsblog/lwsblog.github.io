@@ -4729,7 +4729,22 @@ html[data-theme="light"] .photo-acrylic {
      it. Measured before this rule, with the box centre at x=720 on a 1440px
      viewport: the title's glyphs ran 200 to 368, i.e. centred on 284. The
      three lines are one stack and are aligned as one. */
-  width: max-content;
+  /* 🎛️ FULL VIEWPORT WIDTH, so `text-align: center` centres the title's glyphs on the
+     SCREEN at every moment.
+     --
+     It used to be `width: max-content` (the box hugged its widest line). The opening
+     animation moved the whole box to the middle, so hugging was fine then — but the
+     title now TYPES itself in from the middle outwards, and with a shrink-to-fit box
+     every intermediate state would grow the box to one side and drag the run off
+     centre: "我要的是字从中间冒出来，每个状态都是居中对齐". Pinning the box to the
+     viewport and centring the line inside it makes each state centred for free.
+     --
+     `measure()` keeps working: it sizes against the title's glyph box from a Range
+     (`selectNodeContents`), not against this element, precisely because the box was
+     never a reliable proxy for the text. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
   /* --mast-s is the masthead's current scale, written by JS. The halos
      divide by it for the same reason .photo-screen's shadow does: a
      transform scales text-shadow with the text, and a 20px glow on a 21px
