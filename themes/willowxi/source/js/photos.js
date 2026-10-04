@@ -197,6 +197,9 @@
     var startScale = 1;
     var startX = 0;
     var startY = 0;
+    // The cell the print flies to: a random one from the first two grid rows (see
+    // shuffleFrames). Kept separate from `frames[0]`, which is only the DOM head.
+    var landingFrame = null;
     var mastFrom = null;
     var mastTo = null;
     // Not "the screen has landed" but "the screen has been retired": the print
@@ -243,7 +246,7 @@
     // a resize can never leave the animation aiming at a stale rect.
     function measure() {
       var size = viewport();
-      var first = frames[0];
+      var first = landingFrame || frames[0];
 
       // --- the print's box, sized to the cell it has to become.
       // The cell's own box already includes its mat and caption strip, and the
@@ -821,7 +824,7 @@
         var wantVacant = !retired;
         if (wantVacant !== vacant) {
           vacant = wantVacant;
-          frames[0].classList.toggle('is-vacant', vacant);
+          (landingFrame || frames[0]).classList.toggle('is-vacant', vacant);
         }
       }
 
@@ -1444,6 +1447,42 @@
       frames.forEach(function (frame, i) {
         frame.style.order = String(order[i]);
       });
+      // 🔴 The landing target is chosen from the FIRST TWO VISUAL ROWS only — user:
+      // "屏风图只能选前两行的图".
+      //
+      // `frames[0]` used to be the target, and after a shuffle that could be any cell in
+      // the grid. A cell low down is wrong on two counts: the print flies a long way
+      // down to reach it, and `landScroll` (t = 1) then sits far down the page, so the
+      // substitute blur's trigger point is in an awkward place.
+      //
+      // The rows are measured, not assumed: the column count changes with the viewport
+      // (measured 5 columns at 2560, 4 at 1440, 2 at 390), so "the first 2N cells in
+      // DOM order" would be wrong at every width. Sorting by painted `top` and taking
+      // the two smallest distinct values is viewport-independent.
+      //
+      // Picking among the first N DOM cells after the shuffle is what makes the landing
+      // random WITHIN those two rows — the shuffle already gave each of them a random
+      // slot up there.
+      if (frames.length) {
+        var tops = frames.map(function (f) { return Math.round(f.getBoundingClientRect().top); });
+        var uniq = tops.slice().sort(function (a, b) { return a - b; })
+          .filter(function (v, i, a) { return i === 0 || v !== a[i - 1]; });
+        var secondTop = uniq.length > 1 ? uniq[1] : uniq[0];
+        var inFirstRows = frames.filter(function (f, i) {
+          return tops[i] <= secondTop + 1;
+        });
+        if (inFirstRows.length) {
+          landingFrame = inFirstRows[Math.floor(Math.random() * inFirstRows.length)];
+        } else {
+          landingFrame = frames[0];
+        }
+        // Recorded on the element for the probes: the chosen row cannot be recovered
+        // from `order` (the shuffle writes that).
+        frames.forEach(function (f) { f.removeAttribute('data-landing'); });
+        if (landingFrame) landingFrame.setAttribute('data-landing', '');
+      } else {
+        landingFrame = null;
+      }
     }
 
     function initScreen() {
@@ -1809,6 +1848,7 @@
       });
       vacant = false;
       retired = false;
+      landingFrame = null;
       // The pin is state for THIS visit to the gallery: a PJAX navigation must
       // not leave the next page unable to scroll up.
       pinEngaged = false;
