@@ -746,6 +746,15 @@
         // ⚠️ Multiplied with `start * tailK`, not assigned: the plate has one value
         // and both jobs have to agree on it.
         var altK = 0;
+        // Arm from the same two facts, but the flag is what persists. Testing
+        // `scrollY < printRetiredAt - 1` on its own is wrong: `printRetiredAt` is
+        // recorded on the frame the print goes, which (with the glide) is well past the
+        // landing, so a visitor scrolling back up is STILL below it for a long stretch —
+        // measured, `alt` stayed 0 until y≈2479 and only reached 0.1573 there. The flag
+        // latches the first time that test passes and then keeps `altK` alive.
+        if (!altArmed && printRetiredAt >= 0 && window.scrollY < printRetiredAt - 1) {
+          altArmed = true;
+        }
         if (altArmed) {
           var altRange = window.__altRange > 0 ? window.__altRange : ALT_RANGE;
           altK = 1 - clamp01(Math.max(0, window.scrollY) / altRange);
@@ -757,6 +766,17 @@
         // it cannot exceed 1.
         acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
         acrylic.style.setProperty('--acrylic-k', Math.max(start * tailK, altK).toFixed(4));
+        // 🔴 Keep the plate VISIBLE and let `--acrylic-k` alone decide how much it
+        // shows (k = 0 means `rgba(...,0)` and `blur(0px)`, i.e. nothing painted).
+        //
+        // Toggling `visibility` per state cost two rounds of bugs: tying it to the
+        // print's retirement hid the plate for the whole way back up, so the substitute
+        // blur was computed and never seen (measured: k = 0.9340, blur(20.5px),
+        // visibility: hidden); and once other paths also wrote `visibility`, whichever
+        // ran last won. `visibility` was only ever an optimisation for the promoted
+        // layer, and the plate is a single layer — the state machine for it is not
+        // worth another bug.
+        acrylic.style.visibility = '';
       }
 
       // The cell the print is flying towards is EMPTY until the print is
@@ -764,10 +784,22 @@
       // as two copies of one image. Not "after it has landed" — AT the landing,
       // where the print covers the cell and the swap happens underneath it, so
       // the print takes over from the cell rather than appearing beside it.
-      // One-way on the way down, one-way on the way up, and derived purely from
-      // scroll position, so there is no state to drift.
+      // One-way, on both legs. `after` is `max(0, scrollY - landScroll)`, so it falls
+      // back below 1 as soon as the visitor scrolls back up past the landing — and a
+      // reversible test therefore RE-HID the cell on the way up: measured, the cell
+      // went `visible` at y=3379 and `hidden` again at y=3079, so the photograph the
+      // print had handed over to simply disappeared ("上滑的时候屏风图对应的那张图消失了").
+      // The vacancy belongs to the print's retirement, which is one-way itself, so it
+      // is derived from `retired` rather than re-decided from the scroll each frame.
       if (frames.length) {
-        var wantVacant = after < 1;
+        // 🔴 INVERTED, and that was the bug behind "上滑的时候屏风图对应的那张图消失了".
+        // The cell is hidden while the PRINT stands on it (otherwise the travel shows
+        // two copies of one photograph) and must be VISIBLE once the print is gone,
+        // because that is the hand-over. Deriving it the same way round as the print
+        // left it hidden for ever: measured at the landing itself,
+        // `cellVacant: true, cellVis: hidden` — the grid kept a hole where the
+        // photograph should have been.
+        var wantVacant = !retired;
         if (wantVacant !== vacant) {
           vacant = wantVacant;
           frames[0].classList.toggle('is-vacant', vacant);
@@ -798,15 +830,7 @@
       // it (in px of overscroll) to let the print linger before it goes, or set the
       // pin back on (`PIN_ENABLED`) to get the old pinned behaviour wholesale.
       //
-      // 🔴 REVERSIBLE, so the travel plays backwards on the way up — the visitor's
-      // requested approach ("倒放动画"): the down journey ends with the print gone
-      // (see LAND_RETIRE) and scrolling back up brings it in again from its cell.
-      //
-      // The one-way version existed because the page used to be PINNED at the end of
-      // the dissolve, so "coming back" was impossible and a reappearing print was
-      // read as a glitch ("the print suddenly reappears and grows"). With the pin off
-      // there is nothing to stop the page going back up, so the travel must reverse
-      // instead of staying dead — otherwise scrolling up shows a blank screen.
+      // ONE-WAY: the print does not come back on the way up (user's choice).
       // ⚠️ The test is the RENDERED position (`smoothY`), not `scrollY`. The scroll
       // position jumps in whole pixels and, with a glide, arrives well before the
       // print does — measured, `scrollY` reached 1950 and retired the print while it
@@ -836,9 +860,12 @@
         // up (measured).
         if (retired) printRetiredAt = window.scrollY;
         screen.style.visibility = retired ? 'hidden' : '';
-        // The plate's last job is covering the print's own cell on the way
-        // down; once the print is retired there is nothing left for it to hide.
-        if (acrylic) acrylic.style.visibility = retired ? 'hidden' : '';
+        // ⚠️ The plate's visibility is NOT decided here any more. Tying it to the
+        // retirement hid the plate for the rest of the visit — and the substitute blur
+        // needs exactly that plate on the way back up, so it was computed and never
+        // seen: measured on the way up, `--acrylic-k` reached 0.9340 with a
+        // `blur(20.5px)` and `visibility: hidden`. It is set per frame in the acrylic
+        // block instead.
         if (screenHint) screenHint.style.visibility = retired ? 'hidden' : '';
         document.body.classList.toggle('is-gallery-screen', !retired);
       }
