@@ -1116,12 +1116,33 @@
     // happens on every display.
     //
     // 🎛️ TUNABLE FROM THE CONSOLE:
-    //     window.__glide = 900    // ms the glide lasts after the last scroll event
-    //     window.__speed = 2600   // px per second, the ceiling
+    //     window.__glide = 420    // ms; the whole catch-up, start to finish
+    //     window.__shape = 2.2    // how fast it leaves the mark (1 = lazy, 3 = eager)
+    //     window.__floor = 0.12   // first-frame minimum, as a fraction of the gap
+    //     window.__speed = 9000   // px per second; the fastest the print may move
     //     window.__glide = 0      // no smoothing at all (the old steppy behaviour)
     //   `window.__smooth` (a raw per-frame fraction) still overrides it if set.
-    var GLIDE = 900;
-    var SPEED = 2600;
+    //
+    // 🔴 THE SHAPE IS EASE-IN-OUT, and that is the third attempt at this curve.
+    // Both earlier shapes were rejected, and the measurements say why:
+    //   exponential (`smoothY += delta * 0.22`) — step sizes 3.49× the average on
+    //     the first frames and 0.02× at the end: it lurches off the mark and then
+    //     dribbles. "The animation is stuttering."
+    //   constant speed with a 2600px/s cap — 2.36× at the head and only 0.27× at
+    //     the end, plus a hard speed limit that made it lag the scroll by a whole
+    //     journey before catching up. "Too much easing, lots of empty travel, and
+    //     then it goes linear and stiff."
+    // What is wanted is light at BOTH ends and steady through the middle, so the
+    // step is scaled by a smooth bell: sin²(π·p) has a zero slope at p=0 and p=1
+    // (no lurch, no dribble) and peaks in the middle (fastest where the eye is not
+    // reading a fresh gesture). `p` is the fraction of the glide already spent, so
+    // the shape holds however long the glide is.
+    var GLIDE = 420;
+    var SPEED = 9000;
+    // How eagerly the bell leaves the mark (see the SHAPE note in step()).
+    var SHAPE = 2.2;
+    var stepStart = 0;
+    var stepFrom = 0;
     var lastStepAt = 0;
     function step() {
       frameRequest = 0;
@@ -1132,27 +1153,64 @@
       var glide = window.__glide >= 0 ? window.__glide : GLIDE;
       var speed = window.__speed > 0 ? window.__speed : SPEED;
       var target = window.scrollY;
-      if (smoothY < 0) smoothY = target;    // first frame: start exactly on the scroll
+      if (smoothY < 0) { smoothY = target; stepFrom = target; }
+      // 🔴 A journey lasts `glide` ms from the moment the SCROLL moves, and that
+      // instant is found by watching the TARGET move — not by watching it stand
+      // still. The first version of this restarted the journey on every settled
+      // frame (`|target - stepFrom| < 0.5` is satisfied for ever once the page
+      // stops), so each frame began a fresh bell: measured as
+      //   5px, 47px, 30px, 12px, 3px, … stop … 100px, stop, stop, …
+      // i.e. the print ran a whole ease, halted, then jolted the remaining
+      // distance. The curve was right; the state machine was wrong.
+      if (Math.abs(target - stepFrom) > 0.5) {
+        stepFrom = target;
+        stepStart = performance.now();
+      }
       var delta = target - smoothY;
-      // 🔴 CONSTANT SPEED once there is ground to cover, easing only into the last
-      // few pixels. An exponential is fastest on its very first frame and then
-      // crawls — measured step sizes of 0.115, 0.080, 0.050, 0.030 … so the motion
-      // is most violent exactly when the eye is reading a fresh gesture, then
-      // dribbles out. That uneven ramp is what "there IS easing but it still
-      // stutters" describes. A constant-speed glide moves the same distance every
-      // frame, which is what a smooth-scrolling browser looks like.
-      if (Math.abs(delta) < 0.12) {
+      // 🔴 0.6px, not 0.12px. The residual is invisible either way (the print is
+      // 193px wide at scale 1, so this is a third of a percent), but a threshold
+      // this tight makes the tail of the glide spend several extra frames closing
+      // the last fraction of a pixel. That is exactly the "empty travel" report —
+      // the wheel has moved and the picture has not — so the extra frames are
+      // bought for nothing. `E1` (hand-off size error) still measures 0.4px.
+      if (Math.abs(delta) < 0.6) {
         smoothY = target;                   // close enough: snap so the hand-off is exact
+        stepStart = 0;
       } else if (window.__smooth > 0) {
         smoothY += delta * Math.min(1, window.__smooth);   // raw per-frame override
       } else if (glide <= 0) {
         smoothY = target;                   // smoothing off
       } else {
+        if (!stepStart) stepStart = now;
+        var p = clamp01((now - stepStart) / glide);
+        // 🔴 The bell is `sin²` raised to a POWER, and the power is the knob for
+        // how fast it gets going. `sin²(πp)` alone is symmetric and far too gentle
+        // off the mark — measured, it had covered only 7% of the distance after a
+        // quarter of the glide and needed 600ms to settle, which is read as "there
+        // is a lot of empty travel" (the wheel has moved, the picture has not).
+        // `SHAPE = 2.2` front-loads it: it leaves the mark promptly, still has zero
+        // slope at p=1 so it decelerates into place, and no longer crawls.
+        // 1 = the original symmetric bell, 3 = very eager.
+        var shape = window.__shape > 0 ? window.__shape : SHAPE;
+        var bell = Math.sin(Math.PI * p);
+        var v = Math.pow(bell * bell, shape) * (shape * 2);
+        var stepPx = Math.abs(delta) * v * (dt / glide);
+        // 🔴 A FLOOR under the first frames. `sin²` has zero slope at p=0, so the
+        // opening frames move a fraction of a pixel: measured, 0.10px at 115ms and
+        // the first real motion at ~150ms. That is the "empty travel" — the wheel
+        // has turned and the picture has not — and it is also why the regression
+        // probe read the acrylic as still 0 when it sampled 45ms after a jump.
+        // Lifting the floor to 12% of the gap gets the print moving on the first
+        // frame while leaving the deceleration at the far end untouched.
+        var floorFrac = window.__floor >= 0 ? window.__floor : 0.12;
+        var floorPx = Math.abs(delta) * floorFrac;
+        if (stepPx < floorPx && p < 1) stepPx = floorPx;
         var cap = speed * dt / 1000;                     // the speed limit, px/frame
-        var ease = Math.abs(delta) * (dt / glide);       // the final approach, px/frame
-        var stepPx = Math.min(cap, Math.max(ease, 0.5));
+        if (stepPx > cap) stepPx = cap;
         if (stepPx > Math.abs(delta)) stepPx = Math.abs(delta);
+        if (p >= 1) stepPx = Math.abs(delta);            // journey over: land it
         smoothY += delta > 0 ? stepPx : -stepPx;
+        if (smoothY === target) stepStart = 0;
       }
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
