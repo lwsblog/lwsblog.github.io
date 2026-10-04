@@ -4866,13 +4866,17 @@ html[data-theme="light"] .photo-screen {
   width: 100%;
   max-width: none;
   height: 100%;
-  /* `fill`, not `cover`. JS counter-scales the mat every frame, so the content
-     box steps through a range of aspect ratios (the mat is inset by `rest/scale`,
-     which is not proportional in x and y), and `cover` re-crops on every one of
-     them — the photograph would visibly zoom as it travelled. `fill` stretches
-     by the same amount instead: at most 3% vertically, monotonic, and exactly
-     the cell's crop at scale 1, which is where the hand-off happens. */
-  object-fit: fill;
+  /* 🔴 `cover`, NOT `fill`. `fill` stretched the photograph to whatever shape the
+     content box happened to be, and because the mat is counter-scaled
+     (`rest / scale`) the box's aspect ratio drifted from 1.50 at rest to 1.21
+     during the travel — a 23% vertical stretch. Reported as "some of my pictures
+     are stretched".
+
+     `cover` cannot distort by definition; it crops. The crop is held constant by
+     the other half of the fix, in `render()`: the print's BOX is now
+     counter-scaled along with its mat, so `contentW : contentH` stays constant
+     for the whole travel and there is nothing for `cover` to re-crop. */
+  object-fit: cover;
 }
 
 /* 🔴 The print has its OWN acrylic, and it is a different layer from

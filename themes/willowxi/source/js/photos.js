@@ -135,7 +135,7 @@
     //
     // ⚠️ The knob: bigger = dissolves later and slower (closer to the print
     // leaving), smaller = earlier and quicker. Keep it > 0 and <= 1.
-    var PLATE_TAIL = 0.72;
+    var PLATE_TAIL = 0.35;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -333,7 +333,12 @@
       // The plate finishes earlier than the print — see PLATE_TAIL. Never longer
       // than the tail (the plate must not still be dissolving once the print is
       // erased) and never shorter than a token distance.
-      acrylicTail = Math.max(1, Math.round(tailRange * PLATE_TAIL));
+      // 🎛️ TUNABLE FROM THE CONSOLE (no rebuild needed): set
+      //     window.__plateTail = 0.4        // then scroll away and back to re-measure
+      //   and it overrides PLATE_TAIL. Smaller = the background acrylic clears
+      //   sooner after the print lands; larger = it lingers.
+      var plateTailNow = window.__plateTail > 0 ? window.__plateTail : PLATE_TAIL;
+      acrylicTail = Math.max(1, Math.round(tailRange * plateTailNow));
 
       cell = {
         x: cellRect ? cellRect.left : 0,
@@ -447,8 +452,22 @@
       // HOLD to 0.60, then fade to nothing at 0.90 — a straight line, so every
       // bit of the scroll carries the same amount of change and there is no step
       // anywhere to read as "it just vanished".
+      //
+      // 🎛️ TUNABLE FROM THE CONSOLE (no rebuild needed):
+      //     window.__veilHold = 0.45   // start fading earlier
+      //     window.__veilEnd  = 0.80   // finish fading earlier
+      //   Both are fractions of the travel t (0 = top, 1 = the print has landed).
+      //   Bigger numbers = the frost stays on the picture longer.
+      //
+      // 🔴 `veilEnd` defaults to 0.95, NOT to `veilHold + 0.05`. That 0.05 was the
+      // bug behind "the blur clears suddenly instead of gradually": it squeezed the
+      // whole dissolve into 5% of the travel — measured, 80px of scroll at
+      // 1440x900, a step of -0.207 per 20px, i.e. one frame. The frost now holds to
+      // 0.55 and takes the rest of the approach (≈1470px) to go.
       if (screenVeil) {
-        screenVeil.style.opacity = String(1 - clamp01((t - 0.60) / 0.30));
+        var veilHold = window.__veilHold > 0 ? window.__veilHold : 0.55;
+        var veilEnd = window.__veilEnd > veilHold ? window.__veilEnd : 0.95;
+        screenVeil.style.opacity = String(1 - clamp01((t - veilHold) / (veilEnd - veilHold)));
       }
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
@@ -526,12 +545,22 @@
       //
       // Counter-scaling it (`rest / scale`) keeps `padding × scale` ≈ rest for
       // the whole travel, so the mat is the same thickness on screen from the
-      // first frame to the last. The print's box does not move or resize at all
-      // — only the mat inside it — which is why this needs no height maths.
+      // first frame to the last.
       //
-      // At scale 1 the values are the stylesheet's own, so the mat and the
-      // cell's mat are the same box and the hand-off is invisible.
-      if (padRest) {
+      // 🔴 THE BOX IS COUNTER-SCALED WITH IT, and that is what keeps the
+      // photograph's shape. The mat is 11px on the sides and 11/38 top/bottom —
+      // not proportional — so counter-scaling the padding alone changes the
+      // CONTENT box's aspect ratio from 1.50 (cell-shaped) to 1.214 during the
+      // travel. With `object-fit: fill` that was a 23% vertical stretch of the
+      // user's photographs ("some of my pictures are stretched"); with `cover` it
+      // would be a visible re-crop. Growing the box by the same amount the mat
+      // grew means the content box is ALWAYS `contentW × contentH` in layout and
+      // always scales to the same thing on screen, so the picture is the same
+      // picture in every frame and at the landing it is the cell's own rectangle.
+      //
+      // At scale 1 both the padding and the box are the stylesheet's values, so
+      // the mat and the cell's mat are the same box and the hand-off is invisible.
+      if (padRest && screenBox) {
         var ms = scale > 0.05 ? scale : 0.05;
         var padT = padRest.t / ms;
         var padR = padRest.r / ms;
@@ -539,6 +568,8 @@
         var padL = padRest.l / ms;
         screen.style.padding = (padT.toFixed(2) + 'px ' + padR.toFixed(2) + 'px ' +
           padB.toFixed(2) + 'px ' + padL.toFixed(2) + 'px');
+        screen.style.setProperty('--screen-w', (screenBox.contentW + padL + padR).toFixed(2) + 'px');
+        screen.style.setProperty('--screen-h', (screenBox.contentH + padT + padB).toFixed(2) + 'px');
       }
 
       // The masthead runs 0.18 -> 0.62, inside the print's own stretch. It used
