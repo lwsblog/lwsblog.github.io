@@ -428,9 +428,12 @@
     }
 
     function render(t) {
-      // Veil 0.02 -> 0.44. The blur underneath is the scene's own, so fading
-      // the veil is the whole reveal.
-      var veilT = segment(t, 0.02, 0.44);
+      // Veil 0.02 -> 0.62. (Was 0.02 -> 0.44.) The blur underneath is the print's
+      // own acrylic, so fading the veil is the whole reveal — and at 0.44 it was
+      // gone before the print had travelled a third of the way: "the blur still
+      // disappears too fast". 0.62 keeps the frost on the picture for most of the
+      // approach and only clears it as the print settles.
+      var veilT = segment(t, 0.02, 0.62);
       if (screenVeil) screenVeil.style.opacity = String(1 - veilT);
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
@@ -742,19 +745,17 @@
       // own end; the document's height only participates as a difference, which is
       // stable because both sides are read in the same instant.
       if (spacerHeight0 < 0) return;
-      // 🔴 The target is the fade's own end, NOT the frame the wheel happened to
-      // engage on. A notch is ~100px, so the pin always engages a whole notch past
-      // the limit; using that parks the page there permanently (measured: 2395
-      // against a fade end of 2259) and the print travels an extra 136px out of the
-      // viewport before anything stops.
+      // 🔴 What was wrong with `Math.min(pinY, fadeEnd)`: a wheel notch is ~100px,
+      // so the page always comes to rest a little ABOVE the fade end. Cutting the
+      // document back to the fade end then drags the visitor up to it, AND leaves
+      // them with the limit exactly under their feet — no scroll room at all, so the
+      // next gesture did nothing ("sometimes nothing happens when I flick up").
       //
-      // It is the MINIMUM of the two, and that is the trick: setting the document's
-      // height to the fade end while the page sits past it makes the BROWSER clamp
-      // the position down to the new maximum itself. One correction, performed as
-      // part of the layout change, with no `scrollTo` for the browser's own scroll
-      // animation to override — which is why this works where four other attempts
-      // did not.
-      var target = Math.min(pinY, Math.round(landScroll + Math.max(1, acrylicTail)));
+      // The document now ends at the point the visitor actually reached, plus a
+      // screen of room below it. Nothing above that point is reachable (which is the
+      // whole point), and there is always somewhere to go.
+      var room = Math.min(window.innerHeight * 0.5, 420);
+      var target = Math.max(pinY, Math.round(landScroll + Math.max(1, acrylicTail))) + room;
       var excess = (document.documentElement.scrollHeight - window.innerHeight) - target;
       if (excess <= 1) { spacerLocked = true; return; }
       spacer.style.setProperty('height', (spacerHeight0 - excess) + 'px', 'important');
@@ -840,6 +841,12 @@
       var lim = pinLimit();
       if ((event.deltaY || 0) < 0) {
         holding = true;
+        // ⚠️ `shrinkToPin()` is deliberately NOT called here. It was tried and
+        // reverted: acting on layout from the wheel event let the document be cut
+        // while the print was still travelling, which retired the print and the
+        // plate early (measured: acrylic gone at y=1402 against a limit of 2395).
+        // The shrink belongs to the `scroll` path, which only runs once the pin is
+        // engaged and the animation is over.
         if (window.scrollY <= lim) event.preventDefault();
       } else {
         holding = false;

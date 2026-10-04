@@ -4925,8 +4925,8 @@ html {
   position: absolute;
   inset: 0;
   background: rgba(9, 11, 15, 0.30);
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   will-change: opacity;
 }
 
