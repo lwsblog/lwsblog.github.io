@@ -96,24 +96,20 @@
     // BETWEEN the grid and the print (z-index 20 against the print's 30), so it
     // never dims the print — it blurs and dims everything BEHIND the print, so a
     // photograph in flight does not bleed into the page behind it. The opening
-    // is exactly when that matters most, and it is also when the plate is least
-    // visible over the print, so:
+    // is exactly when that matters most, so:
     //
-    //   ACRYLIC_FROM / TO — the plate is fully closed before the print has moved
-    //     far enough to uncover anything. At t=0 the print's content box covers
-    //     the viewport ("true/true" on every measured width), so the plate is
-    //     invisible there by construction; it becomes visible exactly as the
-    //     print's edges come in. 0.06 → 0.22 in posT finishes it at t=0.36 —
-    //     posT 0.22 is scrollY 731 of 1937 — while the first bare paper edge
-    //     only appears at scrollY 720 (t=0.37) and the first grid cell at
-    //     scrollY 1646. So there is never a frame with a sharp background under
-    //     the print: the plate is already at 1.0 before the seam exists.
+    //   ACRYLIC_FROM / TO — the travel window in which the plate LIFTS. It is
+    //     closed at posT 0 and open by posT 0.22 (t=0.36), and it lifts along the
+    //     print's own timeline so the two are on one clock.
     //
-    //     This replaces the earlier 0.25 → 0.55, which was chasing the half of
-    //     the problem that was visible (a bare white edge) and left the opening
-    //     itself with a fully sharp grid behind the print, which reads as the
-    //     photo mixing into the page instead of sitting on it.
-    var ACRYLIC_FROM = 0.06;
+    //     🔴 Closed at the START, not opened at some point during the scroll.
+    //     The photograph covers the viewport at t=0, so a plate that is not yet
+    //     closed there looks like nothing at all — and what it is for is exactly
+    //     that moment: the grid behind the print is sharp and the photograph
+    //     bleeds into the page instead of sitting on it. Reported as "the acrylic
+    //     is not strong enough on the opening screen". The plate is erased again
+    //     in the tail, once the print has landed.
+    var ACRYLIC_FROM = 0;
     var ACRYLIC_TO = 0.22;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
@@ -123,6 +119,10 @@
     // Filled in by measure().
     var cell = null;
     var screenBox = null;
+    // The print's mat, at the two ends of the travel. Written by measure(); the
+    // live value is interpolated in render() (see there for why).
+    var padStart = null;
+    var padRest = null;
     var startScale = 1;
     var startX = 0;
     var startY = 0;
@@ -166,12 +166,36 @@
       var first = frames[0];
 
       // --- the print's box, sized to the cell it has to become.
-      // The cell's own box already includes its 11px mat and 38px caption
-      // strip, and the print uses the same padding, so at scale 1 the two are
-      // the same rectangle — which is what makes the hand-off invisible.
+      // The cell's own box already includes its mat and caption strip, and the
+      // print uses the same padding, so at scale 1 the two are the same
+      // rectangle — which is what makes the hand-off invisible.
       var cellRect = first ? first.getBoundingClientRect() : null;
-      var boxW = cellRect ? cellRect.width : Math.round(size.width * 0.42);
-      var boxH = cellRect ? cellRect.height : Math.round(boxW * 0.66);
+      var shapeW = cellRect ? cellRect.width : Math.round(size.width * 0.42);
+      var shapeH = cellRect ? cellRect.height : Math.round(shapeW * 0.66);
+
+      // 🔴 Every number below comes from the CELL, never from the print's own
+      // current style. The print's mat is animated (see render), so its padding
+      // is a function of the last frame it drew — measuring it here made
+      // `startScale` a function of its own previous output and it ran away:
+      // re-measuring fed the inflated padding back in as if it were the box, and
+      // the scale went 7.45 → 900 → 817 → 360 … (measured), which blew the print
+      // up to 132 million pixels wide and left it 10,595px off screen.
+      //
+      // `getComputedStyle` on the cell reports the stylesheet's padding, because
+      // the cell is never written to inline. Clearing the print's own inline
+      // padding first gives the same guarantee if it ever is.
+      var cellStyle = first ? window.getComputedStyle(first) : null;
+      padRest = cellStyle
+        ? { l: parseFloat(cellStyle.paddingLeft) || 0,
+            t: parseFloat(cellStyle.paddingTop) || 0,
+            r: parseFloat(cellStyle.paddingRight) || 0,
+            b: parseFloat(cellStyle.paddingBottom) || 0 }
+        : { l: 11, t: 11, r: 11, b: 38 };
+      var contentW = Math.max(1, shapeW - padRest.l - padRest.r);
+      var contentH = Math.max(1, shapeH - padRest.t - padRest.b);
+      // The print's box is the CELL's box: content + the mat at its resting size.
+      var boxW = contentW + padRest.l + padRest.r;
+      var boxH = contentH + padRest.t + padRest.b;
       screen.style.setProperty('--screen-w', boxW + 'px');
       screen.style.setProperty('--screen-h', boxH + 'px');
 
@@ -187,8 +211,7 @@
       //
       // Measuring the mat instead of hard-coding it is what keeps this honest
       // across the phone breakpoint, where the padding is 8/8/26 rather than
-      // 11/11/38. getComputedStyle reports the untransformed padding, so an
-      // in-flight transform cannot poison the number.
+      // 11/11/38.
       //
       // The box it replaced started at 86% x 78% of the viewport — a screen
       // floating in the middle of the page, which is not what the page opens
@@ -196,19 +219,19 @@
       // width-derived scale hit 1.0 on a full-width cell and the print never
       // travelled; cover subsumes that case and gives it more travel, not
       // less.
-      var cs = window.getComputedStyle(screen);
-      var padL = parseFloat(cs.paddingLeft) || 0;
-      var padT = parseFloat(cs.paddingTop) || 0;
-      var contentW = Math.max(1, boxW - padL - (parseFloat(cs.paddingRight) || 0));
-      var contentH = Math.max(1, boxH - padT - (parseFloat(cs.paddingBottom) || 0));
       startScale = Math.max(size.width / contentW, size.height / contentH);
+      // At scale S the mat is DRAWN S times wider, so the content box starts
+      // inset by pad × S rather than pad. That is what the start offset has to
+      // cancel, and it is also the value the mat has to animate FROM.
+      padStart = { l: padRest.l * startScale, t: padRest.t * startScale,
+                   r: padRest.r * startScale, b: padRest.b * startScale };
       // The CONTENT area is centred in the viewport, not the box: the mat is
       // asymmetric (11 top / 38 bottom for the caption strip), so centring
       // the box would leave that strip hanging inside the frame and push the
       // photograph off-centre. Offsetting by the mat puts the photograph
       // exactly on the viewport and the paper edge out of sight.
-      startX = (size.width - contentW * startScale) / 2 - padL * startScale;
-      startY = (size.height - contentH * startScale) / 2 - padT * startScale;
+      startX = (size.width - contentW * startScale) / 2 - padRest.l * startScale;
+      startY = (size.height - contentH * startScale) / 2 - padRest.t * startScale;
 
       // --- the landing spot, and the two ranges the travel is measured in.
       // The travel ends with the first cell already on screen (a cell below
@@ -380,6 +403,30 @@
       // the print carries a 315px halo at the start of the travel.
       screen.style.setProperty('--screen-s', scale.toFixed(4));
 
+      // 🔴 The mat is interpolated as well, and this is the whole reason the
+      // print used to "stick, then jump to the left" at the end of the travel.
+      //
+      // The stylesheet's padding is a FIXED 11px, and the transform scales it
+      // like everything else: at the start the mat is drawn 11 × 7.45 = 82px
+      // wide while the box shrinks with the scale, so the content box (box minus
+      // mat) ends up inset 82px. As the travel finishes, the scale falls to 1
+      // and the mat snaps back to its 11px — which moves the PHOTOGRAPH's centre
+      // 498px to the right in the last 40px of scroll. Nothing else in the
+      // travel moves that fast, so it reads as the print stopping and then
+      // sliding.
+      //
+      // Interpolating the padding from padStart to its stylesheet value keeps the
+      // content box's centre linear for the whole travel, and at scale 1 the
+      // values are exactly the stylesheet's — the mat and the cell's mat are
+      // then the same box, which is what the hand-off needs.
+      if (padStart && padRest) {
+        screen.style.padding = (
+          lerp(padStart.t, padRest.t, printT).toFixed(2) + 'px ' +
+          lerp(padStart.r, padRest.r, printT).toFixed(2) + 'px ' +
+          lerp(padStart.b, padRest.b, printT).toFixed(2) + 'px ' +
+          lerp(padStart.l, padRest.l, printT).toFixed(2) + 'px');
+      }
+
       // The masthead runs 0.18 -> 0.62, inside the print's own stretch. It used
       // to run 0.06 -> 0.66 and that start is why the reversal was broken even
       // after the layers stopped being destroyed: coming back up from the
@@ -427,12 +474,43 @@
       // whole thing reversible for free: scrolling up retraces the envelope
       // exactly, so the plate comes back before the print leaves its cell.
       if (acrylic) {
-        // The inverse of the curve below, so the plate's motion and the print's
-        // motion stay locked to the same parameter in both directions. Easing a
-        // tail-derived value instead would put the two on different clocks and
-        // the reversal would run at the wrong speed.
-        var kIn = Math.pow(clamp01((posT - ACRYLIC_FROM) / (ACRYLIC_TO - ACRYLIC_FROM)), 1 / 3);
-        acrylic.style.setProperty('--acrylic-k', (kIn * (1 - segment(after, 0, tailRange))).toFixed(4));
+        // Two envelopes, and the plate is the STRONGER of them. They cover the
+        // two ends of the travel and are measured on different clocks:
+        //
+        //   1. the OPENING, closed at t=0 and lifted over the print's own
+        //      timeline. Driven from the print rather than from the tail: a
+        //      tail-derived curve put the plate at 0.98 while the print was still
+        //      at scale 1.93, so by the time the grid entered the viewport (90%
+        //      of the travel) there was nothing left of the scroll to see it in.
+        //      Closed at the very first frame, because the photograph fills the
+        //      viewport there and the grid behind it would otherwise be sharp —
+        //      the photo then reads as mixed into the page instead of sitting on
+        //      it. Reported as "the acrylic is not strong enough on the opening".
+        //   2. the TAIL, which lifts the plate once the print has landed so the
+        //      grid is never bare while the print is airborne beside it.
+        //
+        // 🔴 `max`, not a product. The tail envelope is 0 at t=0 (nothing has
+        // been scrolled yet) and the opening envelope is 1 there, so multiplying
+        // them cancelled the opening completely — measured k=0.0000 with
+        // `blur(0px)` on the opening frame, which is exactly the bug being fixed.
+        // The two never need to be strong at once, so the stronger one wins.
+        //
+        // 🔴 And the inverse has to be a real inverse. `start` is clamped at 0,
+        // and the visible value it feeds is `start³`, so recovering the un-eased
+        // fraction is `plate^⅓` — the cube reads the curve backwards and would
+        // force the plate to 0 on the opening frame all over again.
+        var aFrom = ACRYLIC_FROM;
+        var aTo = ACRYLIC_TO;
+        var start;
+        if (posT <= aFrom) {
+          start = 0;
+        } else if (posT < aTo) {
+          start = Math.cbrt(clamp01((posT - aFrom) / (aTo - aFrom)));
+        } else {
+          start = 1;
+        }
+        var tailK = 1 - segment(after, 0, tailRange);
+        acrylic.style.setProperty('--acrylic-k', Math.max(start, tailK).toFixed(4));
       }
 
       // The cell the print is flying towards is EMPTY until the print is
@@ -529,10 +607,20 @@
     // page a few pixels above the limit (measured 2200 against 2197), and a
     // separate clamp in the scroll handler cannot land it exactly either, because
     // by then the gesture has already been consumed.
+    //
+    // 🔴 At the limit the gesture is swallowed and NOTHING is written. Writing
+    // the position back is what produced the visible jitter: the browser had
+    // already scrolled a few pixels before the clamp pulled it home, so every
+    // notch was a scroll-and-snap. With the position untouched there is nothing
+    // to snap back from.
     function onWheel(event) {
       if (!atLimit) return;
       if ((event.deltaY || 0) >= 0) return;            // downward is free
       var lim = pinLimit();
+      if (window.scrollY <= lim) {
+        event.preventDefault();                        // already there: hold still
+        return;
+      }
       if (window.scrollY - Math.abs(event.deltaY) < lim) {
         event.preventDefault();
         window.scrollTo(0, lim);
@@ -865,13 +953,17 @@
 
     function initDrag() {
       var drag = null;
+      // Set while a drag is in flight so the click that follows the pointerup
+      // does not ALSO open the lightbox. A press on the photograph now starts a
+      // drag as well as being the zoom control, and the browser fires `click` on
+      // the button after a drag unless something consumes it: measured, moving a
+      // frame 150px opened the lightbox at the end of the gesture.
+      var swallowClick = false;
 
       root.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         var frame = event.target.closest ? event.target.closest('.photo-frame') : null;
-        // A press on the zoom control is a click, not a drag.
         if (!frame || !root.contains(frame)) return;
-        if (event.target.closest && event.target.closest('.photo-frame__hit')) return;
         if (reduced) return;
 
         drag = {
@@ -898,10 +990,22 @@
         if (!drag) return;
         if (drag.moved) {
           drag.frame.classList.remove('is-dragging');
-          // Left where it was dropped, for this session only.
+          // Left where it was dropped, for this session only. The click that the
+          // browser is about to deliver must not reach the zoom control.
+          swallowClick = true;
+          window.setTimeout(function () { swallowClick = false; }, 0);
         }
         drag = null;
       }
+
+      // Capture phase, on the root: the delegated zoom handler is also on the
+      // root (bubble phase), so this runs first and stops a drag's tail click.
+      root.addEventListener('click', function (event) {
+        if (!swallowClick) return;
+        swallowClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
 
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
@@ -949,6 +1053,10 @@
       screen.style.display = '';
       screen.style.visibility = '';
       screen.style.transform = '';
+      // The mat is written inline every frame (see render); hand it back to the
+      // stylesheet so the next page in a PJAX navigation starts from its own
+      // padding rather than this gallery's last frame.
+      screen.style.padding = '';
       screen.style.removeProperty('--screen-w');
       screen.style.removeProperty('--screen-h');
       if (screenVeil) screenVeil.style.opacity = '';
