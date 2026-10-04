@@ -1028,13 +1028,41 @@
     // hand-off exact — without it the print would still be a fraction of a pixel
     // short of its cell on the frame the pin engages.
     var SMOOTH = 0.22;
+    // 🔴 The glide is specified as a TIME (`GLIDE` ms to cover ~95% of the gap) and
+    // converted to a per-frame factor from the real frame delta, instead of using a
+    // fixed fraction-per-frame.
+    //
+    // Two reasons the fixed fraction read as "there is no easing at all":
+    //   1. an exponential has a long tail — the last few percent of a 100px step
+    //      crawl for several frames, so most of the visible travel happens in the
+    //      first two or three frames and the eye calls that "instant";
+    //   2. a fixed fraction is frame-rate dependent and the user's display is not
+    //      60Hz. At 144Hz the same `0.22` is applied 144 times a second, so the
+    //      step is effectively over in ~3 frames of real time.
+    // With the factor derived from `dt`, the same number of milliseconds of glide
+    // happens on every display.
+    //
+    // 🎛️ TUNABLE FROM THE CONSOLE:
+    //     window.__glide = 500    // ms; default. Bigger = longer, heavier slide
+    //     window.__glide = 1200   // very cinematic, lags noticeably behind the page
+    //     window.__glide = 0      // no smoothing at all (the old steppy behaviour)
+    //   `window.__smooth` (a raw per-frame fraction) still overrides it if set.
+    var GLIDE = 700;
+    var lastStepAt = 0;
     function step() {
       frameRequest = 0;
       if (pinEngaged) return;               // the print is retired; nothing to animate
-      // 🎛️ TUNABLE FROM THE CONSOLE: how much of the remaining distance is covered
-      // each frame. 1 = no smoothing (the old, steppy behaviour), 0.1 = long glide.
-      //     window.__smooth = 0.35
-      var k = window.__smooth > 0 ? Math.min(1, window.__smooth) : SMOOTH;
+      var now = performance.now();
+      var dt = lastStepAt ? Math.min(64, now - lastStepAt) : 16;
+      lastStepAt = now;
+      var k;
+      if (window.__smooth > 0) {
+        k = Math.min(1, window.__smooth);   // raw override, frame-rate dependent
+      } else {
+        var glide = window.__glide >= 0 ? window.__glide : GLIDE;
+        // 3 time-constants covers ~95% of the gap.
+        k = glide <= 0 ? 1 : 1 - Math.exp(-3 * dt / glide);
+      }
       var target = window.scrollY;
       if (smoothY < 0) smoothY = target;    // first frame: start exactly on the scroll
       var delta = target - smoothY;
@@ -1046,7 +1074,8 @@
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
       render(t);
-      if (smoothY !== target) frameRequest = window.requestAnimationFrame(step);
+      if (smoothY !== target) { frameRequest = window.requestAnimationFrame(step); }
+      else { lastStepAt = 0; }
     }
 
     function onResize() {
