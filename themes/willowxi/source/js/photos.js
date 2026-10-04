@@ -650,7 +650,16 @@
         // `ACRYLIC_PEAK..ACRYLIC_TO`, so the background is already clearing while
         // the print's own frost is still on the picture and the two layers descend
         // together instead of one after the other.
-        var acrPeak = clamp01(ACRYLIC_PEAK);
+        //
+        // 🎛️ TUNABLE FROM THE CONSOLE — this is the knob for "the background
+        // acrylic is still too strong / clears too early":
+        //     window.__acrylicPeak = 0.45   // default
+        //     window.__acrylicPeak = 0.72   // peak at y≈1560, i.e. the acrylic is
+        //                                   // still full when the grid arrives
+        //     window.__acrylicPeak = 0.25   // peak at y≈590, clears much sooner
+        //   Fraction of `posT`. Bigger = the full-strength point moves later, so the
+        //   background stays frosted for longer and clears closer to the landing.
+        var acrPeak = clamp01(window.__acrylicPeak > 0 ? window.__acrylicPeak : ACRYLIC_PEAK);
         if (acrPeak <= aFrom + 0.001) acrPeak = aFrom + 0.05;
         if (aTo <= acrPeak + 0.001) aTo = acrPeak + 0.05;
         var plateT = posT <= acrPeak
