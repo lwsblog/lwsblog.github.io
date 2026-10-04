@@ -112,6 +112,25 @@
     // (`reachable - scrollRange`), so on a short page it shrinks rather than
     // pinning the page past its end.
     var TAIL = 520;
+    // How much of that tail the PLATE takes to dissolve, as a fraction. The print
+    // uses all of it to finish walking out of the viewport; the plate should be
+    // gone well before that.
+    //
+    // 🔴 It used to be 1.0, and that is what "the global acrylic disappears a
+    // little too late" was: measured at 2560x1440, the dissolve ran from y=3006 to
+    // y=3526 while the print's box was at top 605 -> 125 (178 tall), i.e. k only
+    // reached 0 once the print was essentially off the top of the screen. The
+    // visitor therefore watched the mask fade over a photograph that had already
+    // left.
+    //
+    // 0.62 puts k=0 at y≈3328, where the print's top is ≈203 — the fade finishes
+    // while the print is still on screen and still moving, which is what makes it
+    // read as the mask being taken off rather than left behind. The pin moves with
+    // it (see pinLimit), so nothing about the scroll limit changes shape.
+    //
+    // ⚠️ The knob: bigger = dissolves later (closer to the print leaving), smaller
+    // = dissolves earlier. Keep it > 0 and <= 1.
+    var PLATE_TAIL = 0.62;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -296,9 +315,10 @@
       landScroll = Math.max(0, cellTop - landY);
       scrollRange = Math.max(1, Math.round(landScroll));
       tailRange = Math.max(1, Math.round(Math.min(TAIL, reachable - scrollRange)));
-      // The plate dissolves over the same distance as the print's tail, so the
-      // two finish together — see TAIL.
-      acrylicTail = tailRange;
+      // The plate finishes earlier than the print — see PLATE_TAIL. Never longer
+      // than the tail (the plate must not still be dissolving once the print is
+      // erased) and never shorter than a token distance.
+      acrylicTail = Math.max(1, Math.round(tailRange * PLATE_TAIL));
 
       cell = {
         x: cellRect ? cellRect.left : 0,
@@ -606,42 +626,22 @@
 
     /* ---- the pin: no way back into the animation ------------------------ */
 
-    // Where the page is held.
-    //
-    // 🔴 One pixel past the end of the tail, and the reason is rounding.
-    // `landScroll` is fractional (1936.5 here) while `scrollY` is an integer, so
-    // at a limit of exactly `landScroll + tailRange` the closest the page can get
-    // is 0.5px short of it — `after` stalled at 259.5 of 260, which left the
-    // plate at k=0.20 instead of 0. The pin therefore sits at ceil(landScroll +
-    // tail) and the erase test uses the same generous comparison.
-    //
-    // It is NOT scrollRange + tailRange: `tailRange` is clamped to whatever
-    // scroll the document has left (`reachable - scrollRange` measured 450px
-    // against a requested 260), so adding the raw TAIL could pin past the end of
-    // the document — which silently disables the pin, because the browser clamps
-    // scrollY to the document end before any handler runs.
-    // Where the page is held: the point at which the plate has finished
+    // Where the page is held: the point at which the PLATE has finished
     // dissolving, so the last thing the visitor scrolls through is the fade.
     //
-    // 🔴 It is `landScroll + tailRange`, NOT `ceil(...)` of the same. The ceil
-    // was there to clear the 0.5px that a fractional `landScroll` leaves against
-    // an integer `scrollY`, but it overshot by design: at the pin, `after` came
-    // out 260.5 against a tailRange of 260, i.e. past the END of the dissolve, so
-    // the plate's whole tail was compressed into the final frame and `erase()`
-    // removed it in the same step. Measured then: k = 1.000 at y=2177 and
-    // k = 0.000 at y=2197, one step.
+    // `landScroll + acrylicTail`, ROUNDED rather than ceiled: a fractional
+    // `landScroll` (3005.7 at 2560x1440) against an integer `scrollY` needs the
+    // nearest integer, and `Math.ceil` would overshoot the end of the dissolve by
+    // design (measured once: `after` 260.5 against a tail of 260, which cut the
+    // fade off in its final frame).
     //
-    // The plate and the print now share `tailRange` (see TAIL) and the pin sits
-    // exactly at its end, so k reaches 0 as the page arrives and nothing is cut
-    // off. Rounding rather than ceiling is what keeps the two aligned for a
-    // fractional `landScroll`.
-    //
-    // It is still NOT scrollRange + TAIL: `tailRange` is clamped to whatever
-    // scroll the document has left (`reachable - scrollRange`), or the pin would
-    // sit past the end of the document — which silently disables it, because the
-    // browser clamps scrollY to the document end before any handler runs.
+    // `acrylicTail` is clamped to the scroll the document actually has left, and
+    // it is SHORTER than the print's own `tailRange` (see PLATE_TAIL) — so the
+    // plate reaches 0 before the print stops moving, which is what makes the fade
+    // readable. The print's remaining walk-out happens below the pin and is
+    // simply never scrolled back through.
     function pinLimit() {
-      return Math.round(landScroll + Math.max(1, tailRange));
+      return Math.round(landScroll + Math.max(1, acrylicTail));
     }
 
     function engagePin() {

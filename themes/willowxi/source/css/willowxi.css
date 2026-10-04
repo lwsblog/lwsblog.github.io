@@ -4875,10 +4875,41 @@ html[data-theme="light"] .photo-screen {
   object-fit: fill;
 }
 
+/* 🔴 The print has its OWN acrylic, and it is a different layer from
+   `.photo-acrylic` — that one sits BEHIND the print and blurs the grid, this one
+   sits ON the photograph and blurs the photograph. Both were asked for
+   separately: "the screen picture itself should have acrylic too, it is not
+   about blurring the background while the picture stays sharp".
+
+   Getting the balance right matters more here than on the plate, because this
+   layer is over the picture the visitor is looking at:
+
+   | | tint | blur |
+   |---|---|---|
+   | the plate behind the print | 0.74 | 22px |
+   | this veil, before | 0.72 | none (a plain dimmer) |
+   | this veil, now | **0.34** | **26px** |
+
+   A/B measured with the veil's blur switched on and off: at 0.72 the picture was
+   pressed to near-black and the blur was invisible, so the layer read as a
+   curtain rather than frosted glass. Dropping the tint and raising the blur puts
+   the work on the blur, which is what "acrylic" means — the photograph is still
+   the photograph, just seen through the pane. Measured at the opening frame the
+   two differ by mean 17.7 / max 78 out of 255, and the frosted side is BRIGHTER
+   (a 26px blur pulls the sky's light down over the buildings), which is the
+   signature of real frost rather than a dimmer.
+
+   The blur radius is in the PRINT's own coordinate space (the veil is inside the
+   print's scaled box), so it shrinks on screen along with the print — which is
+   what keeps the frost the same size relative to the picture. JS fades the whole
+   layer out over the first stretch of the travel by writing its opacity
+   (see `veilT` in render()). */
 .photo-screen__veil {
   position: absolute;
   inset: 0;
-  background: rgba(9, 11, 15, 0.72);
+  background: rgba(9, 11, 15, 0.34);
+  -webkit-backdrop-filter: blur(26px);
+  backdrop-filter: blur(26px);
   will-change: opacity;
 }
 
