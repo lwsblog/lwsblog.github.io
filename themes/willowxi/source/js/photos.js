@@ -1116,11 +1116,12 @@
     // happens on every display.
     //
     // 🎛️ TUNABLE FROM THE CONSOLE:
-    //     window.__glide = 500    // ms; default. Bigger = longer, heavier slide
-    //     window.__glide = 1200   // very cinematic, lags noticeably behind the page
+    //     window.__glide = 900    // ms the glide lasts after the last scroll event
+    //     window.__speed = 2600   // px per second, the ceiling
     //     window.__glide = 0      // no smoothing at all (the old steppy behaviour)
     //   `window.__smooth` (a raw per-frame fraction) still overrides it if set.
-    var GLIDE = 700;
+    var GLIDE = 900;
+    var SPEED = 2600;
     var lastStepAt = 0;
     function step() {
       frameRequest = 0;
@@ -1128,21 +1129,30 @@
       var now = performance.now();
       var dt = lastStepAt ? Math.min(64, now - lastStepAt) : 16;
       lastStepAt = now;
-      var k;
-      if (window.__smooth > 0) {
-        k = Math.min(1, window.__smooth);   // raw override, frame-rate dependent
-      } else {
-        var glide = window.__glide >= 0 ? window.__glide : GLIDE;
-        // 3 time-constants covers ~95% of the gap.
-        k = glide <= 0 ? 1 : 1 - Math.exp(-3 * dt / glide);
-      }
+      var glide = window.__glide >= 0 ? window.__glide : GLIDE;
+      var speed = window.__speed > 0 ? window.__speed : SPEED;
       var target = window.scrollY;
       if (smoothY < 0) smoothY = target;    // first frame: start exactly on the scroll
       var delta = target - smoothY;
+      // 🔴 CONSTANT SPEED once there is ground to cover, easing only into the last
+      // few pixels. An exponential is fastest on its very first frame and then
+      // crawls — measured step sizes of 0.115, 0.080, 0.050, 0.030 … so the motion
+      // is most violent exactly when the eye is reading a fresh gesture, then
+      // dribbles out. That uneven ramp is what "there IS easing but it still
+      // stutters" describes. A constant-speed glide moves the same distance every
+      // frame, which is what a smooth-scrolling browser looks like.
       if (Math.abs(delta) < 0.12) {
-        smoothY = target;
+        smoothY = target;                   // close enough: snap so the hand-off is exact
+      } else if (window.__smooth > 0) {
+        smoothY += delta * Math.min(1, window.__smooth);   // raw per-frame override
+      } else if (glide <= 0) {
+        smoothY = target;                   // smoothing off
       } else {
-        smoothY += delta * k;
+        var cap = speed * dt / 1000;                     // the speed limit, px/frame
+        var ease = Math.abs(delta) * (dt / glide);       // the final approach, px/frame
+        var stepPx = Math.min(cap, Math.max(ease, 0.5));
+        if (stepPx > Math.abs(delta)) stepPx = Math.abs(delta);
+        smoothY += delta > 0 ? stepPx : -stepPx;
       }
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
