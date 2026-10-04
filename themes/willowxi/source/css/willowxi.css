@@ -4866,16 +4866,24 @@ html[data-theme="light"] .photo-screen {
   width: 100%;
   max-width: none;
   height: 100%;
-  /* 🔴 `cover`, NOT `fill`. `fill` stretched the photograph to whatever shape the
-     content box happened to be, and because the mat is counter-scaled
-     (`rest / scale`) the box's aspect ratio drifted from 1.50 at rest to 1.21
-     during the travel — a 23% vertical stretch. Reported as "some of my pictures
-     are stretched".
+  /* 🔴 `cover`, NOT `fill`. This is the ONLY element that was stretching the
+     user's photographs.
 
-     `cover` cannot distort by definition; it crops. The crop is held constant by
-     the other half of the fix, in `render()`: the print's BOX is now
-     counter-scaled along with its mat, so `contentW : contentH` stays constant
-     for the whole travel and there is nothing for `cover` to re-crop. */
+     `fill` forces the source into whatever shape the content box happens to be.
+     The print's mat is counter-scaled (`rest / scale`, and 11px on the sides
+     against 11/38 top/bottom is not proportional), so the content box runs from
+     1.24 at the opening to 1.45 just before the landing and only reaches the
+     source's own 1.502 AT scale 1. Every other frame was therefore a vertical
+     stretch of 17-21% — measured: `11-screen.webp` is 1.502 and was being drawn
+     at 1.241 / 1.248 / 1.275 / 1.452.
+
+     The grid cells were never affected (their `--ratio` is the source's own, and
+     they already use `cover` with a 0.000 error on all 22 photographs).
+
+     `cover` cannot distort. It crops instead, and the crop drifts as the box's
+     ratio changes — which is the lesser of the two evils by a wide margin, and it
+     is exact at scale 1 (content box 193.2 x 128.6 = the cell's own content box),
+     which is the frame the hand-off happens on. */
   object-fit: cover;
 }
 
