@@ -353,6 +353,7 @@
       pinY = -1;
       smoothY = -1;                       // a resize restarts the chase on the scroll
       altArmed = false;                   // the opening owns the plate again
+      retired = false;                    // the print's one-way latch must reopen
       printRetiredAt = -1;
       // The spacer's authored height, captured BEFORE any shrink so the pin's
       // subtraction has a stable base.
@@ -802,7 +803,17 @@
       // is the "卡顿闪动" at the landing. `smoothY` is where the print actually is, so
       // the flip happens on the frame the two are coincident.
       var LAND_RETIRE = window.__landRetire >= 0 ? window.__landRetire : 0;
-      var wantRetired = smoothY >= landScroll + LAND_RETIRE - 0.5;
+      // 🔴 ONE-WAY, and it was NOT — that was a misreading of the brief. The user
+      // chose "屏风图不回来" (the print does not return) and separately asked for
+      // "删掉屏风倒放动画", but the value below was left reversible, so scrolling back up
+      // ran the whole travel backwards: "没变化啊，还是屏风图倒放".
+      //
+      // `retired || ...` latches it: the first frame at or past the landing puts the
+      // print away for good on this visit. What happens on the way back up is the
+      // acrylic plate's substitute blur plus the title (see `altArmed`), NOT the print.
+      // `measure()` and `destroy()` clear `retired`, so re-entering the gallery — or a
+      // resize — starts the opening animation again.
+      var wantRetired = retired || smoothY >= landScroll + LAND_RETIRE - 0.5;
       if (wantRetired !== retired) {
         retired = wantRetired;
         // 🔴 Recorded HERE, not in `erase()`. `erase()` is reachable only from
@@ -1751,6 +1762,7 @@
       smoothY = -1;
       altArmed = false;
       printRetiredAt = -1;
+      retired = false;
       if (spacer) spacer.style.removeProperty('height');
       spacerLocked = false;
       spacerHeight0 = -1;
