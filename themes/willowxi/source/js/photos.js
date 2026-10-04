@@ -753,8 +753,15 @@
       // read as a glitch ("the print suddenly reappears and grows"). With the pin off
       // there is nothing to stop the page going back up, so the travel must reverse
       // instead of staying dead — otherwise scrolling up shows a blank screen.
+      // ⚠️ The test is the RENDERED position (`smoothY`), not `scrollY`. The scroll
+      // position jumps in whole pixels and, with a glide, arrives well before the
+      // print does — measured, `scrollY` reached 1950 and retired the print while it
+      // was still at scale 1.3535 and 26px above its cell, so the cell's own
+      // photograph appeared underneath a print that was still shrinking. That overlap
+      // is the "卡顿闪动" at the landing. `smoothY` is where the print actually is, so
+      // the flip happens on the frame the two are coincident.
       var LAND_RETIRE = window.__landRetire >= 0 ? window.__landRetire : 0;
-      var wantRetired = window.scrollY >= landScroll + LAND_RETIRE - 2;
+      var wantRetired = smoothY >= landScroll + LAND_RETIRE - 0.5;
       if (wantRetired !== retired) {
         retired = wantRetired;
         screen.style.visibility = retired ? 'hidden' : '';
@@ -1197,7 +1204,7 @@
     //   150ms → 649ms              (floaty)
     //   220ms → 950ms              (too much — that is what the rewrite removed)
     // `window.__glide` overrides it live, so exploring this needs no rebuild.
-    var GLIDE = 110;
+    var GLIDE = 180;
     var SPEED = 26000;
     var lastStepAt = 0;
     function step() {
@@ -1277,6 +1284,28 @@
       window.setTimeout(bail, 6000);
     }
 
+    // 🔴 RANDOMISE THE GRID ORDER, at the user's request: "下面的图片随机排序".
+    //
+    // Done with the CSS `order` property rather than by moving nodes. `frames[0]` is
+    // the cell the print flies to, and so is the cell that becomes vacant; it stays
+    // first in the DOM whatever order the visitor sees, so every existing behaviour
+    // (the travel, the hand-off, the vacant cell, the lightbox grouping) is untouched
+    // and only the paint order changes. Moving nodes instead would renumber those.
+    //
+    // 🎛️ `window.__order` — leave unset for a fresh shuffle on every load; set it to
+    // `'authored'` and reload to get the hand-written order back for comparison.
+    function shuffleFrames() {
+      if (window.__order === 'authored') return;
+      var order = frames.map(function (_, i) { return i; });
+      for (var i = order.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+      }
+      frames.forEach(function (frame, i) {
+        frame.style.order = String(order[i]);
+      });
+    }
+
     function initScreen() {
       if (reduced) {
         // No travel and no layers. The screen is dropped and the masthead
@@ -1298,6 +1327,10 @@
         return;
       }
 
+      // The shuffle must happen BEFORE `measure()`: the travel targets `frames[0]`,
+      // and although `order` does not change which element that is, measuring first
+      // would size the print against a grid whose painted order is still settling.
+      shuffleFrames();
       measure();
       armScreenFallback();
 
