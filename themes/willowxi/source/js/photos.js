@@ -178,6 +178,10 @@
     // background is already clearing through the whole second half — which is
     // what makes the two layers descend together instead of one after the other.
     var ACRYLIC_PEAK = 0.45;
+    // How much scroll the SUBSTITUTE blur spans: full strength at the top, gone
+    // by `ALT_RANGE` px. User picked "half the travel"; the travel is ~2440px at
+    // 1440x900, so 1200px. Overridable live with `window.__altRange`.
+    var ALT_RANGE = 1200;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -198,6 +202,15 @@
     // Not "the screen has landed" but "the screen has been retired": the print
     // stays in the layer tree at rest so the page can hand over to the grid.
     var retired = false;
+    // Set once the visitor has come back UP past the landing: from then on the
+    // acrylic plate plays the substitute blur (see render) instead of the print's
+    // travel frost. Cleared by measure() and teardown, so re-entering the gallery
+    // always starts on the opening animation.
+    var altArmed = false;
+    // The scroll position at which the print was retired on THIS visit, or -1 if it
+    // has not been yet. The substitute blur is only allowed after this has happened,
+    // which is what keeps it off the opening animation. See onScroll.
+    var printRetiredAt = -1;
     var vacant = false;
     // The pin. Once the acrylic has dissolved there is nothing left for the
     // travel to do, so the page is held there and the animation's layers are
@@ -339,6 +352,8 @@
       // re-derived from the document height here.
       pinY = -1;
       smoothY = -1;                       // a resize restarts the chase on the scroll
+      altArmed = false;                   // the opening owns the plate again
+      printRetiredAt = -1;
       // The spacer's authored height, captured BEFORE any shrink so the pin's
       // subtraction has a stable base.
       spacerLocked = false;
@@ -702,7 +717,33 @@
         // happens to be looking. Linear spreads the same blur and tint evenly
         // over the whole dissolve, which is what makes it read as a fade.
         var tailK = 1 - clamp01(after / Math.max(1, acrylicTail));
-        acrylic.style.setProperty('--acrylic-k', (start * tailK).toFixed(4));
+        // 🎛️ THE SUBSTITUTE BLUR — a SECOND, independent use of the same plate.
+        //
+        // The plate already carries the print's own travel frost (`start * tailK`).
+        // This is a different job: when the visitor scrolls back UP from below the
+        // landing, the print does NOT come back (user's decision: no reverse
+        // playback), so the plate stands in for it — fully blurred at the top and
+        // clearing as they scroll down again. Measured span: `ALT_RANGE` px of
+        // scroll from the top.
+        //
+        // Armed only by coming back up past the landing (`altArmed`), so it never
+        // competes with the opening animation on the way in — the opening belongs to
+        // the print's own veil, entirely separate (user: "两套动画").
+        //
+        // ⚠️ Multiplied with `start * tailK`, not assigned: the plate has one value
+        // and both jobs have to agree on it.
+        var altK = 0;
+        if (altArmed) {
+          var altRange = window.__altRange > 0 ? window.__altRange : ALT_RANGE;
+          altK = 1 - clamp01(Math.max(0, window.scrollY) / altRange);
+        }
+        // The plate takes whichever job wants it most. `max` rather than a sum or a
+        // product, because the two are alternatives for the same surface: the travel's
+        // frost belongs to the way down, the substitute to the way back up, and at the
+        // hand-over both can be mid-fade — the stronger one is the honest value, and
+        // it cannot exceed 1.
+        acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
+        acrylic.style.setProperty('--acrylic-k', Math.max(start * tailK, altK).toFixed(4));
       }
 
       // The cell the print is flying towards is EMPTY until the print is
@@ -764,6 +805,13 @@
       var wantRetired = smoothY >= landScroll + LAND_RETIRE - 0.5;
       if (wantRetired !== retired) {
         retired = wantRetired;
+        // 🔴 Recorded HERE, not in `erase()`. `erase()` is reachable only from
+        // `engagePin()`, and the pin is switched off (`PIN_ENABLED = false`), so it
+        // never runs — the retirement above is what actually puts the print away now.
+        // With the marker left in `erase()` it stayed at -1 for ever, so the
+        // substitute blur never armed and `--acrylic-alt` read 0 on the whole way back
+        // up (measured).
+        if (retired) printRetiredAt = window.scrollY;
         screen.style.visibility = retired ? 'hidden' : '';
         // The plate's last job is covering the print's own cell on the way
         // down; once the print is retired there is nothing left for it to hide.
@@ -947,6 +995,7 @@
     // Erase the travel's layers for good. Nothing puts them back: this runs once.
     function erase() {
       retired = true;
+      printRetiredAt = window.scrollY;
       screen.style.visibility = 'hidden';
       if (acrylic) {
         acrylic.style.visibility = 'hidden';
@@ -1118,6 +1167,28 @@
           return;                        // nothing left to animate
         }
       }
+      // 🔴 ARM THE SUBSTITUTE BLUR: the visitor has come back UP past the landing —
+      // where the print was retired and does not return — so from here the acrylic
+      // plate stands in for it. This is the ONLY thing that turns it on: entering the
+      // gallery, or scrolling down from the top, leaves it off, so the opening
+      // animation (the print's own veil) is untouched. `measure()` and `destroy()`
+      // clear it, which is what makes a re-entry start clean.
+      // 🔴 ARM THE SUBSTITUTE BLUR — but only once the print has actually been
+      // retired on this visit (`printRetiredAt` remembers where that happened).
+      //
+      // Arming on "any scroll above the landing" was wrong and measurably so: entering
+      // the gallery sits at scrollY = 0, which is above the landing, so the plate came
+      // up at FULL strength on the opening frame (measured `--acrylic-alt: 1.0000` at
+      // y=0) — exactly the "开屏不参与模糊" the user ruled out. The substitute belongs to
+      // the trip BACK: down first, print retires, then up.
+      //
+      // ⚠️ Compared against the point the print actually went away (`printRetiredAt`),
+      // NOT against `landScroll`. Those are two different scroll positions here: the
+      // retirement is decided from `smoothY` while this reads the raw `scrollY`, so the
+      // frame that retires runs at whatever the page had already scrolled to —
+      // measured 3808 against a landing of ~2440, which made the comparison永 false and
+      // left `alt` at 0 for the entire way back up.
+      if (printRetiredAt >= 0 && window.scrollY < printRetiredAt - 1) altArmed = true;
       if (window.scrollY >= pinLimit()) {
         engagePin();
         return;
@@ -1678,6 +1749,8 @@
       holding = false;
       lastRawY = 0;
       smoothY = -1;
+      altArmed = false;
+      printRetiredAt = -1;
       if (spacer) spacer.style.removeProperty('height');
       spacerLocked = false;
       spacerHeight0 = -1;
