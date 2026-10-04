@@ -4884,36 +4884,49 @@ html[data-theme="light"] .photo-screen {
    Getting the balance right matters more here than on the plate, because this
    layer is over the picture the visitor is looking at:
 
-   | | tint | blur |
+   | | blur | tint |
    |---|---|---|
-   | the plate behind the print | 0.74 | 22px |
-   | this veil, before | 0.72 | none (a plain dimmer) |
-   | this veil, now | **0.22** | **26px** |
+   | the plate behind the print | 22px | 0.74 |
+   | this veil, before | none (a plain dimmer) | 0.72 |
+   | this veil, now | **7px** | **0.30** |
 
-   A/B measured with the veil's blur switched on and off: at 0.72 the picture was
-   pressed to near-black and the blur was invisible, so the layer read as a
-   curtain rather than frosted glass. Dropping the tint and raising the blur puts
-   the work on the blur, which is what "acrylic" means — the photograph is still
-   the photograph, just seen through the pane. Measured at the opening frame the
-   two differ by mean 17.7 / max 78 out of 255, and the frosted side is BRIGHTER
-   (a 26px blur pulls the sky's light down over the buildings), which is the
-   signature of real frost rather than a dimmer.
+   🔴 The BLUR is the thing to be careful with here, not the tint. At 26px the
+   photograph stopped being a photograph: measured A/B at the opening frame, the
+   frosted side read as one flat colour field — "all I can see is a big block of
+   colour". This layer sits over the picture the visitor is looking at, so it has
+   to stay a picture. 7px frosts it without erasing it; the plate behind can take
+   22px because nothing is being asked to read through it.
 
-   ⚠️ The knob for "a little lighter / a little heavier": the tint. 0.34 read as
-   "slightly too heavy" — the veil was noticeably greying the picture before the
-   blur got a chance to read. Keep the blur where it is and move this.
+   The tint went UP as the blur came down (0.22 → 0.30): with a light frost the
+   wash is what carries the "acrylic" reading, and at 0.22 the layer was nearly
+   invisible.
+
+   A/B measured with the veil's blur switched on and off at the opening frame:
+   mean 43.3 / max 83 out of 255, and the frosted side is BRIGHTER (the blur pulls
+   the sky's light down over the buildings) — the signature of frost rather than a
+   dimmer.
 
    The blur radius is in the PRINT's own coordinate space (the veil is inside the
    print's scaled box), so it shrinks on screen along with the print — which is
    what keeps the frost the same size relative to the picture. JS fades the whole
    layer out over the first stretch of the travel by writing its opacity
    (see `veilT` in render()). */
+html {
+  /* 🔴 Reserve the scrollbar's lane permanently.
+     The pin makes the root `overflow: hidden` while it holds the page, which
+     removes the scrollbar (and with it ~15px of the viewport's width) and puts it
+     back on every release — that flip is what shook the page left and right.
+     `stable` keeps the lane whether or not a scrollbar is painted, so the root's
+     width never changes and the shake has nothing to come from. */
+  scrollbar-gutter: stable;
+}
+
 .photo-screen__veil {
   position: absolute;
   inset: 0;
-  background: rgba(9, 11, 15, 0.22);
-  -webkit-backdrop-filter: blur(26px);
-  backdrop-filter: blur(26px);
+  background: rgba(9, 11, 15, 0.30);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
   will-change: opacity;
 }
 

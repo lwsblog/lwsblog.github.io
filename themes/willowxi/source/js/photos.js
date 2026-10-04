@@ -123,14 +123,19 @@
     // visitor therefore watched the mask fade over a photograph that had already
     // left.
     //
-    // 0.62 puts k=0 at y≈3328, where the print's top is ≈203 — the fade finishes
-    // while the print is still on screen and still moving, which is what makes it
-    // read as the mask being taken off rather than left behind. The pin moves with
-    // it (see pinLimit), so nothing about the scroll limit changes shape.
+    // 0.62 put k=0 at y≈3328, where the print's top is ≈203 — the fade finished
+    // while the print was still on screen and still moving, which is what makes it
+    // read as the mask being taken off rather than left behind.
     //
-    // ⚠️ The knob: bigger = dissolves later (closer to the print leaving), smaller
-    // = dissolves earlier. Keep it > 0 and <= 1.
-    var PLATE_TAIL = 0.62;
+    // ⚠️ 0.62 then read as "the mask disappears too fast", so it is 0.88 now: the
+    // dissolve runs nearly the whole tail, which is a longer, slower fade. The cost
+    // of going all the way to 1.0 is that k only reaches 0 once the print has left
+    // the viewport, which is what the earlier complaint was about — 0.88 keeps a
+    // little margin so the fade still ends with the print visible.
+    //
+    // ⚠️ The knob: bigger = dissolves later and slower (closer to the print
+    // leaving), smaller = earlier and quicker. Keep it > 0 and <= 1.
+    var PLATE_TAIL = 0.88;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -315,6 +320,13 @@
       // A real resize invalidates the latched pin — every input to it is
       // re-derived from the document height here.
       pinY = -1;
+      // The spacer's authored height, captured BEFORE any shrink so the pin's
+      // subtraction has a stable base.
+      spacerLocked = false;
+      if (spacer) {
+        spacer.style.removeProperty('height');
+        spacerHeight0 = spacer.getBoundingClientRect().height;
+      }
       landScroll = Math.max(0, cellTop - landY);
       scrollRange = Math.max(1, Math.round(landScroll));
       tailRange = Math.max(1, Math.round(Math.min(TAIL, reachable - scrollRange)));
@@ -683,14 +695,70 @@
     // "The motion is upward and we are past the limit" — kept while that is
     // true so every momentum scroll event re-applies the clamp. See onScroll.
     var holding = false;
-    // Root overflow is set to hidden while the hold is applied; see onScroll.
-    var held = false;
     // The last scroll position seen BEFORE any clamp, so the page's own
     // correction is not mistaken for a downward scroll.
     var lastRawY = 0;
+    // Set once the spacer has been shrunk to the limit, so the one-shot edit is not
+    // repeated and cannot chase its own output. Cleared by measure() and teardown.
+    var spacerLocked = false;
+    // The spacer's authored height, captured in measure() (before any shrink), so
+    // the subtraction has a stable base. -1 = not measured yet.
+    var spacerHeight0 = -1;
 
     function pinLimit() {
       return pinY >= 0 ? pinY : Math.round(landScroll + Math.max(1, acrylicTail));
+    }
+
+    // 🔴 Make the limit PHYSICAL instead of fighting for it.
+    //
+    // Everything before this tried to HOLD the visitor at the limit: cancel the
+    // wheel events, write the position back from `scroll`, set the root to
+    // `overflow: hidden`, write it back from `scrollend`. All four are beatable for
+    // the same reason — the browser runs its own scroll animation on its own thread,
+    // and a position written while that is in flight gets overridden by it (measured
+    // again and again: wrote the limit, page settled a whole notch past it). That is
+    // why every discrete-notch probe said "pinned" while a real flick walked to the
+    // top.
+    //
+    // Shrinking the spacer removes the problem instead of solving it: the document
+    // simply ENDS at the limit, so there is nothing above it for any input to scroll
+    // into — momentum, keyboard, scrollbar drag or script. The browser clamps the
+    // position itself, which is what makes this the only version that holds.
+    //
+    // 🔴 Computed from the spacer's AUTHORED height (`scrollHeight - spacer`), not
+    // from the current `scrollHeight`. Deriving it from the live height makes the
+    // calculation chase its own output: after the first shrink the "excess" is
+    // recomputed against the new, already-correct height and comes out ~0, so
+    // subsequent calls quietly do nothing (measured — the spacer stayed at 2160 and
+    // the document stayed 900px too tall).
+    function shrinkToPin() {
+      if (!spacer || pinY < 0 || spacerLocked) return;
+      if (window.scrollY < pinY) return;       // not at the limit yet; leave it alone
+      // 🔴 Both numbers are taken from the DOCUMENT, never from `pinY` and never
+      // from the live `scrollHeight`. `pinY` is the frame the pin happened to
+      // engage on, which is whichever notch carried the page past the limit — so
+      // using it as the target parks the page a whole notch past the intended fade
+      // point (measured: 2395 against a fade end of 2259). The target is the fade's
+      // own end; the document's height only participates as a difference, which is
+      // stable because both sides are read in the same instant.
+      if (spacerHeight0 < 0) return;
+      // 🔴 The target is the fade's own end, NOT the frame the wheel happened to
+      // engage on. A notch is ~100px, so the pin always engages a whole notch past
+      // the limit; using that parks the page there permanently (measured: 2395
+      // against a fade end of 2259) and the print travels an extra 136px out of the
+      // viewport before anything stops.
+      //
+      // It is the MINIMUM of the two, and that is the trick: setting the document's
+      // height to the fade end while the page sits past it makes the BROWSER clamp
+      // the position down to the new maximum itself. One correction, performed as
+      // part of the layout change, with no `scrollTo` for the browser's own scroll
+      // animation to override — which is why this works where four other attempts
+      // did not.
+      var target = Math.min(pinY, Math.round(landScroll + Math.max(1, acrylicTail)));
+      var excess = (document.documentElement.scrollHeight - window.innerHeight) - target;
+      if (excess <= 1) { spacerLocked = true; return; }
+      spacer.style.setProperty('height', (spacerHeight0 - excess) + 'px', 'important');
+      spacerLocked = true;                     // one shot; a resize re-measures
     }
 
     function engagePin() {
@@ -700,6 +768,7 @@
       lastRawY = window.scrollY;
       holding = false;
       if (pinY < 0) pinY = Math.round(landScroll + Math.max(1, acrylicTail));
+      shrinkToPin();
       erase();
     }
 
@@ -738,6 +807,21 @@
     // the limit (so `onScroll` holds them there). The holding itself is done by
     // putting the position back, which works whatever produced the motion —
     // momentum, a keyboard, a scrollbar drag, or a script.
+    // 🔴 How the hold actually works — three attempts got this wrong, so the
+    // shape matters:
+    //
+    //   `wheel`      — knows the visitor is pushing UP, and cancels the events it
+    //                  can (preventDefault). It must NOT touch layout: an earlier
+    //                  version flipped the root to `overflow: hidden` here, which
+    //                  removed and restored the scrollbar on every direction change
+    //                  and shook the whole page left and right.
+    //   `scroll`     — puts the position back, but CANNOT be relied on alone: a
+    //                  `scrollTo` issued while the browser's own smooth scroll is
+    //                  in flight is overridden by it (measured: wrote 2259, page
+    //                  stayed at 2163, every notch).
+    //   `scrollend`  — the fix. It fires when the gesture and its momentum have
+    //                  genuinely finished, so nothing is animating and a position
+    //                  written there sticks. Once per gesture, so nothing jitters.
     function onWheel(event) {
       if (!pinEngaged) return;
       // 🔴 An upward gesture ARMS the hold directly, from the wheel event.
@@ -745,35 +829,20 @@
       // Waiting for the position to prove the motion was upward is too slow by one
       // frame: the wheel event arrives while the page is still a few pixels past the
       // limit (`atLimit` false), the handler does nothing, the browser scrolls its
-      // notch, and only then does the scroll event see a position that looks like a
-      // downward move. Measured: one notch walked the page 2263 → 2163 with the
-      // limit at 2259 and the pin never fired — which is exactly the "one flick and
-      // you are at the top" report, and it survived every earlier fix because a
+      // notch, and only then does the scroll event see what looks like a downward
+      // move. Measured: one notch walked the page 2263 → 2163 with the limit at
+      // 2259 and the pin never fired — which is exactly the "one flick and you are
+      // at the top" report, and it survived every earlier fix because a
       // discrete-notch probe never lands in that state.
       //
       // A downward gesture releases it, so the content under the fold stays
       // reachable in both directions.
       var lim = pinLimit();
       if ((event.deltaY || 0) < 0) {
-        // 🔴 The root's overflow is cleared/set HERE, in the WHEEL event, not in
-        // the scroll event. The browser starts its own scroll animation the moment
-        // this event returns, and by the time `scroll` fires that animation is
-        // already running and overrides any position written. Measured with the
-        // hold applied from `scroll` only: the handler ran at y=2163 with the limit
-        // at 2259, wrote 2259, and the page stayed at 2163 for every further notch.
-        // With `overflow: hidden` set first there is no scroll target left at all,
-        // and the same gesture moves the page 0px instead of walking to the top.
-        if (!held) { held = true; document.documentElement.style.overflow = 'hidden'; }
-        // No distance test here. Being past the limit and pushing up IS the
-        // condition; the clamp brings the page back onto it. A "within N pixels"
-        // gate looks safer and is wrong — the page can sit a whole browser notch
-        // (~100px) past the limit, which is exactly the state the first upward
-        // gesture arrives in.
         holding = true;
         if (window.scrollY <= lim) event.preventDefault();
       } else {
         holding = false;
-        if (held) { held = false; document.documentElement.style.overflow = ''; }
       }
       atLimit = window.scrollY <= lim + 1;
     }
@@ -803,38 +872,22 @@
         //     (the gallery continues under the fold), so nothing happens;
         //   - scrolling UP, the page is put back on the limit and held there.
         //
-        // 🔴 Where the browser's own animation is concerned, the clamp has to
-        // happen BEFORE it starts, and `onWheel` is where that is done — it sets
-        // `overflow: hidden` on the root, so there is no scroll target left for the
-        // gesture and the position cannot move at all. A clamp written from the
-        // `scroll` event is always too late: the animation is already in flight and
-        // overrides it. Measured, with the hold applied only from `scroll`: the
-        // handler ran at y=2163 with the limit at 2259, wrote 2259, and the page
-        // stayed at 2163.
-        //
-        // What is left for this event is the belt-and-braces half for inputs that
-        // never produce a wheel event (keyboard, a scrollbar drag, a script). While
-        // `holding` is true — set by an upward gesture and cleared by a downward one
-        // — the page is put back on the limit.
+        // This handler records the direction and does a best-effort correction; the
+        // correction that actually sticks happens in `scrollend` (see clampToPin).
+        // A clamp written from here alone is overridden by the browser's own scroll
+        // animation — measured repeatedly, which is why this bug survived three
+        // fixes that all looked correct in a discrete-notch probe.
         var y = window.scrollY;
         var lim = pinLimit();
         if (y > lim) {
           if (y < lastRawY - 0.5) holding = true;
           if (holding) {
-            if (!held) {
-              held = true;
-              document.documentElement.style.overflow = 'hidden';
-            }
             window.scrollTo(0, lim);
             lastRawY = lim;
             y = lim;
           }
         } else {
           holding = false;
-          if (held) {
-            held = false;
-            document.documentElement.style.overflow = '';
-          }
         }
         lastRawY = y;
         pinPrevY = y;
@@ -932,6 +985,10 @@
       });
 
       window.addEventListener('scroll', onScroll, { passive: true });
+      // Fires when the gesture and its momentum have finished; the clamp that
+      // actually sticks is applied there (see clampToPin). Guarded because
+      // `scrollend` is recent — without it the `scroll` handler is still there,
+      // just less reliable.
       window.addEventListener('resize', onResize, { passive: true });
       // Not passive: this one has to be able to consume the gesture (see onWheel).
       window.addEventListener('wheel', onWheel, { passive: false });
@@ -1255,7 +1312,9 @@
       pinY = -1;
       holding = false;
       lastRawY = 0;
-      if (held) { held = false; document.documentElement.style.overflow = ''; }
+      if (spacer) spacer.style.removeProperty('height');
+      spacerLocked = false;
+      spacerHeight0 = -1;
       // The masthead lives outside .gallery, so a PJAX navigation that
       // replaces the shell would otherwise leave it stranded on the page.
       if (masthead) {
