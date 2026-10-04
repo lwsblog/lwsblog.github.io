@@ -75,6 +75,10 @@
 
     var reduced = prefersReducedMotion();
     var scrollRange = 1;
+    // The exact fractional scroll position at which the print is standing on its
+    // cell. Not scrollRange: that is rounded for the progress maths, and the
+    // print has to be pinned to the un-rounded spot (see render()).
+    var landScroll = 0;
     var tailRange = 1;
     // How much scroll is left over after the print has touched down, for the
     // acrylic to lift in. The print lands at t=1 (a projection, so the
@@ -85,30 +89,32 @@
     // towards: one photo, two copies, both legible.
     var TAIL = 260;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
-    // own linear parameter posT (so it is relative to the travel, not to a
-    // fixed pixel count, and it retraces identically on the way up):
+    // own linear parameter posT (so it is relative to the travel, not to a fixed
+    // pixel count, and it retraces identically on the way up).
     //
-    //   ACRYLIC_FROM — the plate starts closing, and this is the number the
-    //                  "the acrylic is not on yet when I start scrolling"
-    //                  report is about. Measured on a 390×844 screen: the white
-    //                  paper edge comes into the viewport at scrollY 450 (t=0.32)
-    //                  and is already 46px wide by scrollY 562 (t=0.40) — while
-    //                  at 0.42 the plate was still at k=0.000 there, because
-    //                  0.42 of the print parameter is scrollY 529. A bare white
-    //                  edge over a fully sharp grid is the visible seam. 0.25
-    //                  starts the fade at scrollY 433, just before the edge
-    //                  appears, and the print is still covering the viewport
-    //                  (its content box is 844px tall against a 844px viewport
-    //                  out to t=0.30), so the opening itself stays clean.
-    //   ACRYLIC_TO   — the plate is fully closed, and it has to be BEFORE the
-    //                  landing cell becomes readable. Measured, the first grid
-    //                  cell enters the viewport at posT 0.62 on a 360–430px
-    //                  phone and at 0.845 on 1440×900, so 0.55 leaves margin at
-    //                  both ends. Verified k=1.000 at the frame the cell touches
-    //                  the viewport on 360, 390, 430, 768, 1024, 1280, 1440 and
-    //                  1920.
-    var ACRYLIC_FROM = 0.25;
-    var ACRYLIC_TO = 0.55;
+    // What this layer is FOR, because that decides when it has to be on: it sits
+    // BETWEEN the grid and the print (z-index 20 against the print's 30), so it
+    // never dims the print — it blurs and dims everything BEHIND the print, so a
+    // photograph in flight does not bleed into the page behind it. The opening
+    // is exactly when that matters most, and it is also when the plate is least
+    // visible over the print, so:
+    //
+    //   ACRYLIC_FROM / TO — the plate is fully closed before the print has moved
+    //     far enough to uncover anything. At t=0 the print's content box covers
+    //     the viewport ("true/true" on every measured width), so the plate is
+    //     invisible there by construction; it becomes visible exactly as the
+    //     print's edges come in. 0.06 → 0.22 in posT finishes it at t=0.36 —
+    //     posT 0.22 is scrollY 731 of 1937 — while the first bare paper edge
+    //     only appears at scrollY 720 (t=0.37) and the first grid cell at
+    //     scrollY 1646. So there is never a frame with a sharp background under
+    //     the print: the plate is already at 1.0 before the seam exists.
+    //
+    //     This replaces the earlier 0.25 → 0.55, which was chasing the half of
+    //     the problem that was visible (a bare white edge) and left the opening
+    //     itself with a fully sharp grid behind the print, which reads as the
+    //     photo mixing into the page instead of sitting on it.
+    var ACRYLIC_FROM = 0.06;
+    var ACRYLIC_TO = 0.22;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -216,7 +222,17 @@
       // print and cell coincide at t=1, which is what makes the landing
       // exact rather than merely close.
       var landY = Math.max(size.height * 0.42, cellTop - reachable);
-      scrollRange = Math.max(1, Math.round(cellTop - landY));
+      // 🔴 landY is the print's resting TOP, so the scroll position at which the
+      // cell sits there is (cellTop - landY) — and that is NOT an integer
+      // (measured: 2315.5 - 378 = 1937.5). Rounding it into scrollRange left the
+      // print stuck 0.5px short of its cell at the hand-off: `after` could only
+      // reach 0.5 of the tail, so the print froze half a pixel above the cell
+      // and the swap on the next frame was a visible jump — half a CSS pixel at
+      // dpr 1, a whole DEVICE pixel at dpr 2. Reported as "the print does not
+      // reach the frame, so the switch jumps, and it is obvious even when
+      // scrolling fast". landScroll keeps the fraction for the pin.
+      landScroll = Math.max(0, cellTop - landY);
+      scrollRange = Math.max(1, Math.round(landScroll));
       tailRange = Math.max(1, Math.round(Math.min(TAIL, reachable - scrollRange)));
 
       cell = {
@@ -324,11 +340,17 @@
       // transform still has to be written: the element's own top-left is 0,0
       // and an unwritten transform leaves a 215px print in the corner.
       //
-      // `after` is how far past the landing the page has scrolled. For that
-      // stretch the print rides its cell — the cell's viewport top is exactly
-      // (cell.y - after) — which is what lets the landing stay exact while the
-      // acrylic lifts afterwards.
-      var after = Math.max(0, window.scrollY - scrollRange);
+      // `after` is how far past the LANDING the page has scrolled. Two things
+      // about it are load-bearing:
+      //   - it is measured from the fractional landScroll, not from the rounded
+      //     scrollRange. From scrollRange the value can only reach 0.5 at the
+      //     moment the cell arrives (1937 of 1937.5), so the print stopped half
+      //     a pixel short and the hand-off was a visible jump;
+      //   - the travel is written with the same fractional origin, so at that
+      //     scroll position the print's top is exactly cellTop - landY, i.e. the
+      //     cell's own top, whatever the scroll fraction or the device pixel
+      //     ratio happens to be.
+      var after = Math.max(0, window.scrollY - landScroll);
       // Position runs LINEARLY, scale stays eased. The cell climbs at a
       // constant rate (the page scrolls at one rate), so a print that eases
       // into its position lags the scroll for the whole approach and then has

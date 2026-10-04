@@ -4659,10 +4659,11 @@ html[data-theme="light"] .gallery-board {
   z-index: 20;
   inset: 0;
   /* Defaults to 0, not 1: with no JS (or before the first frame lands) this
-     layer must be invisible. The grid being briefly bare is a much smaller
-     failure than a permanent full-page blur over content nobody can un-blur
-     — and the script writes 1 on its very first frame, where the print
-     covers the viewport anyway. */
+     layer must be invisible. A grid that is briefly bare is a much smaller
+     failure than a permanent full-page blur over content nobody can un-blur.
+     JS takes it to full strength early in the travel — by the time the print
+     has shrunk enough to uncover anything (see ACRYLIC_FROM/TO in photos.js) —
+     and back to 0 in the tail once the print has landed. */
   --acrylic-k: 0;
   /* 22px of blur, not 13. Reported as "the acrylic blur is too weak on the
      screen": over a 1440px grid the 13px plate left the photographs under it
@@ -4977,6 +4978,22 @@ html[data-theme="light"] .photo-frame.is-dragging {
      the bytes land and the grid does not jump. */
   aspect-ratio: var(--ratio);
   object-fit: cover;
+}
+
+/* --- captions are not text ------------------------------------------------
+   The date and the frame number are part of the print, not prose, and the
+   frames are draggable: a drag that starts on a caption selected the date and
+   the browser then offered its search-on-selection bubble, which is what the
+   "dragging a photo keeps triggering search" report was. One rule covers the
+   grid caption, the print's own caption and the lightbox's — the three places
+   the same two strings are printed. The images were never selectable
+   (user-select does not apply to replaced content), so this closes the gap
+   rather than changing how the frames behave. */
+.photo-frame__cap,
+.photo-screen__cap,
+.photo-lightbox__cap {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .photo-frame__cap {
