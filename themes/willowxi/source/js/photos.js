@@ -789,9 +789,49 @@
     // so a discrete wheel notch does not move the print in one jump. -1 = unset.
     // See step(); the pin and every scroll rule still read the real `scrollY`.
     var smoothY = -1;
+    // Consecutive upward notches taken while the page is pinned at the limit. One is
+    // "hold me here"; two is "let me back into the travel". See onWheel / escapePin.
+    var upStreak = 0;
 
     function pinLimit() {
       return pinY >= 0 ? pinY : Math.round(landScroll + Math.max(1, acrylicTail));
+    }
+
+    // 🔴 ESCAPING THE PIN — the other half of "flicking the wheel up does nothing".
+    //
+    // The pin is a one-way door while it is engaged: `onWheel` insists the visitor
+    // stay at the boundary, so once they reached it they could not scroll back into
+    // the travel at all. Measured: at y=2457 with the limit at 2457, five upward
+    // notches moved the page 2457 → 2457, and the script could still reach y=0 — so
+    // it was the handler, not the document.
+    //
+    // The rule that separates the two cases is the ONE-WAY nature of the boundary:
+    //   - an upward notch that would land the page ABOVE the limit  → block it;
+    //   - an upward notch taken when there is a full step of room  → the visitor is
+    //     going back to the travel, so release the pin and let it through.
+    // Releasing restores the layers and clears the latched limit, so the travel
+    // re-animates on the way back up and `reviewPin` re-engages on the way down.
+    //
+    // ⚠️ The spacer is deliberately NOT restored here. Re-inflating the document
+    // mid-gesture is a layout change during a scroll, which is exactly the class of
+    // thing that has produced the jolts reported so far; `measure()` restores it on
+    // a resize, and `destroy()` on teardown.
+    function escapePin() {
+      if (!pinEngaged) return;
+      pinEngaged = false;
+      atLimit = false;
+      holding = false;
+      pinPrevY = window.scrollY;
+      lastRawY = window.scrollY;
+      pinY = -1;
+      smoothY = -1;                  // the travel restarts from wherever they are
+      if (screen) {
+        screen.style.visibility = '';
+        screen.style.opacity = '';
+      }
+      if (acrylic) acrylic.style.removeProperty('visibility');
+      if (screenHint) screenHint.style.removeProperty('visibility');
+      document.body.classList.add('is-gallery-screen');
     }
 
     // 🔴 Make the limit PHYSICAL instead of fighting for it.
@@ -927,16 +967,37 @@
       // reachable in both directions.
       var lim = pinLimit();
       if ((event.deltaY || 0) < 0) {
-        holding = true;
-        // ⚠️ `shrinkToPin()` is deliberately NOT called here. It was tried and
-        // reverted: acting on layout from the wheel event let the document be cut
-        // while the print was still travelling, which retired the print and the
-        // plate early (measured: acrylic gone at y=1402 against a limit of 2395).
-        // The shrink belongs to the `scroll` path, which only runs once the pin is
-        // engaged and the animation is over.
-        if (window.scrollY <= lim) event.preventDefault();
+        // 🔴 ONLY the CROSSING notch is intercepted. The old form —
+        // `if (window.scrollY <= lim) event.preventDefault()` — also cancelled every
+        // upward notch taken once the page was already at or below the limit, so a
+        // visitor who had scrolled down could never get back: measured, at y=2457
+        // with the limit at 2457, five upward notches moved the page 2457 → 2457
+        // while the script could still reach y=0. That was the handler, not the
+        // document, and it is the "flicking the wheel up does nothing" report.
+        //
+        // 🔴 The FIRST notch at the limit is still blocked — that is the behaviour
+        // asked for repeatedly ("flick up once and you are at the top" must not
+        // happen). A SECOND consecutive upward notch is a different statement: the
+        // visitor has asked twice, so they mean to go back into the travel, and the
+        // pin is released. The two requirements are otherwise mutually exclusive,
+        // and this is what satisfies both: one notch = stay, keep pushing = leave.
+        var step = Math.abs(event.deltaY || 0) || 100;
+        if (window.scrollY - lim < step) {
+          holding = true;
+          upStreak += 1;
+          if (upStreak >= 2) {
+            upStreak = 0;
+            escapePin();
+            return;                      // let this notch scroll
+          }
+          event.preventDefault();
+        } else {
+          escapePin();
+          return;
+        }
       } else {
         holding = false;
+        upStreak = 0;
       }
       atLimit = window.scrollY <= lim + 1;
     }
@@ -973,20 +1034,30 @@
         // fixes that all looked correct in a discrete-notch probe.
         var y = window.scrollY;
         var lim = pinLimit();
-        if (y < lim) {
-          // 🔴 BELOW the limit, while the visitor is pushing up, means the page has
-          // already been carried past it by the browser's scroll animation — the
-          // one notch that used to survive. Writing the position back here lands it
-          // while the same frame is still on screen, so it reads as the page simply
-          // stopping rather than a jump: measured without this, a flick settled at
-          // 2311 against a limit of 2395, and every later probe called that "held"
-          // even though the visitor had been moved a whole notch.
+        // 🔴 LEAVING THE PIN, and it has to happen HERE rather than only in the wheel
+        // handler. Once the visitor is genuinely above the boundary the pin has no
+        // business owning the page any more: this branch used to return
+        // unconditionally, so `render()` was never reached again and the print sat
+        // frozen at its opening transform even after its layers were restored
+        // (measured: y=1800 with the transform still scale(7.4539), which is the
+        // t=0 value). Falling through to the travel path below re-animates it.
+        if (y <= lim - 2) {
+          escapePin();                   // clears the pin; the code below redraws
+        } else if (y < lim) {
+          // The page is a hair above the limit and the visitor is pushing up: this
+          // is the browser's own scroll animation having carried it past, i.e. the
+          // notch that used to survive. Put it back — it lands while the same frame
+          // is still on screen, so it reads as the page stopping rather than a jump
+          // (measured without this: a flick settled at 2311 against a limit of 2395
+          // and every probe still called that "held").
           if (holding) {
             window.scrollTo(0, lim);
             y = lim;
             lastRawY = lim;
           }
         } else if (y > lim) {
+          // The page is BELOW the limit: the gallery under the fold, which is where
+          // the visitor asked to be. Only an upward push gets clamped back.
           if (y < lastRawY - 0.5) holding = true;
           if (holding) {
             window.scrollTo(0, lim);
@@ -996,10 +1067,12 @@
         } else {
           holding = false;
         }
-        lastRawY = y;
-        pinPrevY = y;
-        atLimit = y <= lim + 1;
-        return;                          // nothing left to animate
+        if (pinEngaged) {
+          lastRawY = y;
+          pinPrevY = y;
+          atLimit = y <= lim + 1;
+          return;                        // nothing left to animate
+        }
       }
       if (window.scrollY >= pinLimit()) {
         engagePin();
