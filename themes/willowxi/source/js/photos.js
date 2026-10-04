@@ -69,6 +69,7 @@
     var mastSub = document.querySelector('[data-photo-mast-sub]');
 
     var screenImg = root.querySelector('[data-photo-screen-img]');
+    var screenCap = root.querySelector('[data-photo-screen-cap]');
     var screenVeil = root.querySelector('[data-photo-screen-veil]');
     var screenHint = document.querySelector('[data-photo-screen-hint]');
     var frames = Array.prototype.slice.call(root.querySelectorAll('[data-photo-frame]'));
@@ -765,28 +766,23 @@
           var altRange = window.__altRange > 0 ? window.__altRange : ALT_RANGE;
           altK = 1 - clamp01(Math.max(0, window.scrollY) / altRange);
         }
-        // The plate takes whichever job wants it most. `max` rather than a sum or a
-        // product, because the two are alternatives for the same surface: the travel's
-        // frost belongs to the way down, the substitute to the way back up, and at the
-        // hand-over both can be mid-fade — the stronger one is the honest value, and
-        // it cannot exceed 1.
-        acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
-        // 🔴 The SUBSTITUTE blurs; it does not darken.
+        // 🔴 The tint is EITHER the opening's OR the substitute's, never a blend.
         //
-        // Both jobs shared `--acrylic-k`, and that is the tint's multiplier as well as
-        // the radius's, so on the way up the plate painted `rgba(9,11,15, 0.74 × k)` at
-        // full strength — measured along the scroll-up path, the frame brightness fell
-        // to 23.5/255 at y≈1262 against 45–79 on either side: a dark trough in the
-        // middle. That is the "半程变黑" (and the two darker ends read as the second
-        // "变黑").
-        //
-        // The way up wants FROST, which is the blur, not shade. `--acrylic-tint` carries
-        // the tint on its own and collapses to zero once the plate is serving as the
-        // substitute, while `--acrylic-blur` still follows the substitute so the frost
-        // grows towards the top.
-        var tintK = Math.max(start * tailK, altK * 0.12);
+        // `max(openTint, subTint)` left the opening curve in charge wherever it was
+        // larger, and it peaks in the MIDDLE of the travel, so the darkest frame sat at
+        // y≈1000 and the top was lighter — "上滑变成中间最黑上下都白了，我要的是最上面最黑".
+        // A crossfade was no better, since the opening curve is still large in the
+        // middle. The substitute is a REPLACEMENT for the travel on the way back up, so
+        // it simply takes the tint over once armed, and then the shade is a clean
+        // function of the scroll position: heaviest at y = 0, gone by `ALT_RANGE`.
+        var openTint = start * tailK;
+        var tintK = altArmed ? altK : openTint;
         acrylic.style.setProperty('--acrylic-k', tintK.toFixed(4));
-        var blurK = Math.max(start * tailK, altK);
+        acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
+        // The blur still takes the stronger of the two: frost is wanted on the way up as
+        // well as on the way down, and unlike the tint there is no conflict — more
+        // radius is simply more frost.
+        var blurK = Math.max(openTint, altK);
         acrylic.style.setProperty('--acrylic-blur', blurK.toFixed(4));
         // 🔴 Keep the plate VISIBLE and let `--acrylic-k` alone decide how much it
         // shows (k = 0 means `rgba(...,0)` and `blur(0px)`, i.e. nothing painted).
@@ -1480,8 +1476,44 @@
         // from `order` (the shuffle writes that).
         frames.forEach(function (f) { f.removeAttribute('data-landing'); });
         if (landingFrame) landingFrame.setAttribute('data-landing', '');
+        syncPrintTo(landingFrame);
       } else {
         landingFrame = null;
+      }
+    }
+
+    // 🔴 The print has to SHOW the photograph it is going to land on.
+    //
+    // The print's `<img>` is authored server-side against `cover` (the album's picked
+    // landscape frame), while the landing cell became a random choice from the first two
+    // rows. Nothing re-pointed the print afterwards, so it flew to a cell holding a
+    // different photograph — "落点是在前两行但是没落在自己身上，屏风图和落点的图对不上".
+    // Repointing the `src`, the date and the tally (the cell's own number, which the
+    // template already notes must match or the arrival visibly edits the print) keeps
+    // the hand-off seamless.
+    function syncPrintTo(frame) {
+      if (!frame) return;
+      var cellImg = frame.querySelector('[data-photo-frame-img]');
+      if (screenImg && cellImg) {
+        var wanted = cellImg.getAttribute('data-screen-src');
+        if (wanted && screenImg.getAttribute('src') !== wanted) {
+          screenImg.setAttribute('src', wanted);
+          // Matches the print's own `decoding="async"`: the browser keeps the old
+          // frame until the new one is ready instead of blanking.
+          screenImg.setAttribute('decoding', 'async');
+        }
+        if (cellImg.getAttribute('alt')) screenImg.setAttribute('alt', cellImg.getAttribute('alt'));
+      }
+      if (screenCap) {
+        var spans = screenCap.querySelectorAll('span');
+        var cap = frame.querySelector('.photo-frame__cap');
+        if (spans.length && cap) {
+          var capSpans = cap.querySelectorAll('span');
+          if (capSpans.length) spans[0].textContent = capSpans[0].textContent;
+          if (spans.length > 1) {
+            spans[1].textContent = frame.getAttribute('data-tally') || spans[1].textContent;
+          }
+        }
       }
     }
 

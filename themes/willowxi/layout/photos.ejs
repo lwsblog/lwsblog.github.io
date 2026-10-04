@@ -95,6 +95,7 @@
         %>
         <figure class="photo-frame<%= wide ? ' photo-frame--wide' : '' %>" data-photo-frame
           data-index="<%= index %>" data-id="<%= photo.id %>"
+          data-tally="<%= String(index + 1).padStart(2, '0') %>"
           style="--ratio: <%= ratio %>">
           <button class="photo-frame__hit" type="button"
             aria-label="放大第 <%= index + 1 %> 帧：<%= stamp(photo.date) %>">
@@ -102,7 +103,8 @@
               src="<%- photoUrl(photo.id, 'thumb') %>"
               alt="<%= stamp(photo.date) %>" loading="lazy" decoding="async"
               width="<%= photo.w %>" height="<%= photo.h %>" draggable="false"
-              data-light-src="<%- photoUrl(photo.id, 'light') %>">
+              data-light-src="<%- photoUrl(photo.id, 'light') %>"
+              data-screen-src="<%- photoUrl(photo.id, 'screen') %>">
           </button>
           <figcaption class="photo-frame__cap">
             <span><%= stamp(photo.date) %></span>
