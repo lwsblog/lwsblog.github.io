@@ -4,7 +4,6 @@ date: 2026-10-01 01:36:35
 description: 写作台的图从剪贴板到落盘只走一条路：先按质量压，压到底还超标就缩尺寸。文章壁纸走同一段代码。
 categories:
   - DEVLOG
-wallpaper: /images/wallpaper/devlog-004-compression-chain.webp
 ---
 
 ## 这条链是怎么串起来的
