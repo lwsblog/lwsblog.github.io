@@ -4830,7 +4830,22 @@ body.is-gallery-screen .photo-screen__hint {
   left: 0;
   width: var(--screen-w, 50vw);
   height: var(--screen-h, 50vh);
+  /* 🔴 `margin: 0` is load-bearing, not tidiness. The UA stylesheet gives a
+     `<figure>` `margin: 16px 40px`, and this element is `position: fixed` with
+     `top/left: 0` — so the margin shifts it 40px right and 16px down from the
+     viewport origin, and the transform JS writes is a TRANSLATION from that
+     origin, not an absolute viewport position. Without this the print lands 40px
+     right of and 16px below the cell it is supposed to become (measured at the
+     hand-off frame: print [170,393.5] against cell [130,377.5]), which reads as
+     "the print does not line up when it shrinks". */
   margin: 0;
+  /* The mat is rewritten every frame as `rest / scale` so that its DRAWN
+     thickness (`padding × scale`) is the same on the first frame as on the last.
+     A fixed 11px mat is drawn 82px thick at the opening scale of 7.45, and the
+     photograph's centre then slides 498px sideways in the last 40px of scroll as
+     the mat snaps back to 11px — reported as "the print sticks and jumps to the
+     left". At scale 1 this rule's own values are what JS writes, so the hand-off
+     is exact. */
   padding: 11px 11px 38px;
   background: #f4f4f1;
   box-shadow: 0 calc(14px / var(--screen-s, 1)) calc(44px / var(--screen-s, 1)) rgba(0, 0, 0, 0.5);
@@ -4851,7 +4866,13 @@ html[data-theme="light"] .photo-screen {
   width: 100%;
   max-width: none;
   height: 100%;
-  object-fit: cover;
+  /* `fill`, not `cover`. JS counter-scales the mat every frame, so the content
+     box steps through a range of aspect ratios (the mat is inset by `rest/scale`,
+     which is not proportional in x and y), and `cover` re-crops on every one of
+     them — the photograph would visibly zoom as it travelled. `fill` stretches
+     by the same amount instead: at most 3% vertically, monotonic, and exactly
+     the cell's crop at scale 1, which is where the hand-off happens. */
+  object-fit: fill;
 }
 
 .photo-screen__veil {

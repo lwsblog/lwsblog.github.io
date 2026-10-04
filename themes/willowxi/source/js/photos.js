@@ -99,17 +99,18 @@
     // is exactly when that matters most, so:
     //
     //   ACRYLIC_FROM / TO — the travel window in which the plate LIFTS. It is
-    //     closed at posT 0 and open by posT 0.22 (t=0.36), and it lifts along the
-    //     print's own timeline so the two are on one clock.
+    //     closed over the first fifth of the print's own timeline and open by
+    //     posT 0.22 (t=0.36), and it lifts along the print's timeline so the two
+    //     are on one clock.
     //
-    //     🔴 Closed at the START, not opened at some point during the scroll.
-    //     The photograph covers the viewport at t=0, so a plate that is not yet
-    //     closed there looks like nothing at all — and what it is for is exactly
-    //     that moment: the grid behind the print is sharp and the photograph
-    //     bleeds into the page instead of sitting on it. Reported as "the acrylic
-    //     is not strong enough on the opening screen". The plate is erased again
-    //     in the tail, once the print has landed.
-    var ACRYLIC_FROM = 0;
+    //     🔴 `FROM` is NOT 0. Forcing the plate to full strength on the opening
+    //     frame was tried and reverted: on the light theme the plate's wash is
+    //     `rgba(244,245,242,0.78)`, which reads as "the gallery opens on a sheet
+    //     of white" as soon as anything is visible under it, and the visitor sees
+    //     the grid fade in behind the photograph while they scroll. The opening
+    //     frame has the photograph covering the viewport anyway, so a plate there
+    //     buys nothing and costs the light theme its opening.
+    var ACRYLIC_FROM = 0.06;
     var ACRYLIC_TO = 0.22;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
@@ -194,8 +195,12 @@
       var contentW = Math.max(1, shapeW - padRest.l - padRest.r);
       var contentH = Math.max(1, shapeH - padRest.t - padRest.b);
       // The print's box is the CELL's box: content + the mat at its resting size.
+      // The mat is written as `rest / scale` every frame (see render), but the
+      // BOX never changes — the mat lives inside it, so its size is the resting
+      // one throughout and nothing here has to track the animation.
       var boxW = contentW + padRest.l + padRest.r;
       var boxH = contentH + padRest.t + padRest.b;
+      screenBox = { contentW: contentW, contentH: contentH };
       screen.style.setProperty('--screen-w', boxW + 'px');
       screen.style.setProperty('--screen-h', boxH + 'px');
 
@@ -220,9 +225,10 @@
       // travelled; cover subsumes that case and gives it more travel, not
       // less.
       startScale = Math.max(size.width / contentW, size.height / contentH);
-      // At scale S the mat is DRAWN S times wider, so the content box starts
-      // inset by pad × S rather than pad. That is what the start offset has to
-      // cancel, and it is also the value the mat has to animate FROM.
+      // The mat is counter-scaled every frame so its DRAWN thickness is constant
+      // (see render). At scale 1 that is exactly its resting value, so the
+      // offsets below are the resting mat times the starting scale — the mat as
+      // it is actually drawn on the first frame.
       padStart = { l: padRest.l * startScale, t: padRest.t * startScale,
                    r: padRest.r * startScale, b: padRest.b * startScale };
       // The CONTENT area is centred in the viewport, not the box: the mat is
@@ -390,11 +396,17 @@
       // already 0.99, which pinned the print to a cell still 59px BELOW the
       // fold: the print left the viewport entirely and the middle of the
       // travel showed nothing but acrylic. Linear position keeps the print
-      // moving with the scroll from the first frame. Both parameters still
-      // finish together at t=1, so the landing is exact either way.
+      // moving with the scroll from the first frame.
+      //
+      // 🔴 Scale is linear too, on the SAME parameter. Easing it while position
+      // ran straight left the print still 1.19× its cell size at the hand-off —
+      // measured 40px too wide and 16px too tall against the cell it was supposed
+      // to be covering, which is the leftover half of "it sticks and then jumps
+      // to the left". Position and size have to arrive together; the easing only
+      // changes the shape of the size ramp, and at these scales (7.45 → 1) that
+      // is not worth a 40px mismatch on the last frame.
       var posT = clamp01((t - 0.18) / 0.82);
-      var printT = segment(t, 0.18, 1);
-      var scale = lerp(startScale, 1, printT);
+      var scale = lerp(startScale, 1, posT);
       var x = lerp(startX, cell.x, posT);
       var y = lerp(startY, cell.y, posT) - after;
       screen.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
@@ -403,28 +415,28 @@
       // the print carries a 315px halo at the start of the travel.
       screen.style.setProperty('--screen-s', scale.toFixed(4));
 
-      // 🔴 The mat is interpolated as well, and this is the whole reason the
-      // print used to "stick, then jump to the left" at the end of the travel.
+      // 🔴 The mat is written every frame so that its DRAWN thickness stays put,
+      // and this is what fixes "the print is fine and then it sticks and jumps
+      // to the left". The transform scales the mat along with the box, so a
+      // fixed 11px mat is drawn 11 × 7.45 = 82px thick at the opening — and the
+      // photograph's centre then slides 498px sideways in the last 40px of
+      // scroll as the mat snaps back to 11px.
       //
-      // The stylesheet's padding is a FIXED 11px, and the transform scales it
-      // like everything else: at the start the mat is drawn 11 × 7.45 = 82px
-      // wide while the box shrinks with the scale, so the content box (box minus
-      // mat) ends up inset 82px. As the travel finishes, the scale falls to 1
-      // and the mat snaps back to its 11px — which moves the PHOTOGRAPH's centre
-      // 498px to the right in the last 40px of scroll. Nothing else in the
-      // travel moves that fast, so it reads as the print stopping and then
-      // sliding.
+      // Counter-scaling it (`rest / scale`) keeps `padding × scale` ≈ rest for
+      // the whole travel, so the mat is the same thickness on screen from the
+      // first frame to the last. The print's box does not move or resize at all
+      // — only the mat inside it — which is why this needs no height maths.
       //
-      // Interpolating the padding from padStart to its stylesheet value keeps the
-      // content box's centre linear for the whole travel, and at scale 1 the
-      // values are exactly the stylesheet's — the mat and the cell's mat are
-      // then the same box, which is what the hand-off needs.
-      if (padStart && padRest) {
-        screen.style.padding = (
-          lerp(padStart.t, padRest.t, printT).toFixed(2) + 'px ' +
-          lerp(padStart.r, padRest.r, printT).toFixed(2) + 'px ' +
-          lerp(padStart.b, padRest.b, printT).toFixed(2) + 'px ' +
-          lerp(padStart.l, padRest.l, printT).toFixed(2) + 'px');
+      // At scale 1 the values are the stylesheet's own, so the mat and the
+      // cell's mat are the same box and the hand-off is invisible.
+      if (padRest) {
+        var ms = scale > 0.05 ? scale : 0.05;
+        var padT = padRest.t / ms;
+        var padR = padRest.r / ms;
+        var padB = padRest.b / ms;
+        var padL = padRest.l / ms;
+        screen.style.padding = (padT.toFixed(2) + 'px ' + padR.toFixed(2) + 'px ' +
+          padB.toFixed(2) + 'px ' + padL.toFixed(2) + 'px');
       }
 
       // The masthead runs 0.18 -> 0.62, inside the print's own stretch. It used
@@ -602,29 +614,38 @@
     // `scroll`-event handler cannot, since by then the viewport has already moved
     // and the only cure would be a visible snap back.
     //
-    // One atomic action per crossing gesture: swallow it and put the page on the
-    // limit. Letting the browser apply the part of the step that fits leaves the
-    // page a few pixels above the limit (measured 2200 against 2197), and a
-    // separate clamp in the scroll handler cannot land it exactly either, because
-    // by then the gesture has already been consumed.
-    //
-    // 🔴 At the limit the gesture is swallowed and NOTHING is written. Writing
-    // the position back is what produced the visible jitter: the browser had
-    // already scrolled a few pixels before the clamp pulled it home, so every
-    // notch was a scroll-and-snap. With the position untouched there is nothing
-    // to snap back from.
+    // 🔴 One atomic action per crossing gesture, and NO state to get stale.
+    // `atLimit` used to gate this, which left two holes:
+    //   - a gesture big enough to clear the limit in one event (measured
+    //     deltaY 1600 landing on 2079 against a limit of 2197) was never seen by
+    //     this handler, because `atLimit` was still false when it ran;
+    //   - swallowing the gesture without moving left the page wherever the last
+    //     allowed step had put it.
+    // Both are gone if the decision is made from the CURRENT position: any
+    // upward gesture within half a viewport of the limit is consumed and the page
+    // is placed exactly on the limit, and the gesture is only left to the browser
+    // while the page is far enough below it that no part of the step can cross.
     function onWheel(event) {
-      if (!atLimit) return;
+      if (!pinEngaged) return;
       if ((event.deltaY || 0) >= 0) return;            // downward is free
       var lim = pinLimit();
-      if (window.scrollY <= lim) {
-        event.preventDefault();                        // already there: hold still
+      var y = window.scrollY;
+      if (y <= lim) {
+        event.preventDefault();                        // already held: stand still
         return;
       }
-      if (window.scrollY - Math.abs(event.deltaY) < lim) {
+      var step = Math.abs(event.deltaY);
+      if (y - step < lim + 4) {
         event.preventDefault();
         window.scrollTo(0, lim);
         pinPrevY = lim;
+        atLimit = true;
+      } else if (y - step < lim + window.innerHeight * 0.5) {
+        // Close enough that the browser's own scroll would cross in one go.
+        event.preventDefault();
+        window.scrollTo(0, lim);
+        pinPrevY = lim;
+        atLimit = true;
       }
     }
 
@@ -966,10 +987,32 @@
         if (!frame || !root.contains(frame)) return;
         if (reduced) return;
 
+        // 🔴 The frame's OWN offset has to be read back here, because the
+        // transform below is absolute (`translate(dx, dy)`) and a dragged frame
+        // already carries one. Writing the bare pointer delta discarded the
+        // previous drag: drag it 120×40, drag again 100×30, and it snapped back
+        // through the origin to 100×30 — reported as "drag a picture and then
+        // drag it again and it teleports back to where it was". `getComputedStyle`
+        // is read rather than the inline string so a frame that was never dragged
+        // (and so has no transform) reads as 0,0 through the `none` matrix.
+        var baseX = 0;
+        var baseY = 0;
+        var matrix = window.getComputedStyle(frame).transform;
+        if (matrix && matrix !== 'none') {
+          var parts = matrix.match(/matrix(?:3d)?\(([^)]+)\)/);
+          if (parts) {
+            var n = parts[1].split(',');
+            baseX = parseFloat(n[4]) || 0;
+            baseY = parseFloat(n[5]) || 0;
+          }
+        }
+
         drag = {
           frame: frame,
           startX: event.clientX,
           startY: event.clientY,
+          baseX: baseX,
+          baseY: baseY,
           moved: false
         };
       });
@@ -983,7 +1026,8 @@
           drag.moved = true;
           drag.frame.classList.add('is-dragging');
         }
-        drag.frame.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+        drag.frame.style.transform = 'translate(' + (drag.baseX + dx) + 'px, ' +
+          (drag.baseY + dy) + 'px)';
       });
 
       function endDrag() {
@@ -1059,6 +1103,7 @@
       screen.style.padding = '';
       screen.style.removeProperty('--screen-w');
       screen.style.removeProperty('--screen-h');
+      screen.style.removeProperty('--screen-min-h');
       if (screenVeil) screenVeil.style.opacity = '';
       screen.style.removeProperty('--screen-s');
       if (acrylic) {
