@@ -730,7 +730,31 @@
       // replayable), which is what produced "the print suddenly reappears and
       // grows". The page is pinned at the end of the dissolve (see engagePin),
       // so once that has happened the layers are erased for good.
-      var wantRetired = after >= tailRange - 0.001 || pinEngaged;
+      // 🔴 Retires AT the landing, not `tailRange` past it (user, 2026-10-04):
+      // "屏风图连带相框在到位之后直接消失露出底部的原图，不然我把屏风图拖走之后
+      // 还留了一个屏风在原地拖不走很诡异".
+      //
+      // The old form waited for `after >= tailRange` (520px beyond the landing) OR
+      // the pin engaging. Both of those stopped happening when the up-scroll limit
+      // was turned off, so the print simply stayed parked on its cell — and since the
+      // cell hides itself (`is-vacant`) the visitor was left with a printed frame
+      // sitting on the grid that could be dragged around but that nothing removed.
+      //
+      // `LAND_RETIRE = 0` means "the moment the print is exactly on its cell". Raise
+      // it (in px of overscroll) to let the print linger before it goes, or set the
+      // pin back on (`PIN_ENABLED`) to get the old pinned behaviour wholesale.
+      //
+      // 🔴 REVERSIBLE, so the travel plays backwards on the way up — the visitor's
+      // requested approach ("倒放动画"): the down journey ends with the print gone
+      // (see LAND_RETIRE) and scrolling back up brings it in again from its cell.
+      //
+      // The one-way version existed because the page used to be PINNED at the end of
+      // the dissolve, so "coming back" was impossible and a reappearing print was
+      // read as a glitch ("the print suddenly reappears and grows"). With the pin off
+      // there is nothing to stop the page going back up, so the travel must reverse
+      // instead of staying dead — otherwise scrolling up shows a blank screen.
+      var LAND_RETIRE = window.__landRetire >= 0 ? window.__landRetire : 0;
+      var wantRetired = window.scrollY >= landScroll + LAND_RETIRE - 2;
       if (wantRetired !== retired) {
         retired = wantRetired;
         screen.style.visibility = retired ? 'hidden' : '';
@@ -793,7 +817,20 @@
     // "hold me here"; two is "let me back into the travel". See onWheel / escapePin.
     var upStreak = 0;
 
+    // 🎛️ THE UP-SCROLL LIMIT IS OFF, at the user's request (2026-10-04):
+    // "上滑不要做限制了，我想到倒放动画这么改了" — they want to handle the way back
+    // with a reversed animation instead, so the travel must be reachable in both
+    // directions and nothing may hold the page.
+    //
+    // 🔴 Flip this to `true` to get the pin back. Everything it needs is still here
+    // and tested (`esc5` 18/18, `pin4` 4/4 at 2f7d545); with it off, `pinLimit()`
+    // returns Infinity, `onScroll` never engages, `onWheel` never intercepts and
+    // `shrinkToPin` never shortens the document — which also removes the PJAX return
+    // pollution, because that was caused by the shortened document being restored.
+    var PIN_ENABLED = false;
+
     function pinLimit() {
+      if (!PIN_ENABLED) return Infinity;
       return pinY >= 0 ? pinY : Math.round(landScroll + Math.max(1, acrylicTail));
     }
 
@@ -1137,10 +1174,13 @@
     // (no lurch, no dribble) and peaks in the middle (fastest where the eye is not
     // reading a fresh gesture). `p` is the fraction of the glide already spent, so
     // the shape holds however long the glide is.
-    var GLIDE = 420;
-    var SPEED = 9000;
+    // 🔴 Tuned up twice at the user's request ("缓动力度还是轻"). 420 → 700ms of
+    // travel time, with the speed ceiling raised so that time is actually usable,
+    // and the first-frame floor lifted so the start is not dead either.
+    var GLIDE = 700;
+    var SPEED = 14000;
     // How eagerly the bell leaves the mark (see the SHAPE note in step()).
-    var SHAPE = 2.2;
+    var SHAPE = 1.8;
     var stepStart = 0;
     var stepFrom = 0;
     var lastStepAt = 0;
