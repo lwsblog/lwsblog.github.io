@@ -746,13 +746,16 @@
         // ⚠️ Multiplied with `start * tailK`, not assigned: the plate has one value
         // and both jobs have to agree on it.
         var altK = 0;
-        // Arm from the same two facts, but the flag is what persists. Testing
-        // `scrollY < printRetiredAt - 1` on its own is wrong: `printRetiredAt` is
-        // recorded on the frame the print goes, which (with the glide) is well past the
-        // landing, so a visitor scrolling back up is STILL below it for a long stretch —
-        // measured, `alt` stayed 0 until y≈2479 and only reached 0.1573 there. The flag
-        // latches the first time that test passes and then keeps `altK` alive.
-        if (!altArmed && printRetiredAt >= 0 && window.scrollY < printRetiredAt - 1) {
+        // 🔴 The arm test compares against `landScroll` — the CELL's landing — and NOT
+        // against `printRetiredAt`. That was the bug in the previous version:
+        // `printRetiredAt` is the raw `scrollY` of the frame the print went away, and
+        // the retirement is decided on the eased position, so the two are far apart and
+        // the gap tracks the layout. Pick a landing cell low in the grid and merely
+        // nudging the wheel upwards already satisfies `scrollY < printRetiredAt - 1`, so
+        // the substitute blur snapped to full strength instead of growing — "如果我抽到
+        // 一张很下面的图的话那我稍微上滑就会触发模糊". `landScroll` is the fixed design
+        // landmark (`t = 1`), so the trigger no longer depends on which cell was drawn.
+        if (!altArmed && printRetiredAt >= 0 && window.scrollY < landScroll - 1) {
           altArmed = true;
         }
         if (altArmed) {
@@ -765,7 +768,23 @@
         // hand-over both can be mid-fade — the stronger one is the honest value, and
         // it cannot exceed 1.
         acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
-        acrylic.style.setProperty('--acrylic-k', Math.max(start * tailK, altK).toFixed(4));
+        // 🔴 The SUBSTITUTE blurs; it does not darken.
+        //
+        // Both jobs shared `--acrylic-k`, and that is the tint's multiplier as well as
+        // the radius's, so on the way up the plate painted `rgba(9,11,15, 0.74 × k)` at
+        // full strength — measured along the scroll-up path, the frame brightness fell
+        // to 23.5/255 at y≈1262 against 45–79 on either side: a dark trough in the
+        // middle. That is the "半程变黑" (and the two darker ends read as the second
+        // "变黑").
+        //
+        // The way up wants FROST, which is the blur, not shade. `--acrylic-tint` carries
+        // the tint on its own and collapses to zero once the plate is serving as the
+        // substitute, while `--acrylic-blur` still follows the substitute so the frost
+        // grows towards the top.
+        var tintK = Math.max(start * tailK, altK * 0.12);
+        acrylic.style.setProperty('--acrylic-k', tintK.toFixed(4));
+        var blurK = Math.max(start * tailK, altK);
+        acrylic.style.setProperty('--acrylic-blur', blurK.toFixed(4));
         // 🔴 Keep the plate VISIBLE and let `--acrylic-k` alone decide how much it
         // shows (k = 0 means `rgba(...,0)` and `blur(0px)`, i.e. nothing painted).
         //

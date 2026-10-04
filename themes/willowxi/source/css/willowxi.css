@@ -4673,8 +4673,12 @@ html[data-theme="light"] .gallery-board {
      wash and blur alone leaves the grid's contrast intact. Both still scale
      with --acrylic-k, so the plate reaches exactly "not there" at 0. */
   background: rgba(9, 11, 15, calc(0.74 * var(--acrylic-k)));
-  -webkit-backdrop-filter: blur(calc(22px * var(--acrylic-k)));
-  backdrop-filter: blur(calc(22px * var(--acrylic-k)));
+  /* The radius follows --acrylic-blur, NOT --acrylic-k: see the note in
+     photos.js. At a large radius over a full-viewport backdrop Chromium
+     degrades the backdrop to the page background (paper white), which read as
+     "半程变黑然后变白最后又变黑" on the way up. */
+  -webkit-backdrop-filter: blur(calc(22px * var(--acrylic-blur, 0)));
+  backdrop-filter: blur(calc(22px * var(--acrylic-blur, 0)));
   pointer-events: none;
 }
 
