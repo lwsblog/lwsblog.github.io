@@ -534,7 +534,19 @@
       // to the left". Position and size have to arrive together; the easing only
       // changes the shape of the size ramp, and at these scales (7.45 → 1) that
       // is not worth a 40px mismatch on the last frame.
-      var posT = clamp01((t - 0.18) / 0.82);
+      // 🔴 The travel begins at `TRAVEL_FROM`, and that number is the "空行程" knob.
+      //
+      // It was 0.18, which at 1440x900 means the print is COMPLETELY still for the
+      // first ~350px of scroll — the wheel turns, the page moves, nothing on screen
+      // does. Measured before this change: scale 7.454 unchanged from y=0 to y=350.
+      // 0.06 cuts that dead zone to ~117px, so the print is visibly leaving its
+      // full-bleed size almost as soon as the visitor scrolls.
+      //
+      // ⚠️ Only the START moved. The landing is still t=1 (`smoothY >= landScroll`),
+      // so the hand-off, the retirement point and every probe are unaffected.
+      // 🎛️ `window.__travelFrom` overrides it live.
+      var TRAVEL_FROM = window.__travelFrom >= 0 ? window.__travelFrom : 0.06;
+      var posT = clamp01((t - TRAVEL_FROM) / (1 - TRAVEL_FROM));
       var scale = lerp(startScale, 1, posT);
       var scale0 = scale;
       // 🔴 The target is the PHOTOGRAPH's top-left, not the box's.
