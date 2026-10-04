@@ -135,7 +135,7 @@
     //
     // ⚠️ The knob: bigger = dissolves later and slower (closer to the print
     // leaving), smaller = earlier and quicker. Keep it > 0 and <= 1.
-    var PLATE_TAIL = 0.88;
+    var PLATE_TAIL = 0.72;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -433,8 +433,23 @@
       // gone before the print had travelled a third of the way: "the blur still
       // disappears too fast". 0.62 keeps the frost on the picture for most of the
       // approach and only clears it as the print settles.
-      var veilT = segment(t, 0.02, 0.62);
-      if (screenVeil) screenVeil.style.opacity = String(1 - veilT);
+      // 🔴 A cubic falloff, not the shared `segment` (easeInOutCubic). The two
+      // are opposite shapes for this job: the print's opacity needs to move in the
+      // middle, while a frost that is being wiped off should hold at first and then
+      // go — and `segment` is flat at BOTH ends, so it dumped most of the change
+      // into the middle and the frost was gone by 40% of the travel. Measured with
+      // `segment(t, 0.02, 0.62)`: 0.44 at t=0.33 and 0.03 at t=0.50.
+      // Reported twice as "the picture's blur still disappears too fast".
+      //
+      // It starts at t=0.22 — the moment the print begins to shrink and the frame
+      // edge shows — and only reaches 0 at t=0.68, so the frost is on the picture
+      // for most of the approach.
+      // HOLD to 0.60, then fade to nothing at 0.90 — a straight line, so every
+      // bit of the scroll carries the same amount of change and there is no step
+      // anywhere to read as "it just vanished".
+      if (screenVeil) {
+        screenVeil.style.opacity = String(1 - clamp01((t - 0.60) / 0.30));
+      }
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
       // The print: 0.18 -> 1, one scale, one position, both interpolated in
@@ -755,7 +770,12 @@
       // screen of room below it. Nothing above that point is reachable (which is the
       // whole point), and there is always somewhere to go.
       var room = Math.min(window.innerHeight * 0.5, 420);
-      var target = Math.max(pinY, Math.round(landScroll + Math.max(1, acrylicTail))) + room;
+      // 🔴 `pinY + 2 * room`, not `pinY + room`. `pinY` is the frame the pin engaged
+      // on, which is already ABOVE the fade end; adding a single screen of room on
+      // top of it leaves the document ending that much higher again, and the page
+      // then holds a whole notch BELOW the limit (measured: 2311 against 2395, on all
+      // four viewports, i.e. always exactly one room short).
+      var target = Math.max(pinY, Math.round(landScroll + Math.max(1, acrylicTail))) + room * 2;
       var excess = (document.documentElement.scrollHeight - window.innerHeight) - target;
       if (excess <= 1) { spacerLocked = true; return; }
       spacer.style.setProperty('height', (spacerHeight0 - excess) + 'px', 'important');
@@ -886,7 +906,20 @@
         // fixes that all looked correct in a discrete-notch probe.
         var y = window.scrollY;
         var lim = pinLimit();
-        if (y > lim) {
+        if (y < lim) {
+          // 🔴 BELOW the limit, while the visitor is pushing up, means the page has
+          // already been carried past it by the browser's scroll animation — the
+          // one notch that used to survive. Writing the position back here lands it
+          // while the same frame is still on screen, so it reads as the page simply
+          // stopping rather than a jump: measured without this, a flick settled at
+          // 2311 against a limit of 2395, and every later probe called that "held"
+          // even though the visitor had been moved a whole notch.
+          if (holding) {
+            window.scrollTo(0, lim);
+            y = lim;
+            lastRawY = lim;
+          }
+        } else if (y > lim) {
           if (y < lastRawY - 0.5) holding = true;
           if (holding) {
             window.scrollTo(0, lim);
