@@ -352,7 +352,12 @@
       // The plate finishes earlier than the print — see PLATE_TAIL. Never longer
       // than the tail (the plate must not still be dissolving once the print is
       // erased) and never shorter than a token distance.
-      acrylicTail = Math.max(1, Math.round(tailRange * PLATE_TAIL));
+      //
+      // 🎛️ TUNABLE FROM THE CONSOLE (re-measured on resize / next scroll):
+      //     window.__plateTail = 1.0    // default; the tail runs its full length
+      //     window.__plateTail = 0.4    // clears much sooner after the landing
+      var ptNow = window.__plateTail > 0 ? window.__plateTail : PLATE_TAIL;
+      acrylicTail = Math.max(1, Math.round(tailRange * ptNow));
 
       cell = {
         x: cellRect ? cellRect.left : 0,
@@ -463,11 +468,20 @@
       // It starts at t=0.22 — the moment the print begins to shrink and the frame
       // edge shows — and only reaches 0 at t=0.68, so the frost is on the picture
       // for most of the approach.
-      // HOLD to 0.60, then fade to nothing at 0.90 — a straight line, so every
+      // HOLD to 0.75, then fade to nothing at 0.97 — a straight line, so every
       // bit of the scroll carries the same amount of change and there is no step
       // anywhere to read as "it just vanished".
+      //
+      // 🎛️ TUNABLE FROM THE CONSOLE — the knob for "the picture's frost still
+      // clears too fast / too slowly":
+      //     window.__veilHold = 0.55   // start the fade earlier
+      //     window.__veilEnd  = 0.97   // finish it earlier
+      //   Both are fractions of the travel t (0 = top, 1 = print landed). Bigger
+      //   numbers = the frost stays on the picture longer.
       if (screenVeil) {
-        screenVeil.style.opacity = String(1 - clamp01((t - 0.75) / 0.22));
+        var veH = window.__veilHold > 0 ? window.__veilHold : 0.75;
+        var veE = window.__veilEnd > veH ? window.__veilEnd : 0.97;
+        screenVeil.style.opacity = String(1 - clamp01((t - veH) / (veE - veH)));
       }
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
