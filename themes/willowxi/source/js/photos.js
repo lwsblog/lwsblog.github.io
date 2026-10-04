@@ -135,7 +135,7 @@
     //
     // ⚠️ The knob: bigger = dissolves later and slower (closer to the print
     // leaving), smaller = earlier and quicker. Keep it > 0 and <= 1.
-    var PLATE_TAIL = 0.72;
+    var PLATE_TAIL = 1;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -146,20 +146,38 @@
     // photograph in flight does not bleed into the page behind it. The opening
     // is exactly when that matters most, so:
     //
-    //   ACRYLIC_FROM / TO — the travel window in which the plate LIFTS. It is
-    //     closed over the first fifth of the print's own timeline and open by
-    //     posT 0.22 (t=0.36), and it lifts along the print's timeline so the two
-    //     are on one clock.
+    //   ACRYLIC_FROM / TO — the travel window in which the plate LIFTS. `TO` is
+    //     past 1.0 on purpose (see the note on the constant itself): the plate used
+    //     to be fully up by 0.22 and then frozen, which left the background at
+    //     maximum acrylic for the whole second half of the approach.
     //
     //     🔴 `FROM` is NOT 0. Forcing the plate to full strength on the opening
     //     frame was tried and reverted: on the light theme the plate's wash is
     //     `rgba(244,245,242,0.78)`, which reads as "the gallery opens on a sheet
     //     of white" as soon as anything is visible under it, and the visitor sees
-    //     the grid fade in behind the photograph while they scroll. The opening
-    //     frame has the photograph covering the viewport anyway, so a plate there
-    //     buys nothing and costs the light theme its opening.
+    //     the grid fade in behind the photograph while they scroll.
+    // 🔴 `ACRYLIC_TO` is 1.15, not 0.22. The plate used to reach FULL strength at
+    // 22% of the travel and then hold there until 110% — so for the whole second
+    // half the background stayed at maximum acrylic while the print's own frost
+    // cleared. Measured at 1440x900: at y=1771 the veil was already 0.000 (the
+    // picture fully clear) with the plate still 1.000, and the plate did not begin
+    // to go until y=2093. Reported as "by the time the screen picture is sharp the
+    // background acrylic is still nearly at full".
+    //
+    // Running the plate's closure to 1.15 makes the two layers travel together: the
+    // plate starts easing off at t=0.35 and is gone by the landing, with PLATE_TAIL
+    // (see below) finishing the last of it just past the landing.
+    //
+    // ⚠️ The closure is BYPASSED while the print is still covering the viewport:
+    // the photograph spreads over the whole screen for the first stretch, so a plate
+    // there buys nothing and costs the light theme its opening.
     var ACRYLIC_FROM = 0.06;
-    var ACRYLIC_TO = 0.22;
+    var ACRYLIC_TO = 1.00;
+    // Where the plate is at FULL strength, on the print's own timeline (posT).
+    // 0.35 is just past the point the print visibly starts to shrink, so the
+    // background is already clearing through the whole second half — which is
+    // what makes the two layers descend together instead of one after the other.
+    var ACRYLIC_PEAK = 0.10;
     // Everything the travel needs, all measured from the target cell:
     //   cell    — the cell's size and where it will be at t=1
     //   screen  — the print's own box at scale 1, and the scale it starts at
@@ -448,7 +466,7 @@
       // bit of the scroll carries the same amount of change and there is no step
       // anywhere to read as "it just vanished".
       if (screenVeil) {
-        screenVeil.style.opacity = String(1 - clamp01((t - 0.60) / 0.30));
+        screenVeil.style.opacity = String(1 - clamp01((t - 0.75) / 0.22));
       }
       if (screenHint) screenHint.style.opacity = String(1 - segment(t, 0, 0.14));
 
@@ -620,14 +638,24 @@
         // and made the product look broken.
         var aFrom = ACRYLIC_FROM;
         var aTo = ACRYLIC_TO;
-        var start;
-        if (posT <= aFrom) {
-          start = 0;
-        } else if (posT < aTo) {
-          start = Math.cbrt(clamp01((posT - aFrom) / (aTo - aFrom)));
-        } else {
-          start = 1;
-        }
+        // 🔴 THE PLATE'S OWN DISSOLVE IS ONE CONTINUOUS RUN, not "rise to full then
+        // hold then a tail after the landing". The hold was the bug behind "by the
+        // time the screen picture is sharp the background acrylic is still nearly
+        // full": the plate reached 1.0 at 22% of the travel and stayed there until
+        // 110% — measured at 1440x900, the veil was already 0.000 at y=1771 while
+        // the plate was still 1.000, and it did not begin to go until y=2093.
+        //
+        // It now rises over `ACRYLIC_FROM..ACRYLIC_PEAK` and falls over
+        // `ACRYLIC_PEAK..ACRYLIC_TO`, so the background is already clearing while
+        // the print's own frost is still on the picture and the two layers descend
+        // together instead of one after the other.
+        var acrPeak = clamp01(ACRYLIC_PEAK);
+        if (acrPeak <= aFrom + 0.001) acrPeak = aFrom + 0.05;
+        if (aTo <= acrPeak + 0.001) aTo = acrPeak + 0.05;
+        var plateT = posT <= acrPeak
+          ? clamp01((posT - aFrom) / (acrPeak - aFrom))
+          : 1 - clamp01((posT - acrPeak) / (aTo - acrPeak));
+        var start = Math.cbrt(Math.max(0, Math.min(1, plateT)));
         // The dissolve runs over `acrylicTail` (= tailRange, see TAIL) and it is
         // LINEAR in the scroll, not eased.
         //
