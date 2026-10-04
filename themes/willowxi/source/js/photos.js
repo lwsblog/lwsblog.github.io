@@ -80,6 +80,11 @@
     // print has to be pinned to the un-rounded spot (see render()).
     var landScroll = 0;
     var tailRange = 1;
+    // Where the PLATE's dissolve runs out. Equal to or longer than tailRange;
+    // The plate dissolves over the same distance (see TAIL), so the two finish
+    // together. Kept as its own name because that is the thing being reasoned
+    // about in render().
+    var acrylicTail = 1;
     // How much scroll is left over after the print has touched down, for the
     // acrylic to lift in. The print lands at t=1 (a projection, so the
     // landing is exact) and the veil then gets this many pixels of extra
@@ -87,7 +92,26 @@
     // leaving while the print was still airborne, which is exactly when the
     // grid shows the print's own photograph at the spot it is flying
     // towards: one photo, two copies, both legible.
-    var TAIL = 260;
+    // 🔴 How much scroll the PLATE gets to leave in, and the length of the
+    // print's own tail. ONE number for both, because the two have to end
+    // together:
+    //   - the plate must not begin leaving while the print is still airborne, so
+    //     it can never be SHORTER than the print's tail;
+    //   - if it is LONGER, the print is erased (tailRange) while the plate is
+    //     still half opaque — measured k = 0.48 at the frame the print went — so
+    //     the visitor watches the mask dissolve over an empty screen.
+    //
+    // It was 260 shared with an eyed curve that put nearly all of the change in
+    // the last few frames, which measured as a single step: k = 1.000 at y=2177,
+    // k = 0.000 at y=2197. Reported as "the mask disappears very harshly once you
+    // reach the bottom". 520 spread over the same curve gives the plate a real
+    // dissolve.
+    //
+    // ⚠️ This is the knob to turn if it still feels abrupt: bigger is a longer,
+    // softer dissolve. It is clamped to the scroll the document actually has left
+    // (`reachable - scrollRange`), so on a short page it shrinks rather than
+    // pinning the page past its end.
+    var TAIL = 520;
     // 🔴 Where the plate closes on the way down, as fractions of the PRINT's
     // own linear parameter posT (so it is relative to the travel, not to a fixed
     // pixel count, and it retraces identically on the way up).
@@ -272,6 +296,9 @@
       landScroll = Math.max(0, cellTop - landY);
       scrollRange = Math.max(1, Math.round(landScroll));
       tailRange = Math.max(1, Math.round(Math.min(TAIL, reachable - scrollRange)));
+      // The plate dissolves over the same distance as the print's tail, so the
+      // two finish together — see TAIL.
+      acrylicTail = tailRange;
 
       cell = {
         x: cellRect ? cellRect.left : 0,
@@ -489,28 +516,33 @@
         // Two envelopes, and the plate is the STRONGER of them. They cover the
         // two ends of the travel and are measured on different clocks:
         //
-        //   1. the OPENING, closed at t=0 and lifted over the print's own
-        //      timeline. Driven from the print rather than from the tail: a
-        //      tail-derived curve put the plate at 0.98 while the print was still
-        //      at scale 1.93, so by the time the grid entered the viewport (90%
-        //      of the travel) there was nothing left of the scroll to see it in.
-        //      Closed at the very first frame, because the photograph fills the
-        //      viewport there and the grid behind it would otherwise be sharp —
-        //      the photo then reads as mixed into the page instead of sitting on
-        //      it. Reported as "the acrylic is not strong enough on the opening".
+        //   1. the OPENING, closed over the first fifth of the print's own
+        //      timeline and open by posT 0.22. Driven from the print rather than
+        //      from the tail: a tail-derived curve put the plate at 0.98 while
+        //      the print was still at scale 1.93, so by the time the grid entered
+        //      the viewport (90% of the travel) there was nothing left of the
+        //      scroll to see it in.
         //   2. the TAIL, which lifts the plate once the print has landed so the
-        //      grid is never bare while the print is airborne beside it.
+        //      grid is never bare while the print is airborne beside it. Its
+        //      It shares `tailRange` with the print, so the two finish together
+        //      and the plate never dissolves over an empty screen.
         //
-        // 🔴 `max`, not a product. The tail envelope is 0 at t=0 (nothing has
-        // been scrolled yet) and the opening envelope is 1 there, so multiplying
-        // them cancelled the opening completely — measured k=0.0000 with
-        // `blur(0px)` on the opening frame, which is exactly the bug being fixed.
-        // The two never need to be strong at once, so the stronger one wins.
+        // 🔴 The two envelopes MULTIPLY. They each own one end of the travel and
+        // must not be able to hold the plate on at the other:
+        //   - `start` is 1 for every posT >= 0.22, which is nearly the whole
+        //     travel;
+        //   - `tailK` is 1 until the print has landed.
+        // `Math.max` of the two therefore pinned the plate at full strength from
+        // the landing all the way to the end of the tail — measured k = 1.0000 at
+        // every step — and the only thing that ever removed it was `erase()`, one
+        // step to 0. That is exactly "the mask disappears very harshly once you
+        // reach the bottom".
         //
-        // 🔴 And the inverse has to be a real inverse. `start` is clamped at 0,
-        // and the visible value it feeds is `start³`, so recovering the un-eased
-        // fraction is `plate^⅓` — the cube reads the curve backwards and would
-        // force the plate to 0 on the opening frame all over again.
+        // Multiply is correct as long as `start` is a true inverse: it is clamped
+        // at 0 and the value it feeds is `start³`, so recovering the un-eased
+        // fraction is `plate^⅓` (`Math.cbrt`). The earlier version used `pow(x, 3)`
+        // — the cube run backwards — which held `start` at 0 for the whole opening
+        // and made the product look broken.
         var aFrom = ACRYLIC_FROM;
         var aTo = ACRYLIC_TO;
         var start;
@@ -521,8 +553,18 @@
         } else {
           start = 1;
         }
-        var tailK = 1 - segment(after, 0, tailRange);
-        acrylic.style.setProperty('--acrylic-k', Math.max(start, tailK).toFixed(4));
+        // The dissolve runs over `acrylicTail` (= tailRange, see TAIL) and it is
+        // LINEAR in the scroll, not eased.
+        //
+        // 🔴 `segment()` here was the other half of "the mask disappears very
+        // harshly": easeInOutCubic is flat at both ends, so the whole visible
+        // change happened in the middle — measured k = 0.9584 after only 22% of
+        // the tail, then 0.6378, 0.1313, 0.0127 in the remaining steps. A plate
+        // that holds, dumps, and holds again reads as a cut wherever the visitor
+        // happens to be looking. Linear spreads the same blur and tint evenly
+        // over the whole dissolve, which is what makes it read as a fade.
+        var tailK = 1 - clamp01(after / Math.max(1, acrylicTail));
+        acrylic.style.setProperty('--acrylic-k', (start * tailK).toFixed(4));
       }
 
       // The cell the print is flying towards is EMPTY until the print is
@@ -578,8 +620,28 @@
     // against a requested 260), so adding the raw TAIL could pin past the end of
     // the document — which silently disables the pin, because the browser clamps
     // scrollY to the document end before any handler runs.
+    // Where the page is held: the point at which the plate has finished
+    // dissolving, so the last thing the visitor scrolls through is the fade.
+    //
+    // 🔴 It is `landScroll + tailRange`, NOT `ceil(...)` of the same. The ceil
+    // was there to clear the 0.5px that a fractional `landScroll` leaves against
+    // an integer `scrollY`, but it overshot by design: at the pin, `after` came
+    // out 260.5 against a tailRange of 260, i.e. past the END of the dissolve, so
+    // the plate's whole tail was compressed into the final frame and `erase()`
+    // removed it in the same step. Measured then: k = 1.000 at y=2177 and
+    // k = 0.000 at y=2197, one step.
+    //
+    // The plate and the print now share `tailRange` (see TAIL) and the pin sits
+    // exactly at its end, so k reaches 0 as the page arrives and nothing is cut
+    // off. Rounding rather than ceiling is what keeps the two aligned for a
+    // fractional `landScroll`.
+    //
+    // It is still NOT scrollRange + TAIL: `tailRange` is clamped to whatever
+    // scroll the document has left (`reachable - scrollRange`), or the pin would
+    // sit past the end of the document — which silently disables it, because the
+    // browser clamps scrollY to the document end before any handler runs.
     function pinLimit() {
-      return Math.ceil(landScroll + Math.min(TAIL, tailRange));
+      return Math.round(landScroll + Math.max(1, tailRange));
     }
 
     function engagePin() {
@@ -741,6 +803,13 @@
         // On <body>, not on .gallery: the masthead is a sibling of .gallery
         // and a descendant selector would never reach it.
         document.body.classList.add('is-gallery-static');
+        // 🔴 No pin in this mode, and that is structural rather than a flag: this
+        // `return` is what keeps the wheel/key listeners from ever being attached
+        // (they are registered below), so there is nothing to hold the page.
+        // There is also no travel to protect, and `measure()` is skipped here, so
+        // `tailRange`/`landScroll` are still their initial values — a pin computed
+        // from them would be nonsense (measured: a "limit" of 331 against a
+        // document that scrolls to 1797).
         detachers.push(function () {
           document.body.classList.remove('is-gallery-static');
         });
