@@ -2474,14 +2474,17 @@
       }
       pCtx.globalAlpha = 1;
       if (!alive) {
-        clearParticles();
-        // 🔴 Ready to disperse again on the next scroll.
+        // 🔴 The swarm goes, the TEXT DOES NOT COME BACK.
         //
-        // Leaving `pSpawned` true made the effect once-per-visit, so any later scroll had
-        // nothing to show and the feature looked broken after the first moment. The title
-        // is re-drawn by `startTyping` on the way back up, so re-arming here is what lets
-        // each downward scroll produce a dispersal.
-        pSpawned = false;
+        // Re-arming here (`pSpawned = false`) set up a loop: the particles die, this clears
+        // them — which restores the title's opacity — and the very next frame sees "scrolled"
+        // again and spawns a fresh swarm, which dissolves the title again. Measured, the
+        // heading's opacity cycled 0 → 1 → 0 while scrolling: that is precisely the "字在闪，
+        // 时有时无" the user reported. One dispersal per visit; after it the words are gone,
+        // which is the whole point of the effect.
+        if (pCtx) pCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        if (particleCanvas) particleCanvas.hidden = true;
+        pParticles = null;
       }
     }
 
