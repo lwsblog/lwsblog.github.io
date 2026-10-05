@@ -1523,6 +1523,9 @@
       // The particles share this loop rather than starting a second rAF: one clock, one
       // place where the frame budget is spent.
       updateParticles(dt, tickFrames);
+      // Sampled every frame so a dispersal launched at any moment knows how fast the text is
+      // currently travelling (see `spawnParticles`).
+      trackTitleVelocity();
       bailOut = smoothY !== target;
       if (!bailOut) lastStepAt = 0;
       frameRequest = window.requestAnimationFrame(tick);
@@ -2247,7 +2250,11 @@
     //   window.__pSize   square size in px (default 2)
     //   window.__pLife   fade-out in ms (default 2000)
     //   window.__pPush   scroll → velocity multiplier (default 0.6)
-    var P_COUNT = 320;
+    // 0 = no hard ceiling; the population follows the ink (see sampleTitle).
+    var P_COUNT = 0;
+    // One particle per this many sampled pixels. 3 keeps the glyph shapes readable
+    // rather than a solid slab of squares.
+    var P_DENSITY = 3;
     var P_SIZE = 2;
     // 🔴 600ms was INVISIBLE, and that is the whole of "我在线上一点没看到".
     //
@@ -2318,15 +2325,17 @@
       var data;
       try { data = octx.getImageData(0, 0, off.width, off.height).data; }
       catch (e) { return null; }   // tainted or unsupported: no dispersal, no crash
-      // Collect every inked pixel, THEN thin the list at random. A fixed stride would
-      // bias the swarm towards whichever strokes happened to align with it.
       var pts = [];
-      // 🔴 `stride` in SCREEN pixels was 2, which on this type is very coarse: the title is
-      // a 21px face blown up to scale 6.5, so a 2px grid skipped most of the strokes and
-      // the whole dispersal came to ~150 points. 1 samples every pixel; the random thinning
-      // below is what keeps the population at `P_COUNT` regardless.
-      var stride = Math.max(1, Math.round(window.__pStride > 0 ? window.__pStride : P_STRIDE));
-      stride = Math.max(1, Math.round(stride * Math.min(2, box.scale / 3)));
+      // 🔴 Every inked pixel is a candidate — stride 1, always.
+      //
+      // This used to be `2 * min(2, scale/3)`, which at the title's scale of 6.5 worked out
+      // to 2 and skipped half the strokes; combined with a `P_COUNT` cap of 320 the whole
+      // dispersal came to a few hundred 2px squares. Against a heading that carries
+      // thousands of pixels of ink, that reads as "字上掉了几粒灰" — the squares were never
+      // dense enough to BE the text. Sampling every pixel and letting the population follow
+      // the ink is what makes the swarm read as the words, and it is also why the count now
+      // tracks the displayed size rather than being a constant.
+      var stride = 1;
       for (var y = 0; y < off.height; y += stride) {
         for (var x = 0; x < off.width; x += stride) {
           if (data[(y * off.width + x) * 4 + 3] > 140) {
@@ -2335,8 +2344,16 @@
         }
       }
       if (!pts.length) return null;
-      var want = window.__pCount > 0 ? window.__pCount : P_COUNT;
+      // 🎛️ How many inked pixels each particle stands for. 1 = every sampled pixel becomes
+      // a particle (densest); higher thins the swarm. `window.__pDensity` overrides it.
+      var density = window.__pDensity > 0 ? window.__pDensity : P_DENSITY;
       pBox = box;
+      var want = Math.max(120, Math.round(pts.length / density));
+      // The old `P_COUNT` cap of 320 is gone on purpose: the population has to follow the
+      // INK, not a constant. Thinning a 6.5x-scaled heading down to a few hundred squares
+      // is what made the dispersal read as a sprinkle rather than as the words coming apart.
+      // `window.__pCount` still acts as a hard ceiling for anyone who wants one.
+      if (window.__pCount > 0) want = Math.min(want, window.__pCount);
       if (pts.length <= want) return pts;
       for (var i = pts.length - 1; i > 0; i--) {
         var j = Math.floor(Math.random() * (i + 1));
@@ -2364,7 +2381,6 @@
     function spawnParticles() {
       var pts = sampleTitle();
       if (!pts || !resizeParticleCanvas()) return false;
-      // 🔴 Too few points is not a dispersal, it is litter.
       //
       // The sampler can legitimately come back with a handful of pixels — the title still
       // mid-type, or the face resolved differently — and dissolving the glyphs for five
@@ -2372,9 +2388,21 @@
       // Below this threshold the title stays put and nothing is spent.
       if (pts.length < 60) return false;
       var size = window.__pSize > 0 ? window.__pSize : P_SIZE;
+      // 🔴 Every particle INHERITS the title's own screen motion.
+      //
+      // The masthead is `position: fixed` and JS translates it by `- scrollY` so it rides up
+      // with the page (the "跟随滚动" behaviour). A particle spawned at a fixed screen
+      // coordinate therefore stays behind the moment the text moves: measured, after a single
+      // 200px wheel notch the heading had travelled out of the viewport while the swarm hung
+      // where the words used to be — both invisible, which is the "粒子只有一点点 / 字在闪"
+      // report. Giving each particle the text's velocity makes the dispersal travel with the
+      // words, which is also what makes it read as one thing breaking apart.
+      var carry = pTitleVel;
       pParticles = pts.map(function (p) {
         return {
-          x: p[0], y: p[1], vx: 0, vy: 0,
+          x: p[0], y: p[1],
+          vx: carry.x * (0.75 + Math.random() * 0.5),
+          vy: carry.y * (0.75 + Math.random() * 0.5),
           s: size * (0.6 + Math.random() * 0.8),
           a: 1,
           life: 1
@@ -2382,6 +2410,29 @@
       });
       particleCanvas.hidden = false;
       return true;
+    }
+
+    // The title's on-screen velocity, in px/s, from the last two frames. Used to launch the
+    // particles along the same path the glyphs are travelling. See the note in
+    // `spawnParticles`.
+    var pTitleAt = 0;
+    var pTitleY = null;
+    var pTitleVel = { x: 0, y: 0 };
+    function trackTitleVelocity() {
+      if (!masthead) return;
+      var now = performance.now();
+      var b = masthead.getBoundingClientRect();
+      if (pTitleY !== null && pTitleAt && now > pTitleAt) {
+        var dt = (now - pTitleAt) / 1000;
+        if (dt > 0 && dt < 0.5) {
+          pTitleVel = {
+            x: (b.left - pTitleY.x) / dt,
+            y: (b.top - pTitleY.y) / dt
+          };
+        }
+      }
+      pTitleY = { x: b.left, y: b.top };
+      pTitleAt = now;
     }
 
     function drawParticles(dt) {
@@ -2481,16 +2532,33 @@
 
     // The glyphs fade as their own pixels leave. Kept as one function so the two can never
     // drift apart: the swarm and the text are the same material.
+    // 🔴 The text goes FIRST, then the particles appear where it was.
+    //
+    // Measured: the swarm was alive the whole time (8256 particles, present for seconds) and
+    // still effectively invisible, because its alpha starts near 0.5 and decays while the
+    // heading sat on top of it at FULL opacity, in the same colour and the same place. The
+    // result was a crisp title with a faint shimmer behind it — "字在闪时有时无，粒子只有一点
+    // 点" — when the intent is that the words ARE the particles.
+    //
+    // So they are never at full strength together: the glyphs fade over 180ms and the swarm
+    // is released after that. Staggering the spawn behind the fade is what makes it read as
+    // one material changing state rather than as two things drawn on top of each other.
+    var TITLE_FADE = 180;
+    var pSpawnTimer = 0;
     function dissolveTitle() {
       if (!mastTitle) return;
-      if (!mastTitle.style.transition) {
-        mastTitle.style.transition = 'opacity 260ms linear';
-      }
+      mastTitle.style.transition = 'opacity ' + TITLE_FADE + 'ms linear';
       mastTitle.style.opacity = '0';
+      if (pSpawnTimer) window.clearTimeout(pSpawnTimer);
+      pSpawnTimer = window.setTimeout(function () {
+        pSpawnTimer = 0;
+        if (!pParticles) spawnParticles();
+      }, TITLE_FADE);
     }
 
     // The re-type throws the swarm away, so the title comes back clean.
     function clearParticles() {
+      if (pSpawnTimer) { window.clearTimeout(pSpawnTimer); pSpawnTimer = 0; }
       pParticles = null;
       if (pCtx) pCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
       if (particleCanvas) particleCanvas.hidden = true;
@@ -2558,6 +2626,10 @@
         get tickN() { return tickN; },
         get titleDone() { return titleDone; },
         get pDiag() { return pDiag; }
+        , get pAlive() { var n = 0; if (pParticles) for (var i = 0; i < pParticles.length; i++) if (pParticles[i].life > 0) n++; return n; }
+        , get pStats() { if (!pParticles || !pParticles.length) return null;
+            var l0 = pParticles[0].life, a0 = pParticles[0].a;
+            return { n: pParticles.length, life0: Math.round(l0 * 1000) / 1000, a0: Math.round(a0 * 1000) / 1000 }; }
       };
     }
 
