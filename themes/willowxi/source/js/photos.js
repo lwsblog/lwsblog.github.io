@@ -2124,17 +2124,39 @@
     // screen — a full-viewport flash of giant text that read as "屏风突然不见了字突然
     // 变糊了". Both triggers now consume the same state, so they cannot disagree.
     var titleSettled = false;
+    // 🔴 How long to hold the first type-in back when the visitor arrives via PJAX.
+    //
+    // Arriving from another page runs the double-slash sweep, which takes 1.71s. The
+    // typewriter was starting ~0.3s in, so by the time the sweep cleared, the title had
+    // already finished typing — the user's "扫屏动画做完之后打字已经快打完了". The sweep is
+    // the transition that is supposed to REVEAL the gallery, so the typing must begin after
+    // it, not under it.
+    //
+    // It cannot simply wait for `route-ready`: measured on this path, typing was already
+    // under way while that flag was still unset, so waiting on it changes nothing. And a
+    // direct load must NOT be delayed at all (it only waits for the first frame).
+    // 🎛️ `window.__typeDelay` overrides the delay.
+    var TYPE_DELAY = 1700;
+    var titleCueAt = 0;
     function tickTitle() {
       if (!masthead || !mastTitle) return;
-      // 🔴 Armed only when the typing ACTUALLY STARTS, not when the cue appears.
+      // Armed only when the typing ACTUALLY STARTS, not when the cue appears.
       //
       // `titleArmed = true` used to be set unconditionally next to the call, which turned
-      // the cue into a one-shot. `startTyping` now refuses to run before `initTitle` has
+      // the cue into a one-shot. `startTyping` refuses to run before `initTitle` has
       // published `data-full` (see there), and if this flag had already latched, that
       // refusal would have been permanent — exactly the failure it was meant to prevent.
       // Setting it from `startTyping`'s return value makes "armed" mean "the typewriter is
       // running", so a cue that arrives too early simply tries again next frame.
       if (!titleArmed && document.body.classList.contains('route-ready')) {
+        if (!titleCueAt) titleCueAt = performance.now();
+        // Only the PJAX arrival waits: a hard load has no sweep to clear, and it is the
+        // `route-animating` class (set at the START of the transition) that tells the two
+        // apart. The class is gone by the time this runs on a direct load.
+        var held = document.body.classList.contains('route-animating') ||
+          (window.__pjaxArrival === true);
+        var delay = window.__typeDelay >= 0 ? window.__typeDelay : TYPE_DELAY;
+        if (held && performance.now() - titleCueAt < delay) return;
         titleArmed = startTyping() === true;
       }
       if (!titleArmed) return;
