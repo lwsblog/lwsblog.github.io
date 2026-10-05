@@ -647,9 +647,9 @@
       // splash, not to the header.
       if (masthead && mastFrom && mastTo) {
         // 🎛️ `TITLE_FROM` is where the title starts flying to its corner. The user's
-        // brief is that the title stays CENTRED and huge for the whole page and only
-        // the particles take it away, so the fly is off by default: the interpolation
-        // is pinned at its start (`titleT = 0`), which is "centred glyphs at bigScale".
+        // brief is that the title stays CENTRED and huge, so the fly is off by default:
+        // the interpolation is pinned at its start (`titleT = 0`), which is "centred
+        // glyphs at bigScale".
         // Raising this constant (or `window.__titleFrom`) restores the original
         // centre → top-left travel without any other change.
         var titleFrom = window.__titleFrom >= 0 ? window.__titleFrom : TITLE_FROM;
@@ -664,14 +664,8 @@
         // 🔴 The title does NOT follow the scroll any more.
         //
         // It did (`- scrollY`, so it rode up the screen like a placed object), and the
-        // user rejected it: "第一次下滑的时候标题不应该上去，应该是飘散的，虽然还没做但是
-        // 不能随滚轮上去". The travel's job here is to take the title AWAY — the particle
-        // dispersal that replaces it is still to be built — so riding the page was the
-        // wrong half of the idea.
-        //
-        // ⚠️ The particle stage will need a position again, and it should read this
-        // element's viewport rect rather than reintroduce a scroll term here: the
-        // dispersal starts from where the glyphs are, and that is a screen position.
+        // user rejected it: "第一次下滑的时候标题不应该上去 … 不能随滚轮上去". So the title
+        // now simply stays where it is while the page moves past it.
         var my = titleSettled ? 0 : lerp(mastFrom.y, mastTo.y, titleT);
         masthead.style.transform = 'translate(' + mx + 'px, ' + my + 'px) scale(' + mScale + ')';
         masthead.style.setProperty('--mast-s', mScale.toFixed(4));
@@ -2192,9 +2186,7 @@
       // This was `mastTitle.setAttribute('data-full', mastTitle.textContent)`, which stores
       // a REFERENCE: `setAttribute` stringifies lazily, so by the time the attribute was
       // read again the element had been emptied and `data-full` came back as ''. The
-      // typewriter then typed NOTHING (only the caret appeared) and the particle sampler had
-      // no glyphs to break apart — measured, the whole dispersal produced 96 opaque pixels,
-      // all of them the underscore.
+      // typewriter then typed NOTHING — only the caret appeared.
       var fullText = mastTitle.textContent;
       mastTitle.setAttribute('data-full', fullText);
       // 🔴 Emptied now, not when the typing starts.
