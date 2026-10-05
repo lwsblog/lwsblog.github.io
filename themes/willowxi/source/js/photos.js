@@ -1472,10 +1472,12 @@
     // nothing more. A parked tab costs one empty frame per refresh, which is far
     // cheaper than the class of bug it removes.
     var loopArmed = false;
+    var tickFrames = 0;   // real rAF frames, used to age the particles once per frame
     var tickN = 0;
     function tick() {
       if (!loopArmed || pinEngaged) return;
       tickN++;
+      tickFrames++;
       // `performance.now()` rather than the rAF timestamp: `step()` can run this
       // synchronously to save a frame of latency, and mixing the two clocks gives a
       // negative `dt`.
@@ -1513,7 +1515,7 @@
       render(t);
       // The particles share this loop rather than starting a second rAF: one clock, one
       // place where the frame budget is spent.
-      updateParticles(dt);
+      updateParticles(dt, tickFrames);
       bailOut = smoothY !== target;
       if (!bailOut) lastStepAt = 0;
       frameRequest = window.requestAnimationFrame(tick);
@@ -2214,12 +2216,22 @@
     // 🎛️ Knobs (all live):
     //   window.__pCount  target particle count (default 320; the brief said 200-400)
     //   window.__pSize   square size in px (default 2)
-    //   window.__pLife   fade-out in ms (default 600)
+    //   window.__pLife   fade-out in ms (default 2000)
     //   window.__pPush   scroll → velocity multiplier (default 0.6)
     var P_COUNT = 320;
     var P_SIZE = 2;
-    var P_LIFE = 600;
+    // 🔴 600ms was INVISIBLE, and that is the whole of "我在线上一点没看到".
+    //
+    // Measured on the live site: the swarm existed for 0.56s (114ms → 677ms after the
+    // first scroll) and only ever lit ~150 samples across a 1152px-wide title, because
+    // `stride` was 2 screen pixels on a 21px face blown up to scale 6.5. Nothing was
+    // broken; there was simply nothing to see. 2s turns it into something you watch, and
+    // stride 1 roughly doubles the sampling density.
+    var P_LIFE = 2000;
     var P_PUSH = 0.6;
+    // How many screen pixels each sample stands for. 1 = every pixel; see the note in
+    // `sampleTitle` for why the old value of 2 was too coarse to see.
+    var P_STRIDE = 1;
     var pParticles = null;
     var pBox = null;              // the sampled title box, reused for colour
     var pSpawned = false;         // one dispersal per visit
@@ -2280,7 +2292,12 @@
       // Collect every inked pixel, THEN thin the list at random. A fixed stride would
       // bias the swarm towards whichever strokes happened to align with it.
       var pts = [];
-      var stride = Math.max(1, Math.round(2 * box.scale));
+      // 🔴 `stride` in SCREEN pixels was 2, which on this type is very coarse: the title is
+      // a 21px face blown up to scale 6.5, so a 2px grid skipped most of the strokes and
+      // the whole dispersal came to ~150 points. 1 samples every pixel; the random thinning
+      // below is what keeps the population at `P_COUNT` regardless.
+      var stride = Math.max(1, Math.round(window.__pStride > 0 ? window.__pStride : P_STRIDE));
+      stride = Math.max(1, Math.round(stride * Math.min(2, box.scale / 3)));
       for (var y = 0; y < off.height; y += stride) {
         for (var x = 0; x < off.width; x += stride) {
           if (data[(y * off.width + x) * 4 + 3] > 140) {
@@ -2362,7 +2379,16 @@
 
     // Driven from `tick` with that frame's delta, so it shares the gallery's single rAF
     // loop instead of starting a second one.
-    function updateParticles(dt) {
+    // 🔴 Particles age ONLY on real frames.
+    //
+    // `step()` is called synchronously from the scroll handler to save a frame of latency,
+    // so a single scroll burst can run `tick` (and therefore `updateParticles`) several
+    // times within one real frame. Charging each of those a full frame's worth of lifetime
+    // made time-based effects run fast — measured, a 2s particle lifetime drained in 0.7s,
+    // which is why a 0.6s swarm was invisible and a 2s one still was. `tickFrames` is the
+    // rAF's own frame counter, so ageing is billed once per displayed frame.
+    var lastAgedFrame = -1;
+    function updateParticles(dt, frameNo) {
       pDiag.calls++;
       if (reduced || !particleCanvas) { pDiag.skipped = (pDiag.skipped || 0) + 1; return; }
       // 🔴 The dispersal STARTS ON THE FIRST SCROLL, not when the typing ends.
@@ -2379,7 +2405,13 @@
           pDiag.samples = pParticles ? pParticles.length : 0;
         } catch (e) { pDiag.err = String(e); }
       }
-      if (pParticles) { drawParticles(dt); pDiag.drawn++; }
+      if (!pParticles) return;
+      // A repeat call inside the same frame still repaints (the positions have moved) but
+      // does not age anything.
+      var aging = frameNo !== lastAgedFrame;
+      lastAgedFrame = frameNo;
+      drawParticles(aging ? dt : 0);
+      pDiag.drawn++;
     }
 
     // The scroll throws the swarm: its magnitude becomes the particles' initial velocity,
