@@ -815,13 +815,22 @@
         // middle. The substitute is a REPLACEMENT for the travel on the way back up, so
         // it simply takes the tint over once armed, and then the shade is a clean
         // function of the scroll position: heaviest at y = 0, gone by `ALT_RANGE`.
-        var openTint = start * tailK;
+        // 🔴 The travel frost belongs to the PRINT, so it goes when the print goes.
+        //
+        // It is there to frost the background while the print shrinks over it on the way
+        // DOWN. Once the print is retired that job is over — but the curve kept running
+        // off `scrollY`, so on the way back UP it was still painting a `blur(14-18px)`
+        // full-screen plate over the grid the visitor had come back to look at. Measured
+        // on the way up: y=1291 → `blur(14.0px)`, y=791 → `blur(17.8px)`, with the
+        // substitute at 0 the whole time — i.e. the haze the user was complaining about
+        // was never the substitute at all, it was the opening's own frost outliving its
+        // animation. "不应该糊，不然我怎么看上面的图".
+        var openTint = retired ? 0 : start * tailK;
         var tintK = altArmed ? altK : openTint;
         acrylic.style.setProperty('--acrylic-k', tintK.toFixed(4));
         acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
-        // The blur still takes the stronger of the two: frost is wanted on the way up as
-        // well as on the way down, and unlike the tint there is no conflict — more
-        // radius is simply more frost.
+        // Same rule for the radius: it is the stronger of the two, but the opening's half
+        // of it is now gated on the print still being live.
         var blurK = Math.max(openTint, altK);
         acrylic.style.setProperty('--acrylic-blur', blurK.toFixed(4));
         // 🔴 Keep the plate VISIBLE and let `--acrylic-k` alone decide how much it
