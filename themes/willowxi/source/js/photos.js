@@ -179,17 +179,21 @@
     // background is already clearing through the whole second half — which is
     // what makes the two layers descend together instead of one after the other.
     var ACRYLIC_PEAK = 0.45;
-    // 🎛️ How much scroll the SUBSTITUTE blur spans: full strength at the top, gone by
-    // `ALT_RANGE` px. Overridable live with `window.__altRange`.
+    // 🎛️ How far the SUBSTITUTE blur reaches back from the top: full strength at y = 0,
+    // zero at `ALT_RANGE`, linear in between. `window.__altRange` overrides it live.
     //
-    // 1200 (half the travel) hazed the photographs while the visitor was scrolling up to
-    // look at them — "不应该糊，不然我怎么看上面的图". 500 measured clear at the position
-    // the user pointed at (y ≈ 1764).
+    // 🔴 This value is the ANSWER TO A QUESTION THE USER ALREADY ANSWERED TWICE, and I
+    // spent three rounds not hearing it. They pointed at a screenshot and said "就差不多是
+    // 这个位置开始再往上滑就开始渐糊" — i.e. the ramp should START at that position
+    // (y ≈ 1764, which is the landing) and build from there all the way to the top. I
+    // first read it as "the ramp is too long", then as "add a dead zone", then as "make
+    // it very short" — and got "太他妈短了，我刚才说从截图那里开始变糊" for the last one.
     //
-    // ⚠️ Do NOT read "从这里开始糊" as "shorten the ramp": what was reported next is that
-    // the blur arrives as a JUMP at the very top ("你那滑到顶上突然糊了"), which is a
-    // discontinuity, not a gradient length.
-    var ALT_RANGE = 500;
+    // History of this constant, for the next person: 1200 was too long (hazed the
+    // photographs), and anything around 500 or less starts the frost so close to the top
+    // that the approach reads as a jump rather than a build. The user's own landmark —
+    // the landing — is the value.
+    var ALT_RANGE = 1764;
     // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
     // huge, which is the current brief). `window.__titleFrom` overrides it live.
     var TITLE_FROM = 1;
@@ -804,7 +808,17 @@
           altArmed = true;
         }
         if (altArmed) {
-          var altRange = window.__altRange > 0 ? window.__altRange : ALT_RANGE;
+          // 🔴 The span is the LANDING, not a fixed number.
+          //
+          // The user's landmark was "就差不多是这个位置" — the place in their screenshot,
+          // which is where the print retires. Anchoring to `landScroll` makes the ramp
+          // begin exactly at that landmark on every viewport and every landing cell,
+          // instead of at a number that happened to be measured at 1440x900. The plate
+          // then builds continuously from the first scrolled-to position back to the top,
+          // with no dead zone and nothing that reads as a jump.
+          var altRange = window.__altRange > 0
+            ? window.__altRange
+            : (landScroll > 0 ? landScroll : ALT_RANGE);
           altK = 1 - clamp01(Math.max(0, window.scrollY) / altRange);
         }
         // 🔴 The tint is EITHER the opening's OR the substitute's, never a blend.
