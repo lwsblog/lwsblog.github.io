@@ -2106,6 +2106,10 @@
         titleCaret.textContent = '_';
       }
       mastTitle.appendChild(titleCaret);
+      // Releases the `visibility: hidden` that hides the server-rendered title
+      // while this script is still loading (see the CSS note). From here the
+      // typewriter is the only thing that puts characters on screen.
+      masthead.classList.add('is-ready');
     }
 
     // 🔴 Diagnostic surface. The gallery's state is entirely closure-local, which
@@ -2193,6 +2197,7 @@
       titleSettled = false;
       if (masthead) {
         masthead.classList.remove('is-typing');
+        masthead.classList.remove('is-ready');
         masthead.style.transform = '';
         masthead.style.removeProperty('--mast-s');
         if (mastLabel) mastLabel.style.opacity = '';

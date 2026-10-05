@@ -4764,6 +4764,27 @@ html[data-theme="light"] .photo-acrylic {
   opacity: 0.82;
 }
 
+/* 🔴 Keep the title INVISIBLE until the typewriter owns it.
+   --
+   `photos.js` is injected LATE (the gallery waits for the screen image, measured 3-4s
+   on a cold load), so during that window the server-rendered title was on screen in its
+   plain resting state — left-aligned at the top-left — and then vanished and re-typed
+   from the middle. The flash was the giveaway: a title that appears, disappears and
+   reappears is worse than one that simply types.
+   --
+   `html.js` is added synchronously by an inline script in the head (head.ejs), so this
+   rule applies from the first paint while still leaving the title visible when JS is
+   off or broken. Scoped to the gallery with `:has()` so no other page is touched, and
+   released by `is-ready` (set the moment the typewriter starts) — `is-typing` is on the
+   masthead only while characters are still arriving. */
+html.js body:has(.photo-masthead) .photo-masthead__title {
+  visibility: hidden;
+}
+
+html.js body:has(.photo-masthead) .photo-masthead.is-ready .photo-masthead__title {
+  visibility: visible;
+}
+
 .photo-masthead__title {
   margin: 16px 0 0;
   color: var(--paper);
