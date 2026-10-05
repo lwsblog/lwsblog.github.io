@@ -60,6 +60,18 @@
        and kill its own blur. -->
   <div class="photo-acrylic" data-photo-acrylic aria-hidden="true"></div>
 
+  <!-- The particle layer the title disperses into.
+       --
+       z-index 25 is the only band that is both sharp and unobstructed: above the acrylic
+       (20, whose blur would smear the particles away) and below the print (30, which would
+       paint over them). It must be a DIRECT child of `.gallery` — anything inside
+       `.photo-main` is trapped by that element's own z-index 2, and a body-level canvas
+       would land above the print AND the masthead.
+       --
+       `pointer-events: none` (in the stylesheet) keeps every click reaching the grid. The
+       element is hidden until there is something to draw, so it costs nothing at rest. -->
+  <canvas class="photo-particles" data-photo-particles aria-hidden="true" hidden></canvas>
+
   <!-- The screen is a print the size of the viewport, not a full-bleed
        photograph. It holds the SAME aspect ratio as the grid cell it lands
        on, so the whole travel is one continuous scale of one box: the crop

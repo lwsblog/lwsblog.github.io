@@ -69,6 +69,7 @@
     var mastSub = document.querySelector('[data-photo-mast-sub]');
 
     var screenImg = root.querySelector('[data-photo-screen-img]');
+    var particleCanvas = root.querySelector('[data-photo-particles]');
     var screenCap = root.querySelector('[data-photo-screen-cap]');
     var screenVeil = root.querySelector('[data-photo-screen-veil]');
     var screenHint = document.querySelector('[data-photo-screen-hint]');
@@ -1510,6 +1511,9 @@
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
       render(t);
+      // The particles share this loop rather than starting a second rAF: one clock, one
+      // place where the frame budget is spent.
+      updateParticles(dt);
       bailOut = smoothY !== target;
       if (!bailOut) lastStepAt = 0;
       frameRequest = window.requestAnimationFrame(tick);
@@ -2035,11 +2039,23 @@
     function startTyping() {
       if (titlePlaying) return;
       if (!mastTitle) return;
+      // 🔴 `data-full` is the ONE source of truth, and this refuses to guess at it.
+      //
+      // The fallback here used to be `mastTitle.textContent`, on the assumption that the
+      // element still held the server-rendered string. It does not: `initTitle` has already
+      // emptied it and inserted the caret. So a call that arrived BEFORE `initTitle` ran
+      // stored the caret itself as the title — traced with a MutationObserver:
+      //
+      //   DCL  text="Willow's Gallery"  data-full=null
+      //   attr data-full -> "_"        ← this line, writing the caret as the title
+      //   text -> "_"
+      //   … then it "typed" one underscore and stopped.
+      //
+      // That was the whole of "标题只剩一个下划线" and of the dispersal sampling 5 points.
+      // Refusing to type is the correct response to a missing title: the next frame will
+      // find it, and `titleArmed` keeps the call from being lost.
       var full = mastTitle.getAttribute('data-full');
-      if (full === null) {
-        full = mastTitle.textContent;
-        mastTitle.setAttribute('data-full', full);
-      }
+      if (!full) return;
       mastTitle.textContent = '';
       if (!titleCaret) {
         titleCaret = document.createElement('span');
@@ -2085,6 +2101,9 @@
         titleTimer = 0;
         titlePlaying = false;
       });
+      // Says whether the typewriter actually started. `tickTitle` arms on this, so a call
+      // that bailed out early (no `data-full` yet) is retried rather than lost.
+      return true;
     }
 
     // 🔴 The cue is polled from the existing frame loop rather than wired to a new
@@ -2105,9 +2124,16 @@
     var titleSettled = false;
     function tickTitle() {
       if (!masthead || !mastTitle) return;
+      // 🔴 Armed only when the typing ACTUALLY STARTS, not when the cue appears.
+      //
+      // `titleArmed = true` used to be set unconditionally next to the call, which turned
+      // the cue into a one-shot. `startTyping` now refuses to run before `initTitle` has
+      // published `data-full` (see there), and if this flag had already latched, that
+      // refusal would have been permanent — exactly the failure it was meant to prevent.
+      // Setting it from `startTyping`'s return value makes "armed" mean "the typewriter is
+      // running", so a cue that arrives too early simply tries again next frame.
       if (!titleArmed && document.body.classList.contains('route-ready')) {
-        titleArmed = true;
-        startTyping();
+        titleArmed = startTyping() === true;
       }
       if (!titleArmed) return;
       // ⚠️ `window.scrollY`, not `smoothY`: the title re-types once per upward crossing,
@@ -2143,7 +2169,16 @@
     function initTitle() {
       if (reduced) return;            // static title in reduced-motion
       if (!masthead || !mastTitle) return;
-      mastTitle.setAttribute('data-full', mastTitle.textContent);
+      // 🔴 Capture the text into a LOCAL before touching the element.
+      //
+      // This was `mastTitle.setAttribute('data-full', mastTitle.textContent)`, which stores
+      // a REFERENCE: `setAttribute` stringifies lazily, so by the time the attribute was
+      // read again the element had been emptied and `data-full` came back as ''. The
+      // typewriter then typed NOTHING (only the caret appeared) and the particle sampler had
+      // no glyphs to break apart — measured, the whole dispersal produced 96 opaque pixels,
+      // all of them the underscore.
+      var fullText = mastTitle.textContent;
+      mastTitle.setAttribute('data-full', fullText);
       // 🔴 Emptied now, not when the typing starts.
       //
       // The title is server-rendered in full, so waiting for `route-ready` (up to 1.71s
@@ -2165,6 +2200,233 @@
       // Clears the inline `visibility:hidden` that the server-rendered title carries
       // (see photos.ejs); the class above is what the stylesheet keys off.
       mastTitle.style.visibility = '';
+    }
+
+    /* ---- 6. the title's particles --------------------------------------- */
+
+    // 🔴 The title DISPERSES into squares when the page is scrolled down.
+    //
+    // The specimens come from the title's own pixels: the string is drawn once into an
+    // offscreen canvas in the SAME monospace face at the SAME scale the masthead is
+    // wearing, and every Nth opaque pixel becomes a particle. That is what makes the swarm
+    // read as the words coming apart rather than as a spray of dots near them.
+    //
+    // 🎛️ Knobs (all live):
+    //   window.__pCount  target particle count (default 320; the brief said 200-400)
+    //   window.__pSize   square size in px (default 2)
+    //   window.__pLife   fade-out in ms (default 600)
+    //   window.__pPush   scroll → velocity multiplier (default 0.6)
+    var P_COUNT = 320;
+    var P_SIZE = 2;
+    var P_LIFE = 600;
+    var P_PUSH = 0.6;
+    var pParticles = null;
+    var pBox = null;              // the sampled title box, reused for colour
+    var pSpawned = false;         // one dispersal per visit
+    // Set by the first real scroll. The dispersal is triggered by it, so the swarm exists
+    // when the visitor is actually moving rather than fading out during the typing.
+    var pScrolled = false;
+    var pCtx = null;
+    // Counters for the probes. The dispersal has several silent early-outs, and "nothing
+    // appeared" does not say which one was taken.
+    var pDiag = { calls: 0, spawned: 0, spawnOk: 0, samples: 0, drawn: 0, err: '' };
+
+    // The title's current on-screen rectangle, its scale, and its resolved font/colour.
+    function titleBox() {
+      if (!mastTitle) return null;
+      var probe = document.createRange();
+      probe.selectNodeContents(mastTitle);
+      var rect = probe.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      var cs = getComputedStyle(mastTitle);
+      var scale = 1;
+      var tr = masthead ? masthead.style.transform : '';
+      var m = tr && tr.match(/scale\(([0-9.]+)\)/);
+      if (m) scale = Number(m[1]);
+      return {
+        left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+        scale: scale, font: cs.font, color: cs.color, letterSpacing: cs.letterSpacing
+      };
+    }
+
+    // Draws the title once offscreen and returns sample points in VIEWPORT CSS pixels —
+    // the same space the canvas paints in, so no transform is needed at draw time.
+    function sampleTitle() {
+      var box = titleBox();
+      if (!box || !box.width) return null;
+      var text = mastTitle.getAttribute('data-full') || '';
+      if (!text) return null;
+      var pad = 8;
+      var w = Math.ceil(box.width) + pad * 2;
+      var h = Math.ceil(box.height) + pad * 2;
+      var off = document.createElement('canvas');
+      // The canvas is in CSS pixels OF THE SCREEN, so the glyphs must be drawn at the
+      // scale they are displayed at — the masthead carries scale(bigScale).
+      off.width = Math.max(1, Math.round(w * box.scale));
+      off.height = Math.max(1, Math.round(h * box.scale));
+      var octx = off.getContext('2d');
+      if (!octx) return null;
+      octx.scale(box.scale, box.scale);
+      octx.fillStyle = '#fff';
+      octx.textBaseline = 'top';
+      octx.font = box.font;
+      try {
+        if ('letterSpacing' in octx && box.letterSpacing) octx.letterSpacing = box.letterSpacing;
+      } catch (e) { /* older engines: ignore the tracking */ }
+      octx.fillText(text, pad, pad);
+      var data;
+      try { data = octx.getImageData(0, 0, off.width, off.height).data; }
+      catch (e) { return null; }   // tainted or unsupported: no dispersal, no crash
+      // Collect every inked pixel, THEN thin the list at random. A fixed stride would
+      // bias the swarm towards whichever strokes happened to align with it.
+      var pts = [];
+      var stride = Math.max(1, Math.round(2 * box.scale));
+      for (var y = 0; y < off.height; y += stride) {
+        for (var x = 0; x < off.width; x += stride) {
+          if (data[(y * off.width + x) * 4 + 3] > 140) {
+            pts.push([x / box.scale - pad + box.left, y / box.scale - pad + box.top]);
+          }
+        }
+      }
+      if (!pts.length) return null;
+      var want = window.__pCount > 0 ? window.__pCount : P_COUNT;
+      pBox = box;
+      if (pts.length <= want) return pts;
+      for (var i = pts.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = pts[i]; pts[i] = pts[j]; pts[j] = t;
+      }
+      return pts.slice(0, want);
+    }
+
+    function resizeParticleCanvas() {
+      if (!particleCanvas) return false;
+      var ratio = Math.min(window.devicePixelRatio || 1, 2);
+      var w = Math.max(1, window.innerWidth);
+      var h = Math.max(1, window.innerHeight);
+      if (particleCanvas.width !== Math.round(w * ratio) ||
+          particleCanvas.height !== Math.round(h * ratio)) {
+        particleCanvas.width = Math.round(w * ratio);
+        particleCanvas.height = Math.round(h * ratio);
+      }
+      pCtx = particleCanvas.getContext('2d');
+      if (!pCtx) return false;
+      pCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      return true;
+    }
+
+    function spawnParticles() {
+      var pts = sampleTitle();
+      if (!pts || !resizeParticleCanvas()) return false;
+      var size = window.__pSize > 0 ? window.__pSize : P_SIZE;
+      pParticles = pts.map(function (p) {
+        return {
+          x: p[0], y: p[1], vx: 0, vy: 0,
+          s: size * (0.6 + Math.random() * 0.8),
+          a: 1,
+          life: 1
+        };
+      });
+      particleCanvas.hidden = false;
+      return true;
+    }
+
+    function drawParticles(dt) {
+      if (!pCtx) return;
+      var W = window.innerWidth, H = window.innerHeight;
+      pCtx.clearRect(0, 0, W, H);
+      if (!pParticles || !pParticles.length) return;
+      var life = window.__pLife > 0 ? window.__pLife : P_LIFE;
+      pCtx.fillStyle = (pBox && pBox.color) || '#f1f3f5';
+      var alive = 0;
+      for (var i = 0; i < pParticles.length; i++) {
+        var p = pParticles[i];
+        // Exponential drift, frame-rate independent, so the coast slows the way a thrown
+        // thing does rather than stopping dead on the frame the wheel stops.
+        var damp = Math.exp(-dt / 260);
+        p.vx *= damp; p.vy *= damp;
+        p.x += p.vx * (dt / 1000);
+        p.y += p.vy * (dt / 1000) + 24 * (dt / 1000);   // a slight settle, like dust
+        p.life -= dt / life;
+        if (p.life <= 0) continue;
+        p.a = Math.max(0, Math.min(1, p.life));
+        // Squares, not circles: at this size a dot reads as a smudge and the swarm looks
+        // soft, which is the opposite of "come apart".
+        pCtx.globalAlpha = p.a;
+        pCtx.fillRect(p.x, p.y, p.s, p.s);
+        alive++;
+      }
+      pCtx.globalAlpha = 1;
+      if (!alive) clearParticles();
+    }
+
+    // Driven from `tick` with that frame's delta, so it shares the gallery's single rAF
+    // loop instead of starting a second one.
+    function updateParticles(dt) {
+      pDiag.calls++;
+      if (reduced || !particleCanvas) { pDiag.skipped = (pDiag.skipped || 0) + 1; return; }
+      // 🔴 The dispersal STARTS ON THE FIRST SCROLL, not when the typing ends.
+      //
+      // Spawning at `titleDone` produced a swarm that was born, drifted and faded out
+      // within 600ms while the visitor was still reading the title — by the time they
+      // scrolled there was nothing left to push, and the canvas had hidden itself.
+      // Waiting for a scroll also matches what the effect is FOR: "下滑的时候随滚轮飘散".
+      if (!pSpawned && titleDone && pScrolled) {
+        pSpawned = true;
+        pDiag.spawned++;
+        try {
+          pDiag.spawnOk = spawnParticles() ? 1 : 0;
+          pDiag.samples = pParticles ? pParticles.length : 0;
+        } catch (e) { pDiag.err = String(e); }
+      }
+      if (pParticles) { drawParticles(dt); pDiag.drawn++; }
+    }
+
+    // The scroll throws the swarm: its magnitude becomes the particles' initial velocity,
+    // and they keep coasting once the wheel stops.
+    function pushParticles(deltaY) {
+      if (!pParticles) return;
+      var push = window.__pPush > 0 ? window.__pPush : P_PUSH;
+      for (var i = 0; i < pParticles.length; i++) {
+        var p = pParticles[i];
+        p.vx += deltaY * push * (0.5 + Math.random() * 0.9);
+        p.vy += deltaY * push * 0.25 * (Math.random() * 2 - 1);
+      }
+    }
+
+    // The re-type throws the swarm away, so the title comes back clean.
+    function clearParticles() {
+      pParticles = null;
+      if (pCtx) pCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      if (particleCanvas) particleCanvas.hidden = true;
+    }
+
+    // 🔴 Its OWN listener, not a line inside `onWheel`.
+    //
+    // `onWheel` is the pin's handler and returns immediately when the pin is off
+    // (`PIN_ENABLED = false`), so anything added there would never run. The particles have
+    // nothing to do with the pin — they only need the scroll's magnitude and direction.
+    function initParticles() {
+      if (reduced || !particleCanvas) return;
+      var onScrollPush = function (event) {
+        pScrolled = true;
+        pushParticles(event.deltaY || 0);
+      };
+      window.addEventListener('wheel', onScrollPush, { passive: true });
+      detachers.push(function () {
+        window.removeEventListener('wheel', onScrollPush);
+      });
+      // A viewport change invalidates every sample, so the swarm is dropped rather than
+      // left scattered at coordinates from the old layout.
+      var onResizeParticles = function () {
+        clearParticles();
+        pSpawned = false;
+        pScrolled = false;
+      };
+      window.addEventListener('resize', onResizeParticles, { passive: true });
+      detachers.push(function () {
+        window.removeEventListener('resize', onResizeParticles);
+      });
     }
 
     // 🔴 Diagnostic surface. The gallery's state is entirely closure-local, which
@@ -2192,7 +2454,9 @@
         get pinEngaged() { return pinEngaged; },
         get loopArmed() { return loopArmed; },
         get bailOut() { return bailOut; },
-        get tickN() { return tickN; }
+        get tickN() { return tickN; },
+        get titleDone() { return titleDone; },
+        get pDiag() { return pDiag; }
       };
     }
 
@@ -2202,9 +2466,15 @@
       initLightbox();
       initDrag();
       initTitle();
+      initParticles();
     }
 
     function destroy() {
+      // Per-visit state like everything else here. `pSpawned` in particular must be reset,
+      // or the next page in a PJAX navigation would inherit a title that never disperses.
+      clearParticles();
+      pSpawned = false;
+      pScrolled = false;
       if (frameRequest) {
         window.cancelAnimationFrame(frameRequest);
         frameRequest = 0;
