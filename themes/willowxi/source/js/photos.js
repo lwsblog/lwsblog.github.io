@@ -179,10 +179,16 @@
     // background is already clearing through the whole second half — which is
     // what makes the two layers descend together instead of one after the other.
     var ACRYLIC_PEAK = 0.45;
-    // How much scroll the SUBSTITUTE blur spans: full strength at the top, gone
-    // by `ALT_RANGE` px. User picked "half the travel"; the travel is ~2440px at
-    // 1440x900, so 1200px. Overridable live with `window.__altRange`.
-    var ALT_RANGE = 1200;
+    // 🎛️ How much scroll the SUBSTITUTE blur spans: full strength at the top, gone by
+    // `ALT_RANGE` px. Overridable live with `window.__altRange`.
+    //
+    // 1200 (half the travel) was the first value, and it was wrong in a way that only
+    // shows up when you try to USE the page: the grid's first row lands around
+    // y = 1300-1500, so a 1200px ramp left a visible haze over the photographs while the
+    // visitor was scrolling back up to look at them — "不应该糊，不然我怎么看上面的图".
+    // At 500 the plate is completely clear by the time any cell is on screen, while the
+    // top is still fully frosted (which is the part that was asked for).
+    var ALT_RANGE = 500;
     // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
     // huge, which is the current brief). `window.__titleFrom` overrides it live.
     var TITLE_FROM = 1;
