@@ -182,12 +182,13 @@
     // 🎛️ How much scroll the SUBSTITUTE blur spans: full strength at the top, gone by
     // `ALT_RANGE` px. Overridable live with `window.__altRange`.
     //
-    // 1200 (half the travel) was the first value, and it was wrong in a way that only
-    // shows up when you try to USE the page: the grid's first row lands around
-    // y = 1300-1500, so a 1200px ramp left a visible haze over the photographs while the
-    // visitor was scrolling back up to look at them — "不应该糊，不然我怎么看上面的图".
-    // At 500 the plate is completely clear by the time any cell is on screen, while the
-    // top is still fully frosted (which is the part that was asked for).
+    // 1200 (half the travel) hazed the photographs while the visitor was scrolling up to
+    // look at them — "不应该糊，不然我怎么看上面的图". 500 measured clear at the position
+    // the user pointed at (y ≈ 1764).
+    //
+    // ⚠️ Do NOT read "从这里开始糊" as "shorten the ramp": what was reported next is that
+    // the blur arrives as a JUMP at the very top ("你那滑到顶上突然糊了"), which is a
+    // discontinuity, not a gradient length.
     var ALT_RANGE = 500;
     // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
     // huge, which is the current brief). `window.__titleFrom` overrides it live.
@@ -825,8 +826,18 @@
         // substitute at 0 the whole time — i.e. the haze the user was complaining about
         // was never the substitute at all, it was the opening's own frost outliving its
         // animation. "不应该糊，不然我怎么看上面的图".
+        // 🔴 NOT a switch. `altArmed ? altK : openTint` threw the plate away the instant
+        // the visitor crossed back above the landing: `altK` is 0 far from the top, so the
+        // tint fell from the opening's value straight to nothing in one frame — measured
+        // in the code path, `blurK` went from 0.73 to 0.28 the moment `altArmed` flipped.
+        // A value that drops discontinuously is read as "it suddenly changed", which is
+        // exactly what was reported ("到顶突然就糊了" / the earlier "上滑变成中间最黑").
+        //
+        // `max` cannot do that: it only ever rises, so the substitute can take the plate
+        // over smoothly and neither job can yank it away from the other. It also removes
+        // the need to reason about which one owns the plate at any given moment.
         var openTint = retired ? 0 : start * tailK;
-        var tintK = altArmed ? altK : openTint;
+        var tintK = Math.max(openTint, altK);
         acrylic.style.setProperty('--acrylic-k', tintK.toFixed(4));
         acrylic.style.setProperty('--acrylic-alt', altK.toFixed(4));
         // Same rule for the radius: it is the stronger of the two, but the opening's half
@@ -1305,13 +1316,17 @@
       // y=0) — exactly the "开屏不参与模糊" the user ruled out. The substitute belongs to
       // the trip BACK: down first, print retires, then up.
       //
-      // ⚠️ Compared against the point the print actually went away (`printRetiredAt`),
-      // NOT against `landScroll`. Those are two different scroll positions here: the
-      // retirement is decided from `smoothY` while this reads the raw `scrollY`, so the
-      // frame that retires runs at whatever the page had already scrolled to —
-      // measured 3808 against a landing of ~2440, which made the comparison永 false and
-      // left `alt` at 0 for the entire way back up.
-      if (printRetiredAt >= 0 && window.scrollY < printRetiredAt - 1) altArmed = true;
+      // 🔴 ONE arm point, and it lives in `render` (see there) — NOT here.
+      //
+      // This handler used to arm as well, against `printRetiredAt`. That value is the raw
+      // `scrollY` of the frame the print went away, and with a glide it can be a long way
+      // past the landing (measured 3808 against a landing of 2440) — so the flag flipped
+      // while the visitor was still far below the landing, i.e. while the opening's own
+      // tint was still large. The hard `altArmed ? altK : openTint` switch then dropped
+      // the plate's tint to nothing in a single frame, which is a visible snap.
+      //
+      // Arming from the scroll handler is also simply redundant: `render` runs every
+      // frame the page moves, so it cannot miss the crossing.
       if (window.scrollY >= pinLimit()) {
         engagePin();
         return;
