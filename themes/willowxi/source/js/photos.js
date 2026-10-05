@@ -194,6 +194,11 @@
     // that the approach reads as a jump rather than a build. The user's own landmark —
     // the landing — is the value.
     var ALT_RANGE = 1764;
+    // 🎛️ How far UP the page the ramp's start is pulled, in px. The user asked for the
+    // gradient to begin a little earlier than the landing ("渐变开始点再往上一点"), i.e. the
+    // frost should already be faintly present as they arrive rather than starting exactly
+    // there. `window.__altLift` overrides it live.
+    var ALT_LIFT = 200;
     // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
     // huge, which is the current brief). `window.__titleFrom` overrides it live.
     var TITLE_FROM = 1;
@@ -819,6 +824,12 @@
           var altRange = window.__altRange > 0
             ? window.__altRange
             : (landScroll > 0 ? landScroll : ALT_RANGE);
+          // 🎛️ `ALT_LIFT` pulls the START of the ramp UP the page by that many pixels, so
+          // the frost is already faintly present as the visitor arrives at the landing
+          // instead of only beginning there ("渐变开始点再往上一点"). `window.__altLift`
+          // overrides it live; 0 reproduces the landing-anchored version exactly.
+          var altLift = window.__altLift >= 0 ? window.__altLift : ALT_LIFT;
+          altRange = Math.max(1, altRange - altLift);
           altK = 1 - clamp01(Math.max(0, window.scrollY) / altRange);
         }
         // 🔴 The tint is EITHER the opening's OR the substitute's, never a blend.
