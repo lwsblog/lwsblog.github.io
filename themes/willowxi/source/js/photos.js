@@ -1268,6 +1268,13 @@
     }
 
     function onScroll() {
+      // 🔴 The dispersal is armed by ANY real scroll, not only by a wheel.
+      //
+      // `pScrolled` used to be set from the `wheel` listener, so a scrollbar drag, a
+      // keyboard scroll, or a programmatic `window.scrollBy` produced nothing at all —
+      // which is exactly what a probe (or a visitor using the scrollbar) does. The scroll
+      // event covers every one of those.
+      pScrolled = true;
       // 🔴 The pin is checked HERE, on the event, not inside the animation frame.
       // render() only runs on the first frame after a burst of scroll events
       // (`frameRequest` coalesces them), so a check living there never fired for
@@ -2357,6 +2364,13 @@
     function spawnParticles() {
       var pts = sampleTitle();
       if (!pts || !resizeParticleCanvas()) return false;
+      // 🔴 Too few points is not a dispersal, it is litter.
+      //
+      // The sampler can legitimately come back with a handful of pixels — the title still
+      // mid-type, or the face resolved differently — and dissolving the glyphs for five
+      // squares reads as "我只看到一点点粒子" with the heading gone for no visible reason.
+      // Below this threshold the title stays put and nothing is spent.
+      if (pts.length < 60) return false;
       var size = window.__pSize > 0 ? window.__pSize : P_SIZE;
       pParticles = pts.map(function (p) {
         return {
@@ -2396,7 +2410,16 @@
         alive++;
       }
       pCtx.globalAlpha = 1;
-      if (!alive) clearParticles();
+      if (!alive) {
+        clearParticles();
+        // 🔴 Ready to disperse again on the next scroll.
+        //
+        // Leaving `pSpawned` true made the effect once-per-visit, so any later scroll had
+        // nothing to show and the feature looked broken after the first moment. The title
+        // is re-drawn by `startTyping` on the way back up, so re-arming here is what lets
+        // each downward scroll produce a dispersal.
+        pSpawned = false;
+      }
     }
 
     // Driven from `tick` with that frame's delta, so it shares the gallery's single rAF
@@ -2425,6 +2448,14 @@
         try {
           pDiag.spawnOk = spawnParticles() ? 1 : 0;
           pDiag.samples = pParticles ? pParticles.length : 0;
+          // 🔴 The GLYPHS dissolve too, they do not just shed particles.
+          //
+          // Without this the title stayed perfectly legible while squares drifted off it,
+          // so the effect read as "a few dots leaving an intact heading" rather than as the
+          // words coming apart — the user's "我只看到一点点粒子，并且字没有消失". The two have
+          // to go together: the pixels that become particles are exactly the pixels that
+          // stop being text.
+          dissolveTitle();
         } catch (e) { pDiag.err = String(e); }
       }
       if (!pParticles) return;
@@ -2448,11 +2479,27 @@
       }
     }
 
+    // The glyphs fade as their own pixels leave. Kept as one function so the two can never
+    // drift apart: the swarm and the text are the same material.
+    function dissolveTitle() {
+      if (!mastTitle) return;
+      if (!mastTitle.style.transition) {
+        mastTitle.style.transition = 'opacity 260ms linear';
+      }
+      mastTitle.style.opacity = '0';
+    }
+
     // The re-type throws the swarm away, so the title comes back clean.
     function clearParticles() {
       pParticles = null;
       if (pCtx) pCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
       if (particleCanvas) particleCanvas.hidden = true;
+      // The text comes back in step with the particles going away. `initTitle` also calls
+      // this, so a hard load can never inherit a faded-out title.
+      if (mastTitle) {
+        mastTitle.style.transition = '';
+        mastTitle.style.opacity = '';
+      }
     }
 
     // 🔴 Its OWN listener, not a line inside `onWheel`.
