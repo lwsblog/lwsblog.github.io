@@ -199,6 +199,19 @@
     // frost should already be faintly present as they arrive rather than starting exactly
     // there. `window.__altLift` overrides it live.
     var ALT_LIFT = 200;
+    // 🎛️ THE TITLE'S FADE — how the heading leaves on the way down.
+    //
+    // It fades with the SCROLL, not on a timer: the visitor's own movement is what dissolves
+    // it, so it is always mid-fade exactly where they are and there is no state to drift.
+    // `TITLE_FADE_FROM` is where the fading starts and `TITLE_FADE_TO` where the text is
+    // gone, both as a fraction of the travel (`landScroll`), so the shape holds on every
+    // viewport. On the way back up the same curve runs in reverse and re-typing takes over
+    // once the visitor is far enough up (see `tickTitle`).
+    //
+    // ⚠️ This must be driven by `window.scrollY` and not by `smoothY`: `t` is smoothed, so
+    // using it would make the fade lag the scroll and finish after the visitor stopped.
+    var TITLE_FADE_FROM = 0.05;
+    var TITLE_FADE_TO = 0.45;
     // 🎛️ Where the title starts flying to its corner. 1 = never (it stays centred and
     // huge, which is the current brief). `window.__titleFrom` overrides it live.
     var TITLE_FROM = 1;
@@ -669,6 +682,17 @@
         var my = titleSettled ? 0 : lerp(mastFrom.y, mastTo.y, titleT);
         masthead.style.transform = 'translate(' + mx + 'px, ' + my + 'px) scale(' + mScale + ')';
         masthead.style.setProperty('--mast-s', mScale.toFixed(4));
+        // 🔴 The heading FADES OUT with the scroll, and is invisible from `TITLE_FADE_TO`
+        // onward.
+        //
+        // ⚠️ Faded, never `display:none` / `visibility:hidden`: the masthead still has a
+        // text-shadow, and the halo is painted from the same box the glyphs are. Hiding the
+        // element would take the halo with it and make the departure a cut; opacity keeps
+        // the shadow fading in step with the text it belongs to.
+        //
+        // 🎛️ Skipped while the typewriter is running (`titlePlaying`) — the reveal owns the
+        // title's appearance until it finishes, and afterwards the opacity is 0 anyway.
+        if (!titlePlaying) setTitleOpacity();
         if (mastLabel) mastLabel.style.opacity = String(1 - segment(t, 0.04, 0.26));
         if (mastSub) mastSub.style.opacity = String(1 - segment(t, 0.04, 0.26));
       }
@@ -2005,7 +2029,36 @@
       window.addEventListener('pointercancel', endDrag);
     }
 
-    /* ---- 5. the title: typewriter + cursor ------------------------------ */
+    /* ---- 5. the title: typewriter + cursor + scroll fade ---------------- */
+
+    // 🔴 The heading's opacity as a function of WHERE THE PAGE IS.
+    //
+    // Called from `render` every frame with the RAW scroll position, so the text dissolves
+    // exactly as far as the visitor has travelled and never on a timer of its own. On the way
+    // back up the same curve restores it, and once they are high enough `tickTitle` re-types
+    // it — together that is "下滑渐隐消失，上滑重新打字".
+    //
+    // ⚠️ It writes `opacity`, never a display/visibility change, because the title carries a
+    // text-shadow: the halo is painted from the same box as the glyphs, so hiding the element
+    // would take the halo with it and the departure would read as a cut rather than a fade.
+    //
+    // ⚠️ `window.scrollY`, not the smoothed `t`: `t` chases the scroll, so driving the fade
+    // from it would make the text finish dissolving after the visitor had already stopped.
+    function setTitleOpacity() {
+      if (!mastTitle) return;
+      var from = window.__titleFadeFrom >= 0 ? window.__titleFadeFrom : TITLE_FADE_FROM;
+      var to = window.__titleFadeTo > from ? window.__titleFadeTo : TITLE_FADE_TO;
+      var range = landScroll > 0 ? landScroll : scrollRange;
+      var a = 1 - clamp01((window.scrollY / Math.max(1, range) - from) / (to - from));
+      if (a < 0) a = 0;
+      if (a > 1) a = 1;
+      // A short transition smooths the pixels a coarse wheel notch jumps in one go; without
+      // it the fade can step visibly.
+      if (!mastTitle.style.transition) {
+        mastTitle.style.transition = 'opacity 120ms linear';
+      }
+      mastTitle.style.opacity = a.toFixed(4);
+    }
 
     // 🔴 The title TYPES itself in, at the user's request.
     //
@@ -2047,6 +2100,12 @@
       var full = mastTitle.getAttribute('data-full');
       if (!full) return;
       mastTitle.textContent = '';
+      // 🔴 The scroll fade leaves the heading at opacity 0, so the re-type must clear it or
+      // the visitor types into an invisible element. `render` skips the fade while
+      // `titlePlaying` is true, so this value stands for the whole reveal; the fade writes
+      // it again the moment the typing finishes.
+      mastTitle.style.transition = '';
+      mastTitle.style.opacity = '';
       if (!titleCaret) {
         titleCaret = document.createElement('span');
         titleCaret.className = 'photo-masthead__caret';
