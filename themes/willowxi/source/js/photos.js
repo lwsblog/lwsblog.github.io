@@ -641,25 +641,22 @@
         var mScale = lerp(mastFrom.scale, mastTo.scale, titleT);
         var mx = lerp(mastFrom.x, mastTo.x, titleT);
         if (titleSettled) {
-          // Anchored to the viewport at the moment of the re-type; `- scrollY` then
-          // makes it ride the page like a placed object. Deliberately the OPENING
-          // scale, per "标题就是巨大，不缩小".
+          // Anchored to the viewport at the moment of the re-type. Deliberately the
+          // OPENING scale, per "标题就是巨大，不缩小".
           mx = 0;
         }
-        // 🔴 The vertical offset follows the SCROLL, the horizontal one does not — and the
-        // sign is MINUS.
+        // 🔴 The title does NOT follow the scroll any more.
         //
-        // "跟随滚动上下位移" = the title should ride UP the screen as the page scrolls
-        // down, like something standing on the document rather than pinned to the
-        // viewport. `masthead` is `position: fixed`, so nothing moves it on its own; the
-        // transform has to cancel the scroll, which is `- scrollY`. Written as `+` it
-        // drove the title DOWN the screen while the page scrolled up — the user's
-        // "初次下滑的时候为什么标题往下跑了".
+        // It did (`- scrollY`, so it rode up the screen like a placed object), and the
+        // user rejected it: "第一次下滑的时候标题不应该上去，应该是飘散的，虽然还没做但是
+        // 不能随滚轮上去". The travel's job here is to take the title AWAY — the particle
+        // dispersal that replaces it is still to be built — so riding the page was the
+        // wrong half of the idea.
         //
-        // `mastFrom.x` is deliberately left alone: the title's centring must not drift
-        // sideways.
-        var my = (titleSettled ? 0 : lerp(mastFrom.y, mastTo.y, titleT))
-          - (titleT === 0 ? window.scrollY : 0);
+        // ⚠️ The particle stage will need a position again, and it should read this
+        // element's viewport rect rather than reintroduce a scroll term here: the
+        // dispersal starts from where the glyphs are, and that is a screen position.
+        var my = titleSettled ? 0 : lerp(mastFrom.y, mastTo.y, titleT);
         masthead.style.transform = 'translate(' + mx + 'px, ' + my + 'px) scale(' + mScale + ')';
         masthead.style.setProperty('--mast-s', mScale.toFixed(4));
         if (mastLabel) mastLabel.style.opacity = String(1 - segment(t, 0.04, 0.26));
