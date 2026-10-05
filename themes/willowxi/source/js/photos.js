@@ -2002,24 +2002,20 @@
       var i = 0;
       var speed = window.__typeSpeed > 0 ? window.__typeSpeed : TYPE_SPEED;
       var n = full.length;
-      // 🔴 FROM THE MIDDLE OUTWARDS, and centred at every step.
+      // 🔴 LEFT TO RIGHT — an ordinary typewriter. NOT a symmetric reveal.
       //
-      // A left-to-right reveal (`full.slice(0, i)`) grows the line to the right, so the
-      // visitor reads the title as "fixed somewhere and being written" — the user's
-      // "不是字固定好位置从左到右依次显现". Growing the run symmetrically about its own
-      // midpoint makes each state a centred substring, which is the "从中间冒出来" they
-      // asked for; the CSS keeps the line centred in the viewport (`text-align: center`
-      // on a full-width masthead), so the visual centre never moves.
+      // The previous version grew the run about its own midpoint (taking a centred
+      // substring each step), which I built from "字从中间冒出来". That was the wrong
+      // reading and the user corrected it precisely: the reveal order is plain
+      // left-to-right, and the CENTRED LOOK comes from the line box, not from the
+      // substring — each prefix is centred on screen, so `W`, `Wi`, `Wil` … all sit in
+      // the middle while growing rightwards. "不是两边同时打，就是从左往右打，只不过中对齐".
       //
-      // Alternating which side grows by one keeps the two halves within one character of
-      // each other, and the odd step takes its extra character on the right so the run
-      // stays centred on the same pixel.
+      // The centring is CSS's job (`text-align: center` on the full-width masthead) and
+      // needs nothing from here.
       titleTimer = window.setInterval(function () {
         i++;
-        var left = Math.floor(i / 2);
-        var right = i - left;
-        var start = Math.max(0, Math.floor((n - right - left) / 2));
-        mastTitle.textContent = full.slice(start, start + left + right);
+        mastTitle.textContent = full.slice(0, i);
         // Re-inserted each step: the caret must stay last, and `textContent` would
         // otherwise wipe it.
         mastTitle.appendChild(titleCaret);
