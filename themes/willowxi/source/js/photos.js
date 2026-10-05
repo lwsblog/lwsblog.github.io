@@ -2508,8 +2508,15 @@
       // within 600ms while the visitor was still reading the title — by the time they
       // scrolled there was nothing left to push, and the canvas had hidden itself.
       // Waiting for a scroll also matches what the effect is FOR: "下滑的时候随滚轮飘散".
-      if (!pSpawned && titleDone && pScrolled) {
-        pSpawned = true;
+      // 🔴 `pParticles` IS the guard — not a separate `pSpawned` flag.
+      //
+      // Using a flag here was the bug that made the whole feature vanish: `clearParticles`
+      // nulls `pParticles` but left `pSpawned` true, so `!pSpawned` was false for ever and
+      // NO swarm could ever be built again. The canvas stayed hidden and the page showed a
+      // dissolved title over nothing — measured `alive=0` at every sample, with the title
+      // opacity already 0. "One dispersal at a time" is exactly what `pParticles === null`
+      // already means, and unlike a flag it cannot get out of step with the swarm itself.
+      if (!pParticles && titleDone && pScrolled) {
         pDiag.spawned++;
         try {
           pDiag.spawnOk = spawnParticles() ? 1 : 0;
