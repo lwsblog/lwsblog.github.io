@@ -30,7 +30,19 @@
      untouched. -->
 <div class="photo-masthead" data-photo-masthead>
   <span class="photo-masthead__label" data-photo-mast-label>CONTACT SHEET</span>
-  <h1 class="photo-masthead__title" data-photo-mast-title><%= page.title %></h1>
+  <!-- 🔴 `style="visibility:hidden"` is INLINE on purpose, and it is not the same job as
+       the CSS rule that hides this title (see willowxi.css).
+
+       The CSS rule covers the window after the stylesheet loads but BEFORE photos.js is
+       injected — the gallery waits for the screen image, measured 3-4s on a cold load,
+       and without it the server-rendered title sat on screen in its plain resting state
+       (left-aligned, top-left) and then vanished and re-typed. This inline attribute
+       covers the earlier window still: the gap between the HTML being PARSED and the
+       stylesheet being APPLIED, during which the title would otherwise paint with
+       default styles (measured: visible at centre x=135 at 400ms).
+
+       With JS off nothing would ever clear it, so `noscript` in the head puts it back. -->
+  <h1 class="photo-masthead__title" data-photo-mast-title style="visibility:hidden"><%= page.title %></h1>
   <p class="photo-masthead__sub" data-photo-mast-sub>
     <%= photos.length %> FRAMES / <%= landscape %> LANDSCAPE / <%= photos.length - landscape %> PORTRAIT
   </p>

@@ -2110,6 +2110,9 @@
       // while this script is still loading (see the CSS note). From here the
       // typewriter is the only thing that puts characters on screen.
       masthead.classList.add('is-ready');
+      // Clears the inline `visibility:hidden` that the server-rendered title carries
+      // (see photos.ejs); the class above is what the stylesheet keys off.
+      mastTitle.style.visibility = '';
     }
 
     // 🔴 Diagnostic surface. The gallery's state is entirely closure-local, which

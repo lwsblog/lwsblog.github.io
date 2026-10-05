@@ -45,4 +45,10 @@
 
   <link rel="icon" type="image/svg+xml" href="<%- url_for(favicon) %>">
   <link rel="stylesheet" href="<%- url_for('/css/willowxi.css') %>?v=<%- Date.now() %>">
+  <!-- The album title ships with inline `visibility:hidden` so it cannot flash in its
+       plain resting state before the typewriter takes it over (see photos.ejs). Without
+       JS nothing would clear that attribute, so put it back here. -->
+  <noscript>
+    <style>.photo-masthead__title { visibility: visible !important; }</style>
+  </noscript>
 </head>
