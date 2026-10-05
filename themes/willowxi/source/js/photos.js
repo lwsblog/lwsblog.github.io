@@ -239,6 +239,8 @@
     // callback can run at most once per page and never after a PJAX navigation.
     var hasReseat = false;
     var frameRequest = 0;
+    // "the chase still has distance to cover" — see the note in step().
+    var bailOut = false;
     var detachers = [];
 
     /* ---- 1. the screen ------------------------------------------------- */
@@ -1327,11 +1329,12 @@
       // 720, and the frame counter stopped dead at 3 — which is the "惯性动画没了" and,
       // because the print never reaches its cell, feeds the disappearance reports too.
       //
-      // `stepPending` is the truth about "is a frame already queued"; `frameRequest` is
-      // only ever the handle used to cancel it. `step()` clears the flag when it runs.
-      if (stepPending) return;
-      stepPending = true;
-      frameRequest = window.requestAnimationFrame(step);
+      // 🔴 Just POKE the loop. It drives itself now (see `tick`), so this must not
+      // schedule a frame of its own — doing that alongside the loop's own re-arm is
+      // what produced two interleaved runners sharing one handle, and whichever one
+      // finished first orphaned the other. A scroll event can also arrive several times
+      // per frame, so `step()` coalesces internally.
+      step();
     }
 
     // Measured step size for the chase, in units of the remaining distance per
@@ -1402,10 +1405,27 @@
     var GLIDE = 180;
     var SPEED = 26000;
     var lastStepAt = 0;
-    function step() {
-      frameRequest = 0;
-      stepPending = false;
-      if (pinEngaged) return;               // the print is retired; nothing to animate
+    // 🔴 ONE SELF-DRIVEN LOOP, always armed — not a chase started by scroll events and
+    // continued by its own tail.
+    //
+    // Both of those designs failed on the live site, and each failure was invisible
+    // until a probe ran. Tail-continued: the chain died and left `smoothY` stranded
+    // (measured 269 against a `scrollY` of 900, and still 269 two seconds later).
+    // Scroll-driven: the animation's frame rate became the scroll-EVENT rate, so the
+    // print trailed hundreds of pixels behind the page.
+    //
+    // This loop cannot be orphaned — it re-arms itself unconditionally — so `onScroll`
+    // only has to poke it, and a coalesced scroll event costs one frame of latency and
+    // nothing more. A parked tab costs one empty frame per refresh, which is far
+    // cheaper than the class of bug it removes.
+    var loopArmed = false;
+    var tickN = 0;
+    function tick() {
+      if (!loopArmed || pinEngaged) return;
+      tickN++;
+      // `performance.now()` rather than the rAF timestamp: `step()` can run this
+      // synchronously to save a frame of latency, and mixing the two clocks gives a
+      // negative `dt`.
       var now = performance.now();
       var dt = lastStepAt ? Math.min(64, now - lastStepAt) : 16;
       lastStepAt = now;
@@ -1438,11 +1458,22 @@
       var t = clamp01(smoothY / scrollRange);
       if (settings.onProgress) settings.onProgress(t);
       render(t);
-      if (smoothY !== target) {
-        stepPending = true;
-        frameRequest = window.requestAnimationFrame(step);
+      bailOut = smoothY !== target;
+      if (!bailOut) lastStepAt = 0;
+      frameRequest = window.requestAnimationFrame(tick);
+    }
+
+    // The single entry point. Starts the loop, then runs one frame immediately so a
+    // scroll is reflected in the same task rather than a frame later. Several scroll
+    // events inside one frame simply cost a few extra ticks, which is harmless: `tick`
+    // re-reads `window.scrollY` each time and converges on the same answer.
+    function step() {
+      if (!loopArmed) {
+        loopArmed = true;
+        lastStepAt = 0;
+        frameRequest = window.requestAnimationFrame(tick);
       }
-      else { lastStepAt = 0; }
+      tick();
     }
 
     function onResize() {
@@ -1478,6 +1509,20 @@
         done = true;
         settle();
       }
+      // 🔴 A SUCCESSFUL LOAD MUST DISARM THE BACKSTOP.
+      //
+      // Only `error` was wired, so the 6s timer below fired unconditionally whether or
+      // not the photograph arrived: a successful load never cleared `done`, `settle()`
+      // ran anyway, and `retired` was latched true — the print hidden at y=0 with
+      // `landScroll` still thousands of pixels away. Measured on the live site: at the
+      // very first sampled frame, `retired: true, printRetiredAt: -1` while
+      // `smoothY` was 0. That is exactly "首页加载好之后屏风自动消失了字自动变糊".
+      //
+      // It also explains why the symptom moved around — it was a race against a 6s
+      // timer, so a fast connection never showed it and a slow one always did.
+      screenImg.addEventListener('load', function () {
+        done = true;
+      }, { once: true });
       screenImg.addEventListener('error', bail, { once: true });
       // Backstop for a request that hangs without erroring.
       window.setTimeout(bail, 6000);
@@ -2023,7 +2068,19 @@
       // 🔴 The threshold is in VIEWPORT TERMS: "上滑到一半" means half the SCREEN, so it
       // is `0.5 * innerHeight` of scroll remaining. Using a fraction of `landScroll`
       // would mean a different physical point on every layout and on every landing cell.
-      var reTypeBelow = Math.round(landScroll) - Math.round(size.height * TITLE_AT);
+      // 🔴 `window.innerHeight`, NOT `size.height`.
+      //
+      // `size` is a LOCAL of `measure()` (`var size = viewport()`), so it does not exist
+      // out here — and because this runs inside `render`, the resulting
+      // `ReferenceError: size is not defined` was thrown EVERY FRAME from inside `tick()`,
+      // before it could schedule the next frame. That killed the animation loop outright:
+      // measured, the tick counter stopped at 3 and `smoothY` froze 631px short of the
+      // scroll position. Nothing appeared in the console unless the probe subscribed to
+      // `Runtime.exceptionThrown`, which is exactly why it survived several rounds of
+      // "looks fine to me".
+      //
+      // `innerHeight` also matches the intent: "上滑到一半" is half the SCREEN.
+      var reTypeBelow = Math.round(landScroll) - Math.round(window.innerHeight * TITLE_AT);
       if (!titleReTyped && printRetiredAt >= 0 && window.scrollY <= reTypeBelow) {
         titleReTyped = true;
         titleSettled = true;
@@ -2072,7 +2129,15 @@
         get titleSettled() { return titleSettled; },
         get titleReTyped() { return titleReTyped; },
         get titleArmed() { return titleArmed; },
-        get landing() { return landingFrame ? landingFrame.getAttribute('data-id') : null; }
+        get landing() { return landingFrame ? landingFrame.getAttribute('data-id') : null; },
+        // The flags the animation loop depends on. A loop that has silently stopped is
+        // invisible from outside — `loopArmed` says whether it is still armed, `tickN`
+        // whether it is actually advancing, and `bailOut` whether the chase has work
+        // left. Between them they answer "is it running" without guessing.
+        get pinEngaged() { return pinEngaged; },
+        get loopArmed() { return loopArmed; },
+        get bailOut() { return bailOut; },
+        get tickN() { return tickN; }
       };
     }
 
@@ -2089,7 +2154,8 @@
         window.cancelAnimationFrame(frameRequest);
         frameRequest = 0;
       }
-      stepPending = false;
+      loopArmed = false;
+      bailOut = false;
       detachers.forEach(function (fn) { fn(); });
       detachers = [];
       closeLightbox();
