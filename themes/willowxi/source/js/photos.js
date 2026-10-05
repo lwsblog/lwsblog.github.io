@@ -2453,7 +2453,19 @@
         p.y += p.vy * (dt / 1000) + 24 * (dt / 1000);   // a slight settle, like dust
         p.life -= dt / life;
         if (p.life <= 0) continue;
-        p.a = Math.max(0, Math.min(1, p.life));
+        // 🔴 HOLD at full strength, then fade — do not ramp down from the first frame.
+        //
+        // `p.a = p.life` meant a particle was already at ~0.5 alpha by the time anyone could
+        // see it and faded continuously from there, so the swarm was a translucent ghost of
+        // the heading no matter how many particles there were. Measured on the real browser:
+        // 8256 particles alive, canvas showing the letterforms, and the screenshot read as
+        // "the title at 8% opacity" because every square was half-transparent.
+        //
+        // Holding at 1 for the first 55% of the life is what makes the dispersal read as the
+        // text being REPLACED by its own pixels: for that stretch the words are simply there,
+        // made of squares, and only then do they dissolve.
+        var fadeFrom = 0.55;
+        p.a = p.life > fadeFrom ? 1 : Math.max(0, p.life / fadeFrom);
         // Squares, not circles: at this size a dot reads as a smudge and the swarm looks
         // soft, which is the opposite of "come apart".
         pCtx.globalAlpha = p.a;
