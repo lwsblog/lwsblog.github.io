@@ -842,10 +842,16 @@
     //   高度同理，取两者中更紧的那个（这样才能两个方向都盖住）。
     //   而 d = 1 - r（朝外看时面前那面墙的距离）。
     function zoomToFill(p) {
-      var ar = matteAR(p.ratio);
+      // 🔴 用**照片**的尺寸，不是相纸的尺寸。
+      //
+      // 用户："谁要看相纸白边了？？？"。相纸白边只属于墙上；开屏与聚焦应该是照片
+      // 本身铺满视口。用相纸尺寸算的话，白边正好卡在画面里 —— 所以这里按照片算，
+      // 白边就被推到视口之外。
+      //   相纸宽 = 照片宽 * (1 + 2*BORDER)  ->  照片宽 = matteWorld / (1 + 2*BORDER)
+      var photoW = matteWorld / (1 + 2 * MATTE_BORDER);
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
-      var dw = focal * matteWorld / Math.max(1, W);
-      var dh = focal * (matteWorld / ar) / Math.max(1, H);
+      var dw = focal * photoW / Math.max(1, W);
+      var dh = focal * (photoW / p.ratio) / Math.max(1, H);
       var d = Math.min(dw, dh);
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
