@@ -852,7 +852,10 @@
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
       var dw = focal * photoW / Math.max(1, W);
       var dh = focal * (photoW / p.ratio) / Math.max(1, H);
-      var d = Math.min(dw, dh);
+      // 再乘 0.93：让照片**略微盖过**视口。CSS 的百分比内边距是按相纸自身宽高算
+      // 的，和我这里按照片宽算的白边并不严格相等；留一点余量才能保证白边一定在
+      // 画面之外，而不是露出几像素。
+      var d = Math.min(dw, dh) * 0.93;
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
       var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);

@@ -5556,7 +5556,10 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
 }
 [data-dome-matte] .win {
   position: absolute;
-  inset: 5.5% 5.5% 14%;
+  /* 🔴 四边必须均匀。原来底部留 14%（放角标），而 zoomToFill 是按均匀白边
+     反算距离的 —— 于是聚焦/开屏时照片按均匀边铺满，底部那 14% 就把
+     相纸白边露出来了（用户："你这下面不是还有白边吗"）。 */
+  inset: 5.5%;
   background: #0b0d12;
   display: grid;
   place-items: center;
@@ -5570,7 +5573,7 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
 [data-dome-matte] .cap {
   position: absolute;
   left: 7%;
-  bottom: 3%;
+  bottom: 1.2%;
   font-size: 8.5px;
   color: #6b7280;
   letter-spacing: 0.16em;
