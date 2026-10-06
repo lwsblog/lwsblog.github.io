@@ -180,6 +180,13 @@
     '  float w = uDegPerPx * px;',
     '  return 1.0 - smoothstep(w * 0.35, w * 1.15, d);',
     '}',
+    // 光晕掩码：从线心到 w 平滑衰减（平方），是一圈光而不是一条粗线。
+    'float glowMask(float v, float st, float px) {',
+    '  float d = abs(fract(v / st + 0.5) - 0.5) * st;',
+    '  float w = uDegPerPx * px;',
+    '  float k = 1.0 - smoothstep(0.0, w, d);',
+    '  return k * k;',
+    '}',
     // Sweep: continuous, no banding. A core plus a halo, both smooth.
     'float profile(float u) {',
     '  if (u <= 0.0 || u >= 1.0) return 0.0;',
@@ -218,10 +225,13 @@
     // 之前只把线本身加亮加粗，用户仍然说"看不见光晕" —— 因为那读起来只是几条
     // 亮线，没有"光"。原站的光晕是 5 层逐级加宽的描边。这里等价的做法：再算一层
     // **宽得多、也淡得多**的线掩码（8px），只乘扫光强度，于是每条线外面都有一圈晕。
-    '  float halo = max(lineMask(lat, uLatStep, 9.0), lineMask(lon, uLonStep, 9.0));',
-    '  col += uSweepRGB * halo * sw * uSweepA * 0.30;',
-    '  float halo2 = max(lineMask(lat, uLatStep, 20.0), lineMask(lon, uLonStep, 20.0));',
-    '  col += uSweepRGB * halo2 * sw * uSweepA * 0.10;',
+    // 光晕必须**从线向外平滑衰减**，否则只是"线变粗"。
+    // lineMask 的衰减 smoothstep(w*0.35, w*1.15, d) 很硬，给大了就是一坨均匀粗线。
+    // 用单独的 glowMask（平方衰减 + 大半径）才是一圈光。
+    '  float haloA = max(glowMask(lat, uLatStep, 26.0), glowMask(lon, uLonStep, 26.0));',
+    '  col += uSweepRGB * haloA * sw * uSweepA * 0.55;',
+    '  float haloB = max(glowMask(lat, uLatStep, 70.0), glowMask(lon, uLonStep, 70.0));',
+    '  col += uSweepRGB * haloB * sw * uSweepA * 0.22;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
     // 是只有网格线发亮"。去掉这一项。
@@ -578,12 +588,12 @@
         // 预模糊：画进离屏画布并做一次真正的高斯模糊，再上传这张模糊图。
         // 半径给足（相对一张 640px 宽的缩略图），目的是把平铺的重影彻底糊成色块，
         // 而不是留下一堆可辨认的糊影。
-        var bw = 640;
+        var bw = 1024;
         var bh = Math.max(1, Math.round(bw * wall.naturalHeight / wall.naturalWidth));
         var off = document.createElement('canvas');
         off.width = bw; off.height = bh;
         var octx = off.getContext('2d');
-        octx.filter = 'blur(14px)';
+        octx.filter = 'blur(7px)';
         // 多画一圈，模糊后边缘才不会透
         octx.drawImage(wall, -24, -24, bw + 48, bh + 48);
         octx.filter = 'none';
