@@ -5518,7 +5518,16 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
   background: #090b0f;
   overflow: hidden;
 }
+[data-dome-wall] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  z-index: 0;                /* WebGL 壁纸层在下 */
+}
 [data-dome-canvas] {
+  z-index: 1;                /* 2D 网格与扫光在上，本身透明 */
   position: absolute;
   inset: 0;
   display: block;

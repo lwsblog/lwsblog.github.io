@@ -171,7 +171,7 @@
       document.body.appendChild(host);
       host.hidden = false;
       var s = document.createElement('script');
-      s.src = '<%- url_for("/js/dome.js") %>';
+      s.src = '<%- url_for("/js/dome3d.js") %>';
       s.async = true;
       s.onload = function () {
         if (!window.WillowXIDome) return;
