@@ -655,8 +655,17 @@
     // 开场要怼着拍的那张：直接从已经排布好的相纸里随机挑一张（它有经纬度，
     // 相机对着它就行）。不再自己去翻 DOM、拼图片地址。
     function pickOpeningPhotoEntry() {
-      if (!photos.length) return null;
-      return photos[Math.floor(Math.random() * photos.length)];
+      // 🔴 只挑**横屏**图。
+      //
+      // 用户："开屏图不要选竖屏图"。竖片铺满横屏视口会被裁掉上下大半，开场第一眼
+      // 就只剩中间一条，很难看。
+      var land = [];
+      for (var i = 0; i < photos.length; i++) {
+        if (photos[i].ratio >= 1.15) land.push(photos[i]);
+      }
+      var pool = land.length ? land : photos;
+      if (!pool.length) return null;
+      return pool[Math.floor(Math.random() * pool.length)];
     }
 
     function setOpenTitle(txt) {
@@ -715,7 +724,8 @@
         camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
         flyFrom = null;
-        zoom = target = 0.80;      // 贴到墙上，画面里只有这张
+        // 刚好盖满视口，不怼到边角浪费（见 zoomToFill）
+        zoom = target = zoomToFill(pick);
       }
       startTypingOpen();
     }
@@ -819,8 +829,28 @@
       // "聚焦"之后画面里还是一堆小相纸。
       // 朝外看之后，相机就坐在照片所在的这一侧，正对看它即可。
       animateCameraTo(p.lon, p.lat, ms || 900);
-      // 靠近到能看清：0.62 大约是"一张照片占满视口"的距离
-      target = 0.62;
+      // 按相纸实际尺寸算"刚好盖满"的缩放（见 zoomToFill）
+      target = zoomToFill(p);
+    }
+
+    // 🎯 让某张相纸**刚好盖满视口**的缩放值。
+    //
+    // 用户："不要拉的太近浪费了边角……铺满整个屏幕就行"。之前把 target 固定成 0.62 /
+    // 0.80，是拍脑袋的常数：竖片会溢出上下、横片会溢出左右，边角白白浪费。
+    // 正确做法是按相纸的真实世界尺寸反算距离：
+    //   屏幕宽度 = focal * 世界宽 / d   ->   要 >= 视口宽  ->  d <= focal*世界宽/视口宽
+    //   高度同理，取两者中更紧的那个（这样才能两个方向都盖住）。
+    //   而 d = 1 - r（朝外看时面前那面墙的距离）。
+    function zoomToFill(p) {
+      var ar = matteAR(p.ratio);
+      var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
+      var dw = focal * matteWorld / Math.max(1, W);
+      var dh = focal * (matteWorld / ar) / Math.max(1, H);
+      var d = Math.min(dw, dh);
+      var r = Math.max(0, Math.min(R_IN, 1 - d));
+      // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
+      var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
+      return Math.max(0, Math.min(1, z));
     }
 
     function leaveFocus() {
