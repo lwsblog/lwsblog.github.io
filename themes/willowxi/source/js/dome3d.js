@@ -42,6 +42,8 @@
 
   // 与站上一致的色值
   var INK = [0.035, 0.043, 0.059];
+  // 亚克力色罩，取自站上 --scene-acrylic: rgba(9,11,15,0.64)
+  var ACRYLIC = [9 / 255, 11 / 255, 15 / 255, 0.64];
   var GRID_RGB = [196 / 255, 224 / 255, 236 / 255];
   var GRID_A = 0.5;
   var SWEEP_RGB = [214 / 255, 240 / 255, 255 / 255];
@@ -159,6 +161,7 @@
     'uniform float uDegPerPx;',
     'uniform float uDebug;',
     'uniform vec3 uGridRGB, uSweepRGB, uInk;',
+    'uniform vec4 uAcrylic;',
     'varying float vLat;',
     'varying float vLon;',
     'varying vec2 vUV;',
@@ -186,17 +189,29 @@
     '  vec3 nrm = normalize(vPos);',
     '  float lat = degrees(asin(clamp(nrm.y, -1.0, 1.0)));',
     '  float lon = degrees(atan(nrm.x, nrm.z));',
-    // 壁纸模糊：9 抽头盒式。原站那层壁纸是 46px 模糊，而穹顶的壁纸是清晰贴图；
-    // 不糊就成了一张高清插画墙，与站上其它页面观感对不上。NPOT 纹理没有 mipmap，
-    // 所以在 UV 空间按环状偏移采样。
+    // 🔴 亚克力（acrylic），不是普通图像模糊。
+    //
+    // 用户："你这壁纸是什么模糊我要的是亚克力模糊"。原站那层是：壁纸 46px 重模糊
+    // **再叠一层亚克力色罩**（--scene-acrylic: rgba(9,11,15,.64)），所以它读起来
+    // 是磨砂玻璃，而不是"一张糊掉的画"。
+    //
+    // 这里做同样两件事：
+    //   1) 16 抽头双环采样，半径够大才是"磨砂"而不是"柔化"
+    //   2) 再往亚克力色混一层
+    // NPOT 纹理没有 mipmap，只能靠多次采样。
     '  vec4 w = vec4(0.0);',
-    '  for (int bi = 0; bi < 8; bi++) {',
-    '    float ang = float(bi) * 0.785398;',
-    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang), sin(ang)) * 0.010));',
+    '  for (int bi = 0; bi < 12; bi++) {',
+    '    float ang = float(bi) * 0.523599;',
+    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang), sin(ang)) * 0.030));',
     '  }',
-    '  w += texture2D(uTex, fract(vUV));',
-    '  w /= 9.0;',
-    '  col = mix(col, w.rgb, w.a * uWallA);',
+    '  for (int bj = 0; bj < 4; bj++) {',
+    '    float ang2 = float(bj) * 1.570796;',
+    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang2), sin(ang2)) * 0.070));',
+    '  }',
+    '  w /= 16.0;',
+    // 亚克力色罩：把磨砂后的壁纸再往亚克力色拉一层，得到磨砂玻璃的乳白感。
+    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
+    '  col = mix(col, wall, w.a * uWallA);',
     '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
     '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
@@ -446,6 +461,8 @@
       gl.uniform3fv(loc.uGridRGB, GRID_RGB);
       gl.uniform3fv(loc.uSweepRGB, SWEEP_RGB);
       gl.uniform3fv(loc.uInk, INK);
+      // 亚克力色：与站上 --scene-acrylic 同源
+      gl.uniform4f(loc.uAcrylic, ACRYLIC[0], ACRYLIC[1], ACRYLIC[2], ACRYLIC[3]);
 
       // 🔴 亮带要在**相机当前纬度附近**扫，不能在整个球带 -55..+55 上扫。
       // 朝外看之后相机只看到一小块墙（fov 58°、墙距约 0.9），按全域扫时亮带绝大部分
@@ -527,7 +544,7 @@
       });
       ['uEye', 'uRight', 'uUp', 'uFwd', 'uFocal', 'uHalfW', 'uHalfH', 'uBow', 'uHoop',
        'uLatStep', 'uLonStep', 'uGridA', 'uSweepA', 'uWallA', 'uSweepOn', 'uDegPerPx',
-       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex', 'uDebug'].forEach(function (n) {
+       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex', 'uDebug', 'uAcrylic'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       buildMesh();

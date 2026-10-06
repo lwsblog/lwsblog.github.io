@@ -5591,7 +5591,9 @@ html.is-dome .photo-lightbox {
   position: absolute;
   inset: 0;
   z-index: 5;
-  background: #090b0f;
+  /* 🔴 必须透明。开场是"镜头怼着墙上那张照片拍"，照片由 WebGL 画在下面；
+     这里一旦有不透明底色，整个穹顶就被盖住 —— 用户看到的"开屏一片黑"。 */
+  background: transparent;
   display: grid;
   place-items: center;
   overflow: hidden;
