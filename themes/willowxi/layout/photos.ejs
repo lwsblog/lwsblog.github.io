@@ -150,4 +150,35 @@
     </button>
     <p class="photo-lightbox__hint" data-photo-lightbox-hint>&larr; &rarr; 切换 · ESC 关闭</p>
   </div>
+
+  <%# 穹顶相册：只在 ?dome=1 时挂载，线上默认路径完全不受影响。 %>
+  <div data-dome hidden>
+    <canvas data-dome-canvas
+      data-dome-wallpaper="<%- url_for('/images/wallpaper/wallpaper-default.webp') %>"
+      aria-hidden="true"></canvas>
+  </div>
+  <script>
+    (function () {
+      if (!/[?&]dome=1/.test(location.search)) return;
+      var host = document.querySelector('[data-dome]');
+      if (!host) return;
+      // 🔴 必须挪到 body 直属。
+      //
+      // 留在 photos.ejs 的位置时，它被包在页面内容容器里，那个容器自己带
+      // z-index/position 形成层叠上下文 —— 于是穹顶的 z-index:900 只在容器内部
+      // 比较，顶栏（在 body 层，z-index 265）照样压在穹顶上面。挂到 body 下才
+      // 和顶栏在同一层，900 > 265 才生效。
+      document.body.appendChild(host);
+      host.hidden = false;
+      var s = document.createElement('script');
+      s.src = '<%- url_for("/js/dome.js") %>';
+      s.async = true;
+      s.onload = function () {
+        if (!window.WillowXIDome) return;
+        window.__domeInstance = window.WillowXIDome.create(document);
+        window.__domeInstance.init();
+      };
+      document.head.appendChild(s);
+    })();
+  </script>
 </div>

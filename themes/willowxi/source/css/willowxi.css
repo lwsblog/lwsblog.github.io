@@ -5492,3 +5492,36 @@ body.is-gallery-static .photo-masthead__title {
     transition-delay: 0ms !important;
   }
 }
+
+
+/* ============================================================================
+   穹顶相册（在 /photos/?dome=1 时由 dome.js 挂载）
+   ----------------------------------------------------------------------------
+   页面**完全不允许滚动**：滚轮被 dome.js 劫持成缩放，Scrollbar 也一并去掉。
+   用 html.is-dome 做开关，卸载时 dome.js 会把这两个类移除，页面恢复原样。
+   ========================================================================= */
+html.is-dome,
+html.is-dome body {
+  overflow: hidden !important;
+  height: 100%;
+  /* Firefox */
+  scrollbar-width: none;
+  overscroll-behavior: none;
+}
+/* WebKit：连占位都不要留，否则整页会被挤窄 */
+html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+[data-dome] {
+  position: fixed;
+  inset: 0;
+  z-index: 900;              /* 必须高于顶栏，否则导航条会压在穹顶上 */
+  background: #090b0f;
+  overflow: hidden;
+}
+[data-dome-canvas] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
