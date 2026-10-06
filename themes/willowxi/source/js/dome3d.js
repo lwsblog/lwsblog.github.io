@@ -52,7 +52,16 @@
     var p = sph(camLon, camPhi);
     var pos = [p[0] * cr, p[1] * cr, p[2] * cr];
     var L = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]) || 1;
-    var fwd = [-pos[0] / L, -pos[1] / L, -pos[2] / L];
+    // 🔴 相机朝**外**看，不是朝球心看。
+    //
+    // 这是一个模型级的错，不是参数问题：原来 fwd = -pos（朝球心），于是可见的是
+    // **对侧**球壁，距离恒为 1 + r —— r 越大离可见墙越远、东西越小，缩放方向整个
+    // 是反的。用户早先说的"缩放范围有点小""网格太扁"都是它造成的，而我一直在
+    // 调参数。
+    //
+    // 朝外看（fwd = +pos）时，面前那面墙的距离是 1 - r：r 越大离墙越近、东西越大，
+    // 这才是"在穹顶里朝内壁推进"。
+    var fwd = [pos[0] / L, pos[1] / L, pos[2] / L];
     var rx = -fwd[2], rz = fwd[0];
     var rl = Math.sqrt(rx * rx + rz * rz) || 1;
     var right = [rx / rl, 0, rz / rl];
@@ -706,7 +715,8 @@
       //
       // 之前写成 animateCameraTo(p.lon, p.lat)，相机于是和那张照片同侧、背对着它，
       // "聚焦"之后画面里还是一堆小相纸。
-      animateCameraTo(p.lon + 180, -p.lat, ms || 900);
+      // 朝外看之后，相机就坐在照片所在的这一侧，正对看它即可。
+      animateCameraTo(p.lon, p.lat, ms || 900);
       // 靠近到能看清：0.62 大约是"一张照片占满视口"的距离
       target = 0.62;
     }
