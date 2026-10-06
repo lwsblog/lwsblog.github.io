@@ -16,6 +16,44 @@
 (function () {
   'use strict';
 
+var WALL_VS = [
+  'attribute vec3 aPos;',
+  'attribute vec2 aUV;',
+  'uniform vec3 uEye, uRight, uUp, uFwd;',
+  'uniform float uFocal, uHalfW, uHalfH, uBow, uHoop;',
+  'varying vec2 vUV;',
+  'void main() {',
+  '  vec3 d = aPos - uEye;',
+  '  float z = dot(d, uFwd);',
+  '  float x = dot(d, uRight);',
+  '  float y = dot(d, uUp);',
+  '  float sx = uHalfW + uFocal * x / z;',
+  '  float sy = uHalfH - uFocal * y / z;',
+  // The SAME exaggeration the 2D grid applies, so the wallpaper and the grid are
+  // literally the same surface. Doing it here rather than on the CPU is what keeps a
+  // WebGL layer from drifting away from the 2D layer.
+  '  float ty = (sy - uHalfH) / uHalfH;',
+  '  float waist = 1.0 - uBow * max(0.0, 1.0 - ty * ty);',
+  '  float sx2 = uHalfW + (sx - uHalfW) * waist;',
+  '  float tx = (sx - uHalfW) / uHalfW;',
+  '  float sy2 = sy + uHoop * tx * tx * (sy - uHalfH);',
+  '  gl_Position = vec4(sx2 / uHalfW - 1.0, 1.0 - sy2 / uHalfH, 0.0, 1.0);',
+  '  vUV = aUV;',
+  '}'
+].join('\n');
+
+var WALL_FS = [
+  'precision mediump float;',
+  'uniform sampler2D uTex;',
+  'uniform float uAlpha;',
+  'varying vec2 vUV;',
+  'void main() {',
+  '  vec4 c = texture2D(uTex, vUV);',
+  '  gl_FragColor = vec4(c.rgb, c.a * uAlpha);',
+  '}'
+].join('\n');
+
+
   var BAND_HALF = 55.0;      // 球带半张角（度）
   var FOV = 58.0;            // 水平视场角（度），固定
   var R_OUT = 0.32;          // 缩小到底（最远）
@@ -121,7 +159,7 @@
     var wheelAccum = 0;      // 累积滚轮量，让一格 = 固定步长
     var wall = null, wallReady = false;
     var detachers = [];
-    var diag = { tickN: 0, wheelN: 0, lastDelta: 0 };
+    var diag = { tickN: 0, wheelN: 0, lastDelta: 0, glReady: 0, glTex: 0, glVerts: 0, glErr: '' };
 
     // 🔴 半径不能线性插值。
     //
@@ -142,84 +180,154 @@
       canvas.height = Math.round(H * ratio);
       canvas.style.width = W + 'px';
       canvas.style.height = H + 'px';
+      if (glc) {
+        glc.width = canvas.width;
+        glc.height = canvas.height;
+        glc.style.width = W + 'px';
+        glc.style.height = H + 'px';
+      }
     }
 
-    // WALLPAPER, drawn as a TEXTURE ON THE SPHERE -- not as a screen-space tiling.
+    // WALLPAPER as a REAL TEXTURE on the band, drawn with WebGL.
     //
-    // Every earlier version tiled the image in screen space while the grid went through
-    // the real projection plus `exaggerate`. Two different geometries can never agree:
-    // the grid curved and the wallpaper did not (so they did not read as one surface),
-    // they scaled at different rates (the reported opposite-direction zoom), and a
-    // screen-space tiling always leaves hard seams where tiles meet.
+    // Every 2D attempt failed the same way: canvas can only map a texture affinely, so a
+    // projected quad is an approximation and neighbouring quads never meet -- visible
+    // dark seams, and a blur cannot hide an area that was never drawn. WebGL interpolates
+    // per-pixel, so the band is one continuous surface with no seams at all.
     //
-    // So the wallpaper is now mapped onto the band itself: one pass of the image wraps
-    // the full 360 degrees of longitude and spans the band's latitude, drawn as a mesh of
-    // small quads whose corners come from the SAME `project` the grid uses. That makes the
-    // two literally the same surface -- same scale, same direction, same curvature -- and
-    // a single wrap has no seams to hide.
-    var WALL_COLS = 36;          // quads around the sphere
-    var WALL_ROWS = 8;           // quads across the band
+    // The vertex shader applies the SAME exaggeration the 2D grid applies, so the two
+    // layers are still one geometry -- that is what makes them scale and curve together.
 
-    function drawWallpaper(cam, focal) {
-      if (!wallReady) return;
-      var iw = wall.naturalWidth, ih = wall.naturalHeight;
-      ctx.save();
-      // 一次模糊同时办两件事：抹掉仿射近似留下的块间裂缝，并得到原站那种柔和的
-      // 壁纸质感（原站那层是 46px 模糊）。
-      ctx.filter = 'blur(4px)';
-      ctx.globalAlpha = 0.42;
-      for (var r = 0; r < WALL_ROWS; r++) {
-        var lat0 = -BAND_HALF + (2 * BAND_HALF) * r / WALL_ROWS;
-        var lat1 = -BAND_HALF + (2 * BAND_HALF) * (r + 1) / WALL_ROWS;
-        for (var ci = 0; ci < WALL_COLS; ci++) {
-          var lon0 = -180 + 360 * ci / WALL_COLS;
-          var lon1 = -180 + 360 * (ci + 1) / WALL_COLS;
-          var p00 = project(cam, focal, W, H, sph(lon0, lat0));
-          var p10 = project(cam, focal, W, H, sph(lon1, lat0));
-          var p11 = project(cam, focal, W, H, sph(lon1, lat1));
-          var p01 = project(cam, focal, W, H, sph(lon0, lat1));
-          if (!p00 || !p10 || !p11 || !p01) continue;
-          var sx = iw * ci / WALL_COLS;
-          var sy = ih * (WALL_ROWS - 1 - r) / WALL_ROWS;   // image row 0 is the top
-          var sw = iw / WALL_COLS, sh = ih / WALL_ROWS;
-          // Affine map from the unit square to this quad: origin p00, basis p10-p00 and
-          // p01-p00. `transform` (not setTransform) so the DPR scale stays in effect.
-          var a = p10[0] - p00[0], b = p10[1] - p00[1];
-          var c2 = p01[0] - p00[0], d2 = p01[1] - p00[1];
-          // Expand a hair so neighbouring quads overlap instead of leaving hairlines.
-          var ex = 0, k = 1;   // 不再向外扩（clip 用真实四边形，本来就没有缝）
-          var mx = (a + c2), my = (b + d2);
-          var ml = Math.sqrt(mx * mx + my * my) || 1;
-          var gx = mx / ml * ex, gy = my / ml * ex;
-          ctx.save();
-          // 🔴 裁剪路径必须是完整的四边形（四个角）。
-          // 上一版误写成 p00 -> p10 -> p10 -> p00，那是一条线、零面积，clip 之后
-          // 什么都画不出来 —— 壁纸整片消失。
-          // 🔴 裁剪多边形必须比真实四边形**向外放大一点点**。
-          //
-          // 投影后的四边形不是平行四边形，而 canvas 只能做仿射映射，所以每一块都是
-          // 近似；相邻块之间必然合不严，缝里露出底色 —— 画面上就是一道道黑线。
-          // 每块以重心为中心放大 2%，相邻块互相重叠，缝就被盖住了。
-          var mx4 = (p00[0] + p10[0] + p11[0] + p01[0]) / 4;
-          var my4 = (p00[1] + p10[1] + p11[1] + p01[1]) / 4;
-          var E = 1.03;
-          function gz(pt) {
-            return [mx4 + (pt[0] - mx4) * E, my4 + (pt[1] - my4) * E];
+    var glc = null, gl = null, glProg = null, glBuf = null, glTex = null;
+    var glULoc = {};
+    var WALL_REPEAT = 4;         // how many times the image wraps around 360 degrees
+
+    function glCompile(type, src) {
+      var sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        diag.glErr = String(gl.getShaderInfoLog(sh));
+        return null;
+      }
+      return sh;
+    }
+
+    function initWallGL() {
+      glc = root.querySelector('[data-dome-wall]');
+      if (!glc) return;
+      gl = glc.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false }) ||
+           glc.getContext('experimental-webgl');
+      if (!gl) { diag.glErr = 'no webgl'; return; }
+      // MUST size the GL canvas here.
+      //
+      // resize() runs BEFORE initWallGL(), so at that moment glc is still null and the
+      // canvas keeps its default 300x150. The vertex shader then takes uHalfW/uHalfH from
+      // glc.width/2 while uFocal is computed for 1440x900 -- two different scales, so every
+      // vertex lands outside the clip volume and the wallpaper never appears at all.
+      glc.width = canvas.width;
+      glc.height = canvas.height;
+      glc.style.width = W + 'px';
+      glc.style.height = H + 'px';
+      var vs = glCompile(gl.VERTEX_SHADER, WALL_VS);
+      var fs = glCompile(gl.FRAGMENT_SHADER, WALL_FS);
+      if (!vs || !fs) return;
+      glProg = gl.createProgram();
+      gl.attachShader(glProg, vs);
+      gl.attachShader(glProg, fs);
+      gl.linkProgram(glProg);
+      if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)) {
+        diag.glErr = String(gl.getProgramInfoLog(glProg));
+        return;
+      }
+      gl.useProgram(glProg);
+      glULoc = {
+        aPos: gl.getAttribLocation(glProg, 'aPos'),
+        aUV: gl.getAttribLocation(glProg, 'aUV'),
+        uEye: gl.getUniformLocation(glProg, 'uEye'),
+        uRight: gl.getUniformLocation(glProg, 'uRight'),
+        uUp: gl.getUniformLocation(glProg, 'uUp'),
+        uFwd: gl.getUniformLocation(glProg, 'uFwd'),
+        uFocal: gl.getUniformLocation(glProg, 'uFocal'),
+        uHalfW: gl.getUniformLocation(glProg, 'uHalfW'),
+        uHalfH: gl.getUniformLocation(glProg, 'uHalfH'),
+        uBow: gl.getUniformLocation(glProg, 'uBow'),
+        uHoop: gl.getUniformLocation(glProg, 'uHoop'),
+        uTex: gl.getUniformLocation(glProg, 'uTex'),
+        uAlpha: gl.getUniformLocation(glProg, 'uAlpha')
+      };
+      // Build the band mesh once: positions on the sphere, UVs across the image.
+      var LON_STEP_GL = 3, LAT_STEP = 3, verts = [];
+      for (var la = -BAND_HALF; la < BAND_HALF; la += LAT_STEP) {
+        for (var lo = -180; lo < 180; lo += LON_STEP_GL) {
+          var quad = [[lo, la], [lo + LON_STEP_GL, la],
+                      [lo + LON_STEP_GL, la + LAT_STEP], [lo, la + LAT_STEP]];
+          var tri = [0, 1, 2, 0, 2, 3];
+          for (var t = 0; t < 6; t++) {
+            var q = quad[tri[t]];
+            var P = sph(q[0], q[1]);
+            verts.push(P[0], P[1], P[2]);
+            var u = ((q[0] + 180) / 360) * WALL_REPEAT;
+            var v = 1 - (q[1] + BAND_HALF) / (2 * BAND_HALF);   // image row 0 is the top
+            verts.push(u, v);
           }
-          var q00 = gz(p00), q10 = gz(p10), q11 = gz(p11), q01 = gz(p01);
-          ctx.beginPath();
-          ctx.moveTo(q00[0], q00[1]);
-          ctx.lineTo(q10[0], q10[1]);
-          ctx.lineTo(q11[0], q11[1]);
-          ctx.lineTo(q01[0], q01[1]);
-          ctx.closePath();
-          ctx.clip();
-          ctx.transform(a * k, b * k, c2 * k, d2 * k, p00[0], p00[1]);
-          ctx.drawImage(wall, sx, sy, sw, sh, 0, 0, 1, 1);
-          ctx.restore();
         }
       }
-      ctx.restore();
+      glBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, glBuf);
+      var f32 = new Float32Array(verts);
+      gl.bufferData(gl.ARRAY_BUFFER, f32, gl.STATIC_DRAW);
+      diag.glVerts = f32.length / 5;
+      gl.enableVertexAttribArray(glULoc.aPos);
+      gl.vertexAttribPointer(glULoc.aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(glULoc.aUV);
+      gl.vertexAttribPointer(glULoc.aUV, 2, gl.FLOAT, false, 20, 12);
+      gl.clearColor(0.035, 0.043, 0.059, 1);   // the site's ink, as the base colour
+      diag.glReady = 1;
+    }
+
+    function uploadWallTexture() {
+      if (!gl || !wallReady || glTex) return;
+      glTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, glTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wall);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      diag.glTex = 1;
+    }
+
+    function drawWallGL(cam, focal) {
+      if (!gl || !glProg) return;
+      uploadWallTexture();
+      gl.viewport(0, 0, glc.width, glc.height);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      if (!glTex) return;
+      gl.useProgram(glProg);
+      gl.uniform3fv(glULoc.uEye, cam.pos);
+      gl.uniform3fv(glULoc.uRight, cam.right);
+      gl.uniform3fv(glULoc.uUp, cam.up);
+      gl.uniform3fv(glULoc.uFwd, cam.fwd);
+      gl.uniform1f(glULoc.uFocal, focal * ratio);
+      gl.uniform1f(glULoc.uHalfW, glc.width * 0.5);
+      gl.uniform1f(glULoc.uHalfH, glc.height * 0.5);
+      gl.uniform1f(glULoc.uBow, BOW);
+      gl.uniform1f(glULoc.uHoop, HOOP);
+      gl.uniform1f(glULoc.uAlpha, 0.62);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, glTex);
+      gl.uniform1i(glULoc.uTex, 0);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glBuf);
+      gl.enableVertexAttribArray(glULoc.aPos);
+      gl.vertexAttribPointer(glULoc.aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(glULoc.aUV);
+      gl.vertexAttribPointer(glULoc.aUV, 2, gl.FLOAT, false, 20, 12);
+      gl.drawArrays(gl.TRIANGLES, 0, diag.glVerts || 0);
     }
 
     // 透视线：球带的纬线（整圈）与经线（弧段）。这是穹顶自己的几何。
@@ -261,17 +369,15 @@
       if (!W || !H) return;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, W, H);
-
-      // 底色：暗场，与站上 ink 一致
-      ctx.fillStyle = '#090b0f';
-      ctx.fillRect(0, 0, W, H);
+      // ⚠️ 这里**不能**再铺不透明底色：壁纸由下面那层 WebGL canvas 画，铺了就把
+      //    它盖住了。暗场底色改由 WebGL 的 clearColor 负责（见 glClearColor）。
 
       var cr = radius();
       var cam = makeCamera(camLon, camPhi, cr);
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
 
-      // ① 内壁壁纸
-      drawWallpaper(cam, focal);
+      // ① 内壁壁纸：交给 WebGL 做真纹理映射（见 drawWallGL）
+      drawWallGL(cam, focal);
 
       // ② 透视线（底网格）
       var base = [];
@@ -362,7 +468,7 @@
       // 壁纸：取站上同一张，保证和其它页面同源
       wall = new window.Image();
       wall.decoding = 'async';
-      wall.onload = function () { wallReady = true; render(); };
+      wall.onload = function () { wallReady = true; glTex = null; render(); };
       wall.onerror = function () { wallReady = false; };
       wall.src = canvas.getAttribute('data-dome-wallpaper') || '/images/wallpaper/wallpaper-default.webp';
 
@@ -371,6 +477,7 @@
       document.documentElement.classList.add('is-dome');
       document.body.classList.add('is-dome');
 
+      initWallGL();          // WebGL 壁纸层
       window.addEventListener('wheel', onWheel, { passive: false });
       window.addEventListener('resize', onResize);
       detachers.push(function () { window.removeEventListener('wheel', onWheel); });
@@ -398,7 +505,7 @@
           zoom: zoom, target: target, radius: radius(), phase: phase,
           W: W, H: H, ratio: ratio, wallReady: wallReady,
           tickN: diag.tickN, wheelN: diag.wheelN, lastDelta: diag.lastDelta,
-          bow: BOW, hoop: HOOP,
+          bow: BOW, hoop: HOOP, gl: diag.glReady, glTex: diag.glTex, glErr: diag.glErr,
           scrollY: window.scrollY
         };
       }
