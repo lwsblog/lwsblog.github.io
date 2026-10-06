@@ -34,13 +34,16 @@
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
   var LON_STEP = 7.0;        // 网格：经线间距（度）
-  // 平铺份数：横向 3 圈（原来是 7）。份数越多，重模糊之后相邻份互相渗透越厉害，
-  // 就是"一堆图叠在一起的"重影"来源之一（用户报的正是这个）。
-  var WALL_REPEAT = 3;
+  // 壁纸只铺**一张**：横向绕球一圈、纵向铺满整条球带。
+  //
+  // 用户："现在壁纸分成上下两块了，我只要一块，只要一排连起来，视野里上下只塞
+  // 一张图"。之前横向 3 圈、纵向按比例约 3 圈，于是纵向被切成好几块、露出拼接
+  // 边界。现在两个方向都只走一遍。
+  var WALL_REPEAT = 1;       // 横向绕球 1 圈
   var WALL_AR = 1280 / 533;  // 壁纸原始宽高比，用来定纵向重复次数
   // 一个横向重复覆盖 360/WALL_REPEAT 度经度；按原图比例，它应当覆盖
   // (360/WALL_REPEAT)/WALL_AR 度纬度。球带高 2*BAND_HALF，于是纵向需要重复：
-  var WALL_VREP = (2 * BAND_HALF) / ((360 / WALL_REPEAT) / WALL_AR);
+  var WALL_VREP = 1;         // 纵向只 1 张（原来按比例算出来约 3，才被切成几块）
 
   // 与站上一致的色值
   var INK = [0.035, 0.043, 0.059];
@@ -210,9 +213,15 @@
     '  float mw = max(lineMask(lat, uLatStep, 1.15 + 1.6 * sw),',
     '                 lineMask(lon, uLonStep, 1.15 + 1.6 * sw));',
     '  col += uSweepRGB * mw * sw * uSweepA;',
-    // 光晕：亮带核心再叠一层，让"光"真的溢出来（只加在线附近，不铺满面片）
-    '  float glow = sw * sw * sw;',
-    '  col += uSweepRGB * max(m, mw * 0.55) * glow * uSweepA * 0.8;',
+    // 🔴 光晕 = 线**周围**一圈溢出的光，不是"线更亮"。
+    //
+    // 之前只把线本身加亮加粗，用户仍然说"看不见光晕" —— 因为那读起来只是几条
+    // 亮线，没有"光"。原站的光晕是 5 层逐级加宽的描边。这里等价的做法：再算一层
+    // **宽得多、也淡得多**的线掩码（8px），只乘扫光强度，于是每条线外面都有一圈晕。
+    '  float halo = max(lineMask(lat, uLatStep, 9.0), lineMask(lon, uLonStep, 9.0));',
+    '  col += uSweepRGB * halo * sw * uSweepA * 0.30;',
+    '  float halo2 = max(lineMask(lat, uLatStep, 20.0), lineMask(lon, uLonStep, 20.0));',
+    '  col += uSweepRGB * halo2 * sw * uSweepA * 0.10;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
     // 是只有网格线发亮"。去掉这一项。
@@ -311,6 +320,10 @@
       var win = document.createElement('div');
       win.className = 'win';
       var img = document.createElement('img');
+      // 快速渐显：图片解码完再显示，避免"先看到空白框再蹦出图"。
+      img.style.opacity = '0';
+      img.style.transition = 'opacity 160ms linear';
+      img.addEventListener('load', function () { img.style.opacity = '1'; });
       img.src = p.src;
       img.alt = '';
       img.draggable = false;
@@ -676,6 +689,8 @@
       // 穹顶就"展开"了 —— 全程没有任何过渡动画要写。
       var pick = pickOpeningPhotoEntry();
       if (pick) {
+        // 开屏这张要立刻显示，不能等 lazy —— 它是开场唯一的画面。
+        if (pick.img) { pick.img.loading = 'eager'; }
         camLon = pick.lon;
         camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
