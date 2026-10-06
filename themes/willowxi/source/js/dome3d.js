@@ -18,7 +18,7 @@
   'use strict';
 
   var BAND_HALF = 55.0;      // 球带半张角（度）
-  var FOV = 58.0;            // 水平视场角（度），固定
+  var FOV = 52.0;   // 收窄视场角：边缘透视更平，与弯度解耦            // 水平视场角（度），固定
   // 🎛️ 朝外看之后，r 越大离墙越近。缩小到底 = 尽量靠近球心，让面前那面墙尽量远
   // （距离 1-r），从而看到更多内壁。0.32 在旧模型里是"最远"，在新模型里其实离墙
   // 只剩 0.68，壁纸被放得很大。
@@ -28,8 +28,8 @@
   // 它只在**顶点**上做，而三角形内部是屏幕空间线性插值的，非线性形变于是
   // 让每条网格线在三角形边界折一下（用户截图里的折角）。
   // 相机模型修正之后，真球面投影本身已经够弯，不再需要它。
-  var BOW = 0.20;   // 0.34 透视过夸张，收敛            // 穹顶夸张：水平收腰
-  var HOOP = 0.14;           // 穹顶夸张：横线外弓
+  var BOW = 0.28;            // 穹顶夸张：水平收腰
+  var HOOP = 0.20;           // 穹顶夸张：横线外弓
   var SWEEP_MS = 9000;       // 扫光一轮毫秒（原站 4s，穹顶视野更大故放慢）
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
@@ -282,6 +282,9 @@
           id: f.getAttribute('data-id') || String(i + 1),
           tally: f.getAttribute('data-tally') || String(i + 1),
           src: img.getAttribute('src'),
+          // 高分辨率档：开屏会把相纸怼到全屏，用 640 缩略图会糊，要换大图
+          light: img.getAttribute('data-light-src'),
+          screen: img.getAttribute('data-screen-src'),
           ratio: isFinite(ratio) && ratio > 0 ? ratio : 1.5
         });
       }
@@ -700,7 +703,14 @@
       var pick = pickOpeningPhotoEntry();
       if (pick) {
         // 开屏这张要立刻显示，不能等 lazy —— 它是开场唯一的画面。
-        if (pick.img) { pick.img.loading = 'eager'; }
+        if (pick.img) {
+          pick.img.loading = 'eager';
+          // 🔴 换成全尺寸（1600px 灯箱档）。开屏时相纸被怼到铺满视口，
+          // 用墙上那张 640 缩略图会糊 —— 用户："开屏的时候加载全尺寸的图片，
+          // 不然好糊"。其余照片仍用缩略图（它们在墙上很小，不需要大图）。
+          var big = pick.light || pick.screen;
+          if (big) { pick.img.style.opacity = '0'; pick.img.src = big; }
+        }
         camLon = pick.lon;
         camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
