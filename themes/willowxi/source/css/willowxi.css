@@ -5575,3 +5575,63 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
   color: #6b7280;
   letter-spacing: 0.16em;
 }
+/* 穹顶模式下把旧相册（相纸飞入网格那一套）整层藏掉 —— 它的脚本仍会初始化，
+   但 scrollY 恒为 0，所以只会停在起始帧，藏掉即可，不必去动它的代码。 */
+html.is-dome .photo-screen,
+html.is-dome .photo-masthead,
+html.is-dome .photo-main,
+html.is-dome .gallery-board,
+html.is-dome .photo-acrylic,
+html.is-dome .photo-lightbox {
+  display: none !important;
+}
+
+/* 开屏序列：随机照片铺满 → 打字 → 停留 3s 或被滚轮打断 → 尾字倒放删除 */
+[data-dome-open] {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #090b0f;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+[data-dome-open] .shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+[data-dome-open] .veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 11, 15, 0.72);
+}
+[data-dome-open] h1 {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: clamp(30px, 7vw, 96px);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-shadow: 0 0 20px rgba(9, 11, 15, 0.8);
+}
+[data-dome-open] .caret {
+  display: inline-block;
+  width: 0.6em;
+  animation: blink-mark 1s steps(1, end) infinite;
+}
+[data-dome-open] .hint2 {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.34em;
+}

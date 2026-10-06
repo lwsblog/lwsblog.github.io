@@ -436,6 +436,7 @@
       var k = 1 - Math.exp(-dt / 160);
       if (Math.abs(target - zoom) > 0.0004) zoom += (target - zoom) * k; else zoom = target;
       phase = (phase + dt / SWEEP_MS) % 1;
+      tickOpening(now);
       diag.tickN++;
       render();
     }
@@ -444,6 +445,13 @@
     function onWheel(e) {
       e.preventDefault();
       diag.wheelN++;
+      // 🔴 开屏期间滚轮不缩放。
+      // Q7=C：一动滚轮就立刻收（不等 3 秒）；删除动画播放期间滚轮完全无效，
+      // 删除结束后才允许缩小。
+      if (!ready) {
+        if (openState === 'typing' || openState === 'hold') beginDelete();
+        return;
+      }
       wheelAccum += e.deltaY;
       if (Math.abs(wheelAccum) >= 100) {
         var n = Math.trunc(wheelAccum / 100);
@@ -515,7 +523,127 @@
       window.addEventListener('resize', onResize);
       detachers.push(function () { window.removeEventListener('wheel', onWheel); });
       detachers.push(function () { window.removeEventListener('resize', onResize); });
+      startOpening();
       arm();
+    }
+
+    // ---- 开屏序列 ------------------------------------------------------
+    //
+    // 定稿（grilling）：Q4=B 先让照片铺满、再打字；Q5=A 删除是尾字先退
+    // （严格倒放）；Q7=C 一动滚轮就立刻收，不动则打完停 3 秒。
+    // 约束：删除动画播放期间滚轮**完全无效**，删除结束后才允许缩放。
+    var TYPE_MS = 110;      // 每字毫秒
+    var HOLD_MS = 3000;     // 打完停留
+    var DEL_MS = 70;        // 删除每字毫秒（比打字快一点，收得干脆）
+    var openState = 'idle'; // idle | image | typing | hold | deleting | done
+    var openEl = null, openH1 = null, openText = '', openAt = 0;
+    var ready = false;      // 建好之后才允许缩放
+
+    function pickOpeningPhoto() {
+      var frames = root.querySelectorAll('[data-photo-frame]');
+      var pool = [];
+      for (var i = 0; i < frames.length; i++) {
+        var im = frames[i].querySelector('img');
+        if (!im) continue;
+        var src = im.getAttribute('data-screen-src') || im.getAttribute('src');
+        if (src) pool.push(src);
+      }
+      if (!pool.length) return null;
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function setOpenTitle(txt) {
+      if (!openH1) return;
+      openH1.textContent = txt;
+      var care = document.createElement('span');
+      care.className = 'caret';
+      care.setAttribute('aria-hidden', 'true');
+      care.textContent = '_';
+      openH1.appendChild(care);
+    }
+
+    function startOpening() {
+      var host = canvas.parentNode || document.body;
+      openEl = document.createElement('div');
+      openEl.setAttribute('data-dome-open', '');
+      var src = pickOpeningPhoto();
+      if (src) {
+        var im = document.createElement('img');
+        im.className = 'shot';
+        im.alt = '';
+        openEl.appendChild(im);
+      }
+      var veil = document.createElement('div');
+      veil.className = 'veil';
+      openEl.appendChild(veil);
+      openH1 = document.createElement('h1');
+      openEl.appendChild(openH1);
+      var hint = document.createElement('p');
+      hint.className = 'hint2';
+      hint.textContent = '滚轮进入';
+      openEl.appendChild(hint);
+      host.appendChild(openEl);
+
+      // 标题原文取自页面上那个 h1（data-full 由旧脚本写入，取不到就用兜底）
+      var mast = document.querySelector('[data-photo-mast-title]');
+      openText = (mast && (mast.getAttribute('data-full') || mast.textContent)) ||
+                 "Willow's Gallery";
+      openText = openText.replace(/_+$/, '').trim();
+
+      openState = 'image';
+      var shot = openEl.querySelector('.shot');
+      var begin = function () { startTypingOpen(); };
+      if (shot) {
+        shot.onload = function () { window.setTimeout(begin, 220); };
+        shot.onerror = function () { begin(); };
+        shot.src = src;
+      } else {
+        window.setTimeout(begin, 220);
+      }
+    }
+
+    function startTypingOpen() {
+      if (openState !== 'image') return;
+      openState = 'typing';
+      openAt = performance.now();
+    }
+
+    function tickOpening(now) {
+      if (!openEl) return;
+      if (openState === 'typing') {
+        var n = Math.min(openText.length,
+          Math.floor((now - openAt) / TYPE_MS));
+        setOpenTitle(openText.slice(0, n));
+        if (n >= openText.length) { openState = 'hold'; openAt = now; }
+      } else if (openState === 'hold') {
+        if (now - openAt >= HOLD_MS) beginDelete();
+      } else if (openState === 'deleting') {
+        var k = openText.length - Math.min(openText.length,
+          Math.floor((now - openAt) / DEL_MS));
+        setOpenTitle(openText.slice(0, k));
+        if (k <= 0) finishOpening();
+      }
+    }
+
+    // 尾字先退 —— 严格倒放
+    function beginDelete() {
+      if (openState === 'deleting' || openState === 'done') return;
+      openState = 'deleting';
+      openAt = performance.now();
+    }
+
+    function finishOpening() {
+      openState = 'done';
+      var el = openEl;
+      openEl = null; openH1 = null;
+      if (el) {
+        el.style.transition = 'opacity 420ms linear';
+        el.style.opacity = '0';
+        window.setTimeout(function () {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        }, 460);
+      }
+      ready = true;       // 到这里才允许缩放
     }
 
     function destroy() {
@@ -535,7 +663,8 @@
           W: W, H: H, ratio: ratio, wallReady: wallReady,
           tickN: diag.tickN, wheelN: diag.wheelN, scrollY: window.scrollY,
           verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
-          m0: diag.m0 || null, m1: diag.m1 || null, err: diag.err, bow: BOW, hoop: HOOP
+          m0: diag.m0 || null, m1: diag.m1 || null,
+          open: openState, ready: ready, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
     };
