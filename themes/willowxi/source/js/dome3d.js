@@ -186,15 +186,24 @@
     '  vec3 nrm = normalize(vPos);',
     '  float lat = degrees(asin(clamp(nrm.y, -1.0, 1.0)));',
     '  float lon = degrees(atan(nrm.x, nrm.z));',
-    '  vec4 w = texture2D(uTex, fract(vUV));',
+    // 壁纸模糊：9 抽头盒式。原站那层壁纸是 46px 模糊，而穹顶的壁纸是清晰贴图；
+    // 不糊就成了一张高清插画墙，与站上其它页面观感对不上。NPOT 纹理没有 mipmap，
+    // 所以在 UV 空间按环状偏移采样。
+    '  vec4 w = vec4(0.0);',
+    '  for (int bi = 0; bi < 8; bi++) {',
+    '    float ang = float(bi) * 0.785398;',
+    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang), sin(ang)) * 0.010));',
+    '  }',
+    '  w += texture2D(uTex, fract(vUV));',
+    '  w /= 9.0;',
     '  col = mix(col, w.rgb, w.a * uWallA);',
     '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
     '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
     '  col += uSweepRGB * m * sw * uSweepA;',
-    // The band also lifts the surface a touch, so it reads as light passing over the
-    // wallpaper rather than as only the lines glowing.
-    '  col += uSweepRGB * sw * 0.045;',
+    // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
+    // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
+    // 是只有网格线发亮"。去掉这一项。
     '  gl_FragColor = vec4(col, 1.0);',
     '  if (uDebug > 0.5) gl_FragColor = vec4(fract(vUV.x), vUV.y, 0.0, 1.0);',
     '}'
@@ -217,7 +226,13 @@
 
     // ---- 相纸：贴在内壁上的照片 ----------------------------------------
     var MATTE_ARC = 13.0;        // 一张相纸占的弧长（度）—— 统一弧长
-    var MATTE_AR = 1.30;         // 相纸本身的宽高比（不是照片的）
+    // 🔴 相纸的宽高比**由照片决定**，不是常数。
+    //
+    // 用户："相纸是根据照片来的为什么所有相纸都是一个比例"。之前固定 1.30，竖片
+    // 被塞进横相纸里、四周一圈大白边。现在相纸 = 照片外形 + 均匀白边：设照片宽为 1
+    //   相纸宽 = 1 + 2*BORDER，相纸高 = 1/ratio + 2*BORDER
+    var MATTE_BORDER = 0.085;
+    function matteAR(ratio) { return (1 + 2 * MATTE_BORDER) / (1 / ratio + 2 * MATTE_BORDER); }
     var perRowMin = 10, perRowMax = 14;
     var photos = [];             // {el, img, lat, lon}
 
@@ -295,13 +310,10 @@
       cap.className = 'cap';
       cap.textContent = p.tally;
       el.appendChild(cap);
-      // 照片按原比例内嵌：宽高比由图片自身决定，用 max-width/height 居中留边
-      var iw = 1 - 2 * 0.055;
-      if (p.ratio >= MATTE_AR * (iw / (1 - 0.055 - 0.14))) {
-        img.style.width = '100%';
-      } else {
-        img.style.height = '100%';
-      }
+      // 相纸现在就是照片的形状，照片直接铺满内框（不再有"塞进去留边"）。
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.objectFit = 'cover';
       p.el = el; p.img = img;
       layer.appendChild(el);
     }
@@ -331,7 +343,7 @@
         var pt = projectPoint(cam, focal, W, H, Q);
         var wpx = focal * matteWorld / zz;
         if (wpx < 6) { q.el.style.display = 'none'; continue; }
-        var hpx = wpx / MATTE_AR;
+        var hpx = wpx / matteAR(q.ratio);
         if (!diag.m1) diag.m1 = { zz: zz, wpx: wpx, focal: focal, mw: matteWorld, pt: pt };
         // 侧倾：相机坐标系里该点的横向角
         var xc = ex * cam.right[0] + ey * cam.right[1] + ez * cam.right[2];
@@ -588,17 +600,11 @@
     var openEl = null, openH1 = null, openText = '', openAt = 0;
     var ready = false;      // 建好之后才允许缩放
 
-    function pickOpeningPhoto() {
-      var frames = root.querySelectorAll('[data-photo-frame]');
-      var pool = [];
-      for (var i = 0; i < frames.length; i++) {
-        var im = frames[i].querySelector('img');
-        if (!im) continue;
-        var src = im.getAttribute('data-screen-src') || im.getAttribute('src');
-        if (src) pool.push(src);
-      }
-      if (!pool.length) return null;
-      return pool[Math.floor(Math.random() * pool.length)];
+    // 开场要怼着拍的那张：直接从已经排布好的相纸里随机挑一张（它有经纬度，
+    // 相机对着它就行）。不再自己去翻 DOM、拼图片地址。
+    function pickOpeningPhotoEntry() {
+      if (!photos.length) return null;
+      return photos[Math.floor(Math.random() * photos.length)];
     }
 
     function setOpenTitle(txt) {
@@ -615,15 +621,10 @@
       var host = canvas.parentNode || document.body;
       openEl = document.createElement('div');
       openEl.setAttribute('data-dome-open', '');
-      var src = pickOpeningPhoto();
-      if (src) {
-        var im = document.createElement('img');
-        im.className = 'shot';
-        im.alt = '';
-        openEl.appendChild(im);
-      }
+      // 不塞图片：那张照片就在墙上，靠相机怼近去看（见下面）。只留标题用的覆盖层。
       var veil = document.createElement('div');
       veil.className = 'veil';
+      veil.style.background = 'rgba(9, 11, 15, 0.42)';   // 比原来轻，别把照片压死
       openEl.appendChild(veil);
       openH1 = document.createElement('h1');
       openEl.appendChild(openH1);
@@ -640,15 +641,22 @@
       openText = openText.replace(/_+$/, '').trim();
 
       openState = 'image';
-      var shot = openEl.querySelector('.shot');
-      var begin = function () { startTypingOpen(); };
-      if (shot) {
-        shot.onload = function () { window.setTimeout(begin, 220); };
-        shot.onerror = function () { begin(); };
-        shot.src = src;
-      } else {
-        window.setTimeout(begin, 220);
+      // 🔴 开场不是"放一张照片盖住屏幕"，而是**镜头一开始就怼着墙上那张照片拍**。
+      //
+      // 用户把这一点讲透了："开屏不是让照片顺势变成一张图，这种逻辑你做不好，我要的
+      // 是它本来就是在墙上的一张照片，只不过开始的时候镜头怼着那张拍"。
+      // 于是这里根本不需要往覆盖层里塞图片：那张照片早就在穹顶墙上，只要把相机放到
+      // 它面前、给一个很近的缩放，屏幕里自然就只有它。删除动画结束后再把镜头拉远，
+      // 穹顶就"展开"了 —— 全程没有任何过渡动画要写。
+      var pick = pickOpeningPhotoEntry();
+      if (pick) {
+        camLon = pick.lon;
+        camPhi = pick.lat;
+        tLon = camLon; tPhi = camPhi;
+        flyFrom = null;
+        zoom = target = 0.80;      // 贴到墙上，画面里只有这张
       }
+      startTypingOpen();
     }
 
     function startTypingOpen() {
@@ -692,7 +700,10 @@
           if (el.parentNode) el.parentNode.removeChild(el);
         }, 460);
       }
+      // 🔴 标题删完 = 镜头拉远。因为开场就是"怼着墙上那张拍"，这里只要把缩放拉回
+      // 最远（相机位置不动），穹顶就自然展开了 —— 没有任何过渡动画要写。
       ready = true;       // 到这里才允许缩放
+      target = 0;
     }
 
     // ---- 阶段⑤：探索与聚焦 ---------------------------------------------
