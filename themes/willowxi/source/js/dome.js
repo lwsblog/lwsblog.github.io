@@ -62,6 +62,25 @@
     return { pos: campos, fwd: fwd, right: right, up: up };
   }
 
+  // 🎛️ 穹顶夸张：真球面从内部看曲率很弱（fov 58° 时可见内壁仅约 45°，几乎是平的）。
+  // 原站那个"穹顶感"来自刻意把平面网格掰弯（bow .17 / hoop .13），比真实球面弯得多。
+  // 所以这里在**真投影之上**再叠一层同类形变，把穹顶弯度补回来。
+  // 0 = 纯真球面（很平）；越大越像原站。
+  var BOW = 0.16;      // 水平"收腰"：屏幕中部往里挤
+  var HOOP = 0.12;     // 横线向外"弓"
+
+  function exaggerate(x, y, W, H) {
+    if (!BOW && !HOOP) return [x, y];
+    var cx = W * 0.5, cy = H * 0.5;
+    var halfW = Math.max(1, W * 0.5), halfH = Math.max(1, H * 0.5);
+    var ty = (y - cy) / halfH;
+    var waist = 1 - BOW * Math.max(0, 1 - ty * ty);
+    var x2 = cx + (x - cx) * waist;
+    var tx = (x - cx) / halfW;
+    var y2 = y + HOOP * tx * tx * (y - cy);
+    return [x2, y2];
+  }
+
   // 把球面点投影到屏幕；在相机后方返回 null
   function project(cam, focal, W, H, P) {
     var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
@@ -69,7 +88,7 @@
     if (z <= 0.06) return null;
     var xc = dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2];
     var yc = dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2];
-    return [W * 0.5 + focal * xc / z, H * 0.5 - focal * yc / z];
+    return exaggerate(W * 0.5 + focal * xc / z, H * 0.5 - focal * yc / z, W, H);
   }
 
   /* ---- 扫光强度（与 willowxi.js 的渐变一致）----------------------------- */
@@ -102,7 +121,16 @@
     var tile = null;          // 预模糊好的壁纸瓦片（离屏）
     var wallTile = 512;       // 瓦片的基准宽度（px）
 
-    function radius() { return R_OUT + (R_IN - R_OUT) * zoom; }
+    // 🔴 半径不能线性插值。
+    //
+    // 视觉缩放正比于 1/(1-r)：r 从 0.32 走到 0.94 时 1-r 从 0.68 掉到 0.06，
+    // 于是**最后 10% 的滚轮行程吃掉了绝大部分缩放**，前半段像是没动 ——
+    // 用户："缩放范围有点小"。改成让 (1-r) 按**几何级数**衰减，等量的滚轮就得到
+    // 等比例的视觉缩放，整段行程的手感才均匀。
+    var D_OUT = 1 - R_OUT, D_IN = 1 - R_IN;
+    function radius() {
+      return 1 - D_OUT * Math.pow(D_IN / D_OUT, zoom);
+    }
 
     function resize() {
       ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -140,7 +168,10 @@
       var ar = tile.height / tile.width;
       var th = t * ar;
       // 以视口中心为锚，向外铺满。每帧最多 ~ (W/t+2)*(H/th+2) 次 drawImage。
-      var ox = W * 0.5, oy = H * 0.42;
+      // 🔴 锚点必须是视口中心，和 3D 投影同心。
+      // 之前用 (0.5W, 0.42H)：壁纸是绕 0.42H 的纯 2D 缩放，网格是绕 0.5H 的
+      // 真投影，同一次缩放里两者朝不同方向跑 —— 用户："背景和网格缩放方向不一致"。
+      var ox = W * 0.5, oy = H * 0.5;
       var i0 = Math.floor(-ox / t) - 1, i1 = Math.ceil((W - ox) / t) + 1;
       var j0 = Math.floor(-oy / th) - 1, j1 = Math.ceil((H - oy) / th) + 1;
       ctx.save();
@@ -168,7 +199,8 @@
     // 透视线：球带的纬线（整圈）与经线（弧段）。这是穹顶自己的几何。
     function traceGrid(cam, focal, onSeg) {
       var lon, phi, pts, last;
-      for (phi = -BAND_HALF; phi <= BAND_HALF + 0.01; phi += 5) {
+      // 线太稀就读不出弯 —— 5°/15° 在 fov 58° 下每屏只有十来条，看着是平的。
+      for (phi = -BAND_HALF; phi <= BAND_HALF + 0.01; phi += 2.5) {
         var pv = null;
         for (lon = -180; lon <= 180; lon += 3) {
           var p = project(cam, focal, W, H, sph(lon, phi));
@@ -182,7 +214,7 @@
       // 相机在球内，整条经线始终可见，于是**整条经线只拿到了它最后一个点的纬度**
       // （+55°），扫光强度被整条共享 —— 画面上就出现了跟着经线走的"竖亮条"。
       // 现在每 3° 输出一段，每段用自己的中点纬度取强度，亮带才真的是横着的一条。
-      for (lon = -180; lon < 180; lon += 15) {
+      for (lon = -180; lon < 180; lon += 10) {
         var prev = null, prevPhi = 0;
         for (phi = -BAND_HALF; phi <= BAND_HALF + 0.01; phi += 3) {
           var q = project(cam, focal, W, H, sph(lon, phi));
@@ -222,32 +254,42 @@
       ctx.lineWidth = 1;
       for (var i = 0; i < base.length; i++) strokeSeg(base[i]);
 
-      // ③ 扫光：亮带中心纬度随 phase 从下缘扫到上缘。
-      //    按段的中点纬度取强度，分段归入若干档，每档一次描边 —— 这样亮带会
-      //    跟着球面弯（原版是一条直带），而描边次数仍然很少。
+      // ③ 扫光。
+      //
+      // 🔴 用**屏幕空间的线性渐变**当描边色，与原版 willowxi.js:339-344 同一手法。
+      //
+      // 上一版为了体现"亮带跟着球面弯"，改成按中点纬度分档、每档一个固定 alpha。
+      // 只有 10 档，于是画出来是一条条台阶 —— 用户："段落感太强了，太生硬了"。
+      // 那是分档本身造成的，不是球面几何的问题；**渐变是连续的，档位不是**。
+      // 3D 感来自网格本身的投影，不需要靠给亮带分档来换。
+      //
+      // 亮带中心的屏幕 y：把"正前方墙面上、纬度等于亮带中心"的那点投影出来即得。
       var half = BAND_HALF * BAND_FRAC * 0.5;
-      var center = -BAND_HALF + phase * (2 * BAND_HALF);
-      var lo = center - half, hi = center + half;
-      var buckets = {};
-      traceGrid(cam, focal, function (pts, phiMid) {
-        var u = half ? (phiMid - lo) / (2 * half) : -1;
-        var v = sweepProfile(u);
-        if (v <= 0.01) return;
-        var key = Math.round(v * 10) / 10;
-        (buckets[key] || (buckets[key] = [])).push(pts);
-      });
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = 'rgb(' + SWEEP[0] + ',' + SWEEP[1] + ',' + SWEEP[2] + ')';
-      for (var g = 0; g < GLOW.length; g++) {
-        ctx.lineWidth = GLOW[g][0];
-        for (var key in buckets) {
-          ctx.globalAlpha = SWEEP_A * parseFloat(key) * GLOW[g][1];
-          var list = buckets[key];
-          for (var n = 0; n < list.length; n++) strokeSeg(list[n]);
+      var centerLat = -BAND_HALF + phase * (2 * BAND_HALF);
+      var midLon = camLon + 180;
+      var pMid = project(cam, focal, W, H, sph(midLon, centerLat));
+      var pTop = project(cam, focal, W, H, sph(midLon, Math.min(BAND_HALF, centerLat + half)));
+      var pBot = project(cam, focal, W, H, sph(midLon, Math.max(-BAND_HALF, centerLat - half)));
+      if (pMid && pTop && pBot) {
+        var yA = pTop[1], yB = pBot[1];
+        if (yB - yA < 1) yB = yA + 1;
+        var grad = ctx.createLinearGradient(0, yA, 0, yB);
+        for (var st = 0; st < STOPS.length; st++) {
+          grad.addColorStop(STOPS[st][0],
+            'rgba(' + SWEEP[0] + ',' + SWEEP[1] + ',' + SWEEP[2] + ',' +
+            (SWEEP_A * STOPS[st][1]).toFixed(3) + ')');
         }
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        // 5 层光晕：逐层加宽变淡，在网格上留下柔和的拖尾（与原版同一组数字）
+        for (var g = 0; g < GLOW.length; g++) {
+          ctx.globalAlpha = GLOW[g][1];
+          ctx.lineWidth = GLOW[g][0];
+          ctx.strokeStyle = grad;
+          for (var i2 = 0; i2 < base.length; i2++) strokeSeg(base[i2]);
+        }
+        ctx.restore();
       }
-      ctx.restore();
     }
 
     function tick(now) {
@@ -275,8 +317,9 @@
       diag.wheelN++;
       diag.lastDelta = e.deltaY;
       wheelAccum += e.deltaY;
-      // 一格滚轮（deltaY≈100）走 0.06 的缩放行程，手感偏"重"，避免一滑到底
-      var step = 0.06;
+      // 一格滚轮走 0.05 的行程。半径改成几何映射后每格都是等比例的视觉变化，
+      // 所以整段行程的手感均匀，不需要再靠"重"来防一滑到底。
+      var step = 0.05;
       if (Math.abs(wheelAccum) >= 100) {
         var n = Math.trunc(wheelAccum / 100);
         // 往下滚 = 拉远（缩小），往上滚 = 靠近（放大）
@@ -329,11 +372,19 @@
           zoom: zoom, target: target, radius: radius(), phase: phase,
           W: W, H: H, ratio: ratio, wallReady: wallReady,
           tickN: diag.tickN, wheelN: diag.wheelN, lastDelta: diag.lastDelta,
+          bow: BOW, hoop: HOOP,
           scrollY: window.scrollY
         };
       }
     };
   }
 
-  window.WillowXIDome = { create: createDome };
+  window.WillowXIDome = {
+    create: createDome,
+    // 🎛️ 实时调夸张力度（0 = 纯真球面，很平；0.25 左右明显像穹顶）
+    setBow: function (v) { BOW = Number(v) || 0; },
+    setHoop: function (v) { HOOP = Number(v) || 0; },
+    getBow: function () { return BOW; },
+    getHoop: function () { return HOOP; }
+  };
 })();
