@@ -122,8 +122,6 @@
     var wall = null, wallReady = false;
     var detachers = [];
     var diag = { tickN: 0, wheelN: 0, lastDelta: 0 };
-    var tile = null;          // 预模糊好的壁纸瓦片（离屏）
-    var wallTile = 512;       // 瓦片的基准宽度（px）
 
     // 🔴 半径不能线性插值。
     //
@@ -146,61 +144,78 @@
       canvas.style.height = H + 'px';
     }
 
-    // WALLPAPER: its size must be DERIVED FROM THE GRID, never computed on its own.
+    // WALLPAPER, drawn as a TEXTURE ON THE SPHERE -- not as a screen-space tiling.
     //
-    // It used to be `focal * 0.46 / max(0.12, 1 - r)`. That inner max clamped the
-    // divisor once r passed 0.88, so the wallpaper stopped growing while the grid kept
-    // growing -- the reported opposite-direction scaling. It was also a screen-space 2D
-    // tiling while the grid is a real projection, so the two could never agree.
+    // Every earlier version tiled the image in screen space while the grid went through
+    // the real projection plus `exaggerate`. Two different geometries can never agree:
+    // the grid curved and the wallpaper did not (so they did not read as one surface),
+    // they scaled at different rates (the reported opposite-direction zoom), and a
+    // screen-space tiling always leaves hard seams where tiles meet.
     //
-    // Now one tile spans WALL_CELLS grid cells and its screen width comes from the very
-    // same formula the grid uses (same focal, same distance to the wall), so scale,
-    // rate and anchor all match by construction.
-    var WALL_CELLS = 4;          // how many longitude cells one tile spans
-    var LON_STEP = 10;           // MUST match the longitude step in traceGrid
+    // So the wallpaper is now mapped onto the band itself: one pass of the image wraps
+    // the full 360 degrees of longitude and spans the band's latitude, drawn as a mesh of
+    // small quads whose corners come from the SAME `project` the grid uses. That makes the
+    // two literally the same surface -- same scale, same direction, same curvature -- and
+    // a single wrap has no seams to hide.
+    var WALL_COLS = 36;          // quads around the sphere
+    var WALL_ROWS = 8;           // quads across the band
 
-    // Pre-blur the wallpaper ONCE into an offscreen tile, then only drawImage it.
-    // Blurring the whole viewport every frame would be far too expensive, and blurring
-    // each tile separately is what left hard edges between tiles before.
-    function buildTile() {
+    function drawWallpaper(cam, focal) {
       if (!wallReady) return;
-      var ar = wall.naturalHeight / wall.naturalWidth;
-      var c = document.createElement('canvas');
-      c.width = wallTile; c.height = Math.max(1, Math.round(wallTile * ar));
-      var x = c.getContext('2d');
-      x.filter = 'blur(10px)';
-      x.drawImage(wall, -20, -20, c.width + 40, c.height + 40);
-      x.filter = 'none';
-      tile = c;
-    }
-    function tileSize(focal) {
-      // Distance to the wall straight ahead: camera is r from the centre, wall at 1 - r.
-      var d = Math.max(0.06, 1 - radius());
-      var world = 2 * Math.PI * (LON_STEP * WALL_CELLS) / 360;
-      return Math.max(24, focal * world / d);
-    }
-
-    function drawWallpaper(focal) {
-      if (!tile) return;
-      var t = tileSize(focal);
-      var ar = tile.height / tile.width;
-      var th = t * ar;
-      var ox = W * 0.5, oy = H * 0.5;
-      var i0 = Math.floor(-ox / t) - 1, i1 = Math.ceil((W - ox) / t) + 1;
-      var j0 = Math.floor(-oy / th) - 1, j1 = Math.ceil((H - oy) / th) + 1;
+      var iw = wall.naturalWidth, ih = wall.naturalHeight;
       ctx.save();
+      // 一次模糊同时办两件事：抹掉仿射近似留下的块间裂缝，并得到原站那种柔和的
+      // 壁纸质感（原站那层是 46px 模糊）。
+      ctx.filter = 'blur(4px)';
       ctx.globalAlpha = 0.42;
-      for (var j = j0; j <= j1; j++) {
-        for (var i = i0; i <= i1; i++) {
-          var px = ox + i * t, py = oy + j * th;
-          // Mirror HORIZONTALLY only. Mirroring both axes is what made the seam-free
-          // tiling read as a kaleidoscope; left-right mirroring alone still makes the
-          // seam continuous while leaving the vertical repeat untouched.
-          if (i % 2 === 0) { ctx.drawImage(tile, px, py, t, th); continue; }
+      for (var r = 0; r < WALL_ROWS; r++) {
+        var lat0 = -BAND_HALF + (2 * BAND_HALF) * r / WALL_ROWS;
+        var lat1 = -BAND_HALF + (2 * BAND_HALF) * (r + 1) / WALL_ROWS;
+        for (var ci = 0; ci < WALL_COLS; ci++) {
+          var lon0 = -180 + 360 * ci / WALL_COLS;
+          var lon1 = -180 + 360 * (ci + 1) / WALL_COLS;
+          var p00 = project(cam, focal, W, H, sph(lon0, lat0));
+          var p10 = project(cam, focal, W, H, sph(lon1, lat0));
+          var p11 = project(cam, focal, W, H, sph(lon1, lat1));
+          var p01 = project(cam, focal, W, H, sph(lon0, lat1));
+          if (!p00 || !p10 || !p11 || !p01) continue;
+          var sx = iw * ci / WALL_COLS;
+          var sy = ih * (WALL_ROWS - 1 - r) / WALL_ROWS;   // image row 0 is the top
+          var sw = iw / WALL_COLS, sh = ih / WALL_ROWS;
+          // Affine map from the unit square to this quad: origin p00, basis p10-p00 and
+          // p01-p00. `transform` (not setTransform) so the DPR scale stays in effect.
+          var a = p10[0] - p00[0], b = p10[1] - p00[1];
+          var c2 = p01[0] - p00[0], d2 = p01[1] - p00[1];
+          // Expand a hair so neighbouring quads overlap instead of leaving hairlines.
+          var ex = 0, k = 1;   // 不再向外扩（clip 用真实四边形，本来就没有缝）
+          var mx = (a + c2), my = (b + d2);
+          var ml = Math.sqrt(mx * mx + my * my) || 1;
+          var gx = mx / ml * ex, gy = my / ml * ex;
           ctx.save();
-          ctx.translate(px + t, py);
-          ctx.scale(-1, 1);
-          ctx.drawImage(tile, 0, 0, t, th);
+          // 🔴 裁剪路径必须是完整的四边形（四个角）。
+          // 上一版误写成 p00 -> p10 -> p10 -> p00，那是一条线、零面积，clip 之后
+          // 什么都画不出来 —— 壁纸整片消失。
+          // 🔴 裁剪多边形必须比真实四边形**向外放大一点点**。
+          //
+          // 投影后的四边形不是平行四边形，而 canvas 只能做仿射映射，所以每一块都是
+          // 近似；相邻块之间必然合不严，缝里露出底色 —— 画面上就是一道道黑线。
+          // 每块以重心为中心放大 2%，相邻块互相重叠，缝就被盖住了。
+          var mx4 = (p00[0] + p10[0] + p11[0] + p01[0]) / 4;
+          var my4 = (p00[1] + p10[1] + p11[1] + p01[1]) / 4;
+          var E = 1.03;
+          function gz(pt) {
+            return [mx4 + (pt[0] - mx4) * E, my4 + (pt[1] - my4) * E];
+          }
+          var q00 = gz(p00), q10 = gz(p10), q11 = gz(p11), q01 = gz(p01);
+          ctx.beginPath();
+          ctx.moveTo(q00[0], q00[1]);
+          ctx.lineTo(q10[0], q10[1]);
+          ctx.lineTo(q11[0], q11[1]);
+          ctx.lineTo(q01[0], q01[1]);
+          ctx.closePath();
+          ctx.clip();
+          ctx.transform(a * k, b * k, c2 * k, d2 * k, p00[0], p00[1]);
+          ctx.drawImage(wall, sx, sy, sw, sh, 0, 0, 1, 1);
           ctx.restore();
         }
       }
@@ -256,7 +271,7 @@
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
 
       // ① 内壁壁纸
-      drawWallpaper(focal);
+      drawWallpaper(cam, focal);
 
       // ② 透视线（底网格）
       var base = [];
@@ -347,7 +362,7 @@
       // 壁纸：取站上同一张，保证和其它页面同源
       wall = new window.Image();
       wall.decoding = 'async';
-      wall.onload = function () { wallReady = true; buildTile(); render(); };
+      wall.onload = function () { wallReady = true; render(); };
       wall.onerror = function () { wallReady = false; };
       wall.src = canvas.getAttribute('data-dome-wallpaper') || '/images/wallpaper/wallpaper-default.webp';
 
