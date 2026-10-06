@@ -698,7 +698,15 @@
 
     function focusOn(p, ms) {
       focusId = p.id;
-      animateCameraTo(p.lon, p.lat, ms || 900);   // 字段名是 lat，不是 phi
+      // 🔴 相机必须落在照片的**对侧**。
+      //
+      // makeCamera 的朝向是 "从相机位置指向球心"（fwd = -pos），所以坐在 (lon,lat)
+      // 方向上时，看到的是**对侧**球壁。要让方向为 P 的那张照片出现在正前方，相机
+      // 就得在 -P 处：经度 +180、纬度取反。
+      //
+      // 之前写成 animateCameraTo(p.lon, p.lat)，相机于是和那张照片同侧、背对着它，
+      // "聚焦"之后画面里还是一堆小相纸。
+      animateCameraTo(p.lon + 180, -p.lat, ms || 900);
       // 靠近到能看清：0.62 大约是"一张照片占满视口"的距离
       target = 0.62;
     }
@@ -728,14 +736,50 @@
     }
 
     /* ---- 指针：拖动移动视角（Q6/Q17：位置会动、朝向不动）------------ */
+    // ---- 双指缩放（Q12=A）------------------------------------------------
+    //
+    // 用 Pointer Events 自己维护活跃指针表并算两指距离，一套代码同时覆盖鼠标拖动
+    // 与触摸双指。不用 Touch 事件是为了避免和拖动分成两套；Safari 私有的
+    // gesture* 只有 Safari 有，更不该用。
+    var pointers = {}, pinchDist = 0, pinchZoom = 0;
+
+    function livePointers() {
+      var out = [];
+      for (var id in pointers) if (pointers[id]) out.push(pointers[id]);
+      return out;
+    }
+    function dist2(a, b) {
+      var dx = a.x - b.x, dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     function onPointerDown(e) {
       if (!ready || e.button !== 0) return;
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var lp = livePointers();
+      if (lp.length >= 2) {
+        // 第二根手指按下 -> 切到双指缩放，并停止平移
+        dragging = false;
+        pinchDist = dist2(lp[0], lp[1]);
+        pinchZoom = target;
+        return;
+      }
       dragging = true; dragged = 0;
       dragX = e.clientX; dragY = e.clientY;
       flyFrom = null;
       if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
     }
     function onPointerMove(e) {
+      if (pointers[e.pointerId]) { pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY; }
+      var lp = livePointers();
+      if (lp.length >= 2) {
+        var d = dist2(lp[0], lp[1]);
+        if (pinchDist > 0) {
+          // 张开手指 = 靠近（放大）；捏合 = 拉远
+          target = clamp01(pinchZoom + (d / pinchDist - 1) * 1.2);
+        }
+        return;
+      }
       if (!dragging) return;
       var dx = e.clientX - dragX, dy = e.clientY - dragY;
       dragX = e.clientX; dragY = e.clientY;
@@ -746,6 +790,8 @@
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
+      if (pointers[e.pointerId]) delete pointers[e.pointerId];
+      if (livePointers().length < 2) pinchDist = 0;
       if (!dragging) return;
       dragging = false;
       if (canvas.releasePointerCapture && e.pointerId !== undefined) {
@@ -806,7 +852,7 @@
           tickN: diag.tickN, wheelN: diag.wheelN, scrollY: window.scrollY,
           verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
           m0: diag.m0 || null, m1: diag.m1 || null,
-          open: openState, ready: ready, focusId: focusId, err: diag.err, bow: BOW, hoop: HOOP
+          open: openState, ready: ready, focusId: focusId, pointers: livePointers().length, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
     };
