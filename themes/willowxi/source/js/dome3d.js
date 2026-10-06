@@ -437,6 +437,7 @@
       if (Math.abs(target - zoom) > 0.0004) zoom += (target - zoom) * k; else zoom = target;
       phase = (phase + dt / SWEEP_MS) % 1;
       tickOpening(now);
+      tickCamera(now);
       diag.tickN++;
       render();
     }
@@ -491,6 +492,8 @@
       assignSlots(list);
       for (var pi = 0; pi < list.length; pi++) buildMatte(list[pi]);
       photos = list;
+      layer.addEventListener('click', onMatteClick);
+      detachers.push(function () { layer.removeEventListener('click', onMatteClick); });
       diag.photos = photos.length;
 
       wall = new window.Image();
@@ -520,6 +523,16 @@
       document.documentElement.classList.add('is-dome');
       document.body.classList.add('is-dome');
       window.addEventListener('wheel', onWheel, { passive: false });
+      window.addEventListener('keydown', onKey);
+      canvas.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('pointermove', onPointerMove, { passive: true });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+      detachers.push(function () { window.removeEventListener('keydown', onKey); });
+      detachers.push(function () { canvas.removeEventListener('pointerdown', onPointerDown); });
+      detachers.push(function () { window.removeEventListener('pointermove', onPointerMove); });
+      detachers.push(function () { window.removeEventListener('pointerup', onPointerUp); });
+      detachers.push(function () { window.removeEventListener('pointercancel', onPointerUp); });
       window.addEventListener('resize', onResize);
       detachers.push(function () { window.removeEventListener('wheel', onWheel); });
       detachers.push(function () { window.removeEventListener('resize', onResize); });
@@ -646,6 +659,134 @@
       ready = true;       // 到这里才允许缩放
     }
 
+    // ---- 阶段⑤：探索与聚焦 ---------------------------------------------
+    //
+    // 相机**位置会动、朝向不动**（Q17=A）：拖动沿环带与竖直方向平移，滚轮沿半径
+    // 进出。聚焦就是让相机滑到那张照片的正对面（Q13），移动本身用非线性缓动
+    // （Q18=C）—— 因为相机是连续移动的，中间的照片自然会掠过。
+    var tLon = 0, tPhi = 0;        // 相机目标经纬度
+    var flyFrom = null, flyAt = 0, flyMs = 0;
+    var dragging = false, dragX = 0, dragY = 0, dragged = 0;
+    var focusId = null;
+
+    function animateCameraTo(lon, phi, ms) {
+      // 取最短路径，避免绕远路（经度环绕）
+      var d = lon - camLon;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      flyFrom = { lon: camLon, phi: camPhi };
+      tLon = camLon + d;
+      tPhi = phi;
+      flyAt = performance.now();
+      flyMs = ms || 900;
+    }
+
+    function tickCamera(now) {
+      if (dragging || !flyFrom) return;
+      var k = flyMs > 0 ? (now - flyAt) / flyMs : 1;
+      if (k >= 1) { camLon = tLon; camPhi = tPhi; flyFrom = null; return; }
+      // easeInOutCubic：起步慢、中间快、落位慢 —— 即用户要的"非线性移动"
+      var e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      camLon = flyFrom.lon + (tLon - flyFrom.lon) * e;
+      camPhi = flyFrom.phi + (tPhi - flyFrom.phi) * e;
+    }
+
+    function photoById(id) {
+      for (var i = 0; i < photos.length; i++) if (photos[i].id === id) return photos[i];
+      return null;
+    }
+
+    function focusOn(p, ms) {
+      focusId = p.id;
+      animateCameraTo(p.lon, p.lat, ms || 900);   // 字段名是 lat，不是 phi
+      // 靠近到能看清：0.62 大约是"一张照片占满视口"的距离
+      target = 0.62;
+    }
+
+    function leaveFocus() {
+      focusId = null;
+      target = 0;
+    }
+
+    // 同一排里左右相邻的那张（Q19=C：箭头切相邻）
+    function stepFocus(dir) {
+      if (!focusId) return;
+      var cur = photoById(focusId);
+      if (!cur) return;
+      var best = null, bestD = 1e9;
+      for (var i = 0; i < photos.length; i++) {
+        var q = photos[i];
+        if (q === cur) continue;
+        if (Math.abs(q.lat - cur.lat) > 0.5) continue;   // 只在同一排里找
+        var d = q.lon - cur.lon;
+        while (d > 180) d -= 360;
+        while (d < -180) d += 360;
+        if (dir > 0 ? d <= 0.5 : d >= -0.5) continue;
+        if (Math.abs(d) < bestD) { bestD = Math.abs(d); best = q; }
+      }
+      if (best) focusOn(best, 620);
+    }
+
+    /* ---- 指针：拖动移动视角（Q6/Q17：位置会动、朝向不动）------------ */
+    function onPointerDown(e) {
+      if (!ready || e.button !== 0) return;
+      dragging = true; dragged = 0;
+      dragX = e.clientX; dragY = e.clientY;
+      flyFrom = null;
+      if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+    }
+    function onPointerMove(e) {
+      if (!dragging) return;
+      var dx = e.clientX - dragX, dy = e.clientY - dragY;
+      dragX = e.clientX; dragY = e.clientY;
+      dragged += Math.abs(dx) + Math.abs(dy);
+      // 转成视角：水平拖动绕竖直轴，竖直拖动改变纬度
+      camLon -= dx * 0.22;
+      camPhi = Math.max(-32, Math.min(32, camPhi + dy * 0.16));
+      tLon = camLon; tPhi = camPhi;
+    }
+    function onPointerUp(e) {
+      if (!dragging) return;
+      dragging = false;
+      if (canvas.releasePointerCapture && e.pointerId !== undefined) {
+        try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+      // 🔴 必须复位 dragged。pointerup 之后浏览器才派发 click，而 click 处理器用
+      // `dragged > 6` 过滤掉"拖完就跳"的误触 —— dragged 不复位的话，一旦拖过一次，
+      // 之后所有点击都会被当成拖动尾巴而丢弃，表现为"点相纸没反应"。
+      window.setTimeout(function () { dragged = 0; }, 0);
+    }
+
+    // 点相纸 = 直接过去那张（Q19=C）。拖动过程里不触发，避免"拖完就跳"。
+    function onMatteClick(e) {
+      if (!ready) return;
+      if (dragged > 6) return;
+      var el = e.target;
+      while (el && el !== layer && !el.getAttribute('data-id')) el = el.parentNode;
+      if (!el || el === layer) return;
+      var id = el.getAttribute('data-id');
+      var p2 = photoById(id);
+      if (p2) { e.stopPropagation(); focusOn(p2, 900); }
+    }
+
+    function onKey(e) {
+      if (!ready) return;
+      if (e.key === 'Escape') { leaveFocus(); return; }
+      if (e.key === 'ArrowRight') { focusId ? stepFocus(1) : (animateCameraTo(camLon + 30, camPhi, 520), null); return; }
+      if (e.key === 'ArrowLeft') { focusId ? stepFocus(-1) : (animateCameraTo(camLon - 30, camPhi, 520), null); return; }
+      if (e.key === '+' || e.key === '=') { target = Math.min(1, target + 0.12); return; }
+      if (e.key === '-' || e.key === '_') { target = Math.max(0, target - 0.12); return; }
+      if (e.key === 'Enter') {
+        // 聚焦视野中心最近的那张
+        var best = null, bestZ = 1e9;
+        for (var i = 0; i < photos.length; i++) {
+          var q = photos[i];
+          if (q.z > 0.06 && q.z < bestZ) { bestZ = q.z; best = q; }
+        }
+        if (best) focusOn(best, 900);
+      }
+    }
+
     function destroy() {
       if (frameRequest) { window.cancelAnimationFrame(frameRequest); frameRequest = 0; }
       for (var i = 0; i < detachers.length; i++) detachers[i]();
@@ -660,11 +801,12 @@
       state: function () {
         return {
           zoom: zoom, target: target, radius: radius(), phase: phase,
+          camLon: Math.round(camLon * 10) / 10, camPhi: Math.round(camPhi * 10) / 10,
           W: W, H: H, ratio: ratio, wallReady: wallReady,
           tickN: diag.tickN, wheelN: diag.wheelN, scrollY: window.scrollY,
           verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
           m0: diag.m0 || null, m1: diag.m1 || null,
-          open: openState, ready: ready, err: diag.err, bow: BOW, hoop: HOOP
+          open: openState, ready: ready, focusId: focusId, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
     };
