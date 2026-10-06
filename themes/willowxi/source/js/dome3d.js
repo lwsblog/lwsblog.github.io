@@ -28,8 +28,8 @@
   // 它只在**顶点**上做，而三角形内部是屏幕空间线性插值的，非线性形变于是
   // 让每条网格线在三角形边界折一下（用户截图里的折角）。
   // 相机模型修正之后，真球面投影本身已经够弯，不再需要它。
-  var BOW = 0.34;            // 穹顶夸张：水平收腰
-  var HOOP = 0.24;           // 穹顶夸张：横线外弓
+  var BOW = 0.20;   // 0.34 透视过夸张，收敛            // 穹顶夸张：水平收腰
+  var HOOP = 0.14;           // 穹顶夸张：横线外弓
   var SWEEP_MS = 9000;       // 扫光一轮毫秒（原站 4s，穹顶视野更大故放慢）
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
@@ -213,7 +213,7 @@
     // 上传的就是那张模糊图。这里只剩 1 次采样。
     '  vec4 w = texture2D(uTex, fract(vUV));',    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
     '  col = mix(col, wall, w.a * uWallA);',
-    '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
+    '  float m = max(lineMask(lat, uLatStep, 1.9), lineMask(lon, uLonStep, 1.9));',
     '  col += uGridRGB * m * uGridA;',
     '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
     // 亮带经过时线也变宽一点，光带才成型（只影响扫光这一项，底网格不变）
@@ -228,9 +228,9 @@
     // 光晕必须**从线向外平滑衰减**，否则只是"线变粗"。
     // lineMask 的衰减 smoothstep(w*0.35, w*1.15, d) 很硬，给大了就是一坨均匀粗线。
     // 用单独的 glowMask（平方衰减 + 大半径）才是一圈光。
-    '  float haloA = max(glowMask(lat, uLatStep, 26.0), glowMask(lon, uLonStep, 26.0));',
+    '  float haloA = max(glowMask(lat, uLatStep, 44.0), glowMask(lon, uLonStep, 44.0));',
     '  col += uSweepRGB * haloA * sw * uSweepA * 0.16;',
-    '  float haloB = max(glowMask(lat, uLatStep, 70.0), glowMask(lon, uLonStep, 70.0));',
+    '  float haloB = max(glowMask(lat, uLatStep, 120.0), glowMask(lon, uLonStep, 120.0));',
     '  col += uSweepRGB * haloB * sw * uSweepA * 0.06;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
