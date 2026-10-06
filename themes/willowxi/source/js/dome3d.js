@@ -102,6 +102,9 @@
     'varying float vLat;',
     'varying float vLon;',
     'varying vec2 vUV;',
+    // 球面位置也传下去。经纬度在球面上是弯的，而 varying 在三角形内是线性插值的；
+    // 直接插值经纬度会让网格线在三角形边界折成折线（放大时尤其明显）。
+    'varying vec3 vPos;',
     'void main() {',
     '  vec3 d = aPos - uEye;',
     '  float z = dot(d, uFwd);',
@@ -135,6 +138,7 @@
     '  vLat = aLat;',
     '  vLon = aLon;',
     '  vUV = aUV;',
+    '  vPos = aPos;',
     '}'
   ].join('\n');
 
@@ -154,6 +158,7 @@
     'varying float vLat;',
     'varying float vLon;',
     'varying vec2 vUV;',
+    'varying vec3 vPos;',
     // Distance to the nearest grid line (in degrees), compared against a width expressed
     // in degrees, so the line keeps a constant on-screen width.
     'float lineMask(float v, float st, float px) {',
@@ -171,11 +176,17 @@
     '}',
     'void main() {',
     '  vec3 col = uInk;',
+    // 由球面位置反算精确经纬度（与 JS 的 sph() 一致：y=sin(lat)、x=sin(lon)cos(lat)、
+    // z=cos(lon)cos(lat)）。不直接用 vLat/vLon 是因为它们在三角形内是线性插值的，
+    // 会把网格线在三角形边界折成折线。
+    '  vec3 nrm = normalize(vPos);',
+    '  float lat = degrees(asin(clamp(nrm.y, -1.0, 1.0)));',
+    '  float lon = degrees(atan(nrm.x, nrm.z));',
     '  vec4 w = texture2D(uTex, fract(vUV));',
     '  col = mix(col, w.rgb, w.a * uWallA);',
-    '  float m = max(lineMask(vLat, uLatStep, 1.15), lineMask(vLon, uLonStep, 1.15));',
+    '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
-    '  float sw = profile((vLat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
+    '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
     '  col += uSweepRGB * m * sw * uSweepA;',
     // The band also lifts the surface a touch, so it reads as light passing over the
     // wallpaper rather than as only the lines glowing.
@@ -322,20 +333,19 @@
         var xc = ex * cam.right[0] + ey * cam.right[1] + ez * cam.right[2];
         var tilt = Math.atan2(xc, zz) * 180 / Math.PI;
         if (tilt > 40) tilt = 40; if (tilt < -40) tilt = -40;
-        // 景深：按相对最近距离分档（绝对距离在相机后退时会让整屏一起糊）
-        var rel = zz / zmin;
-        var blur = 0, dim = 0;
-        if (rel > 2.6) { blur = 7; dim = 0.42; }
-        else if (rel > 1.8) { blur = 3.6; dim = 0.22; }
-        else if (rel > 1.3) { blur = 1.6; dim = 0.08; }
+        // 不做模糊、不做压暗 —— 用户明确否掉："谁要这个模糊了"。而且那层模糊本身
+        // 就是"照片飘在空中"的一部分原因：一张又虚又半透明的卡片，读起来就是浮在
+        // 墙前的贴纸，不是墙上自带的东西。纵深改由透视（近大远小）自己承担。
         q.el.style.display = '';
         q.el.style.width = wpx.toFixed(1) + 'px';
         q.el.style.height = hpx.toFixed(1) + 'px';
+        // 只有横向侧倾（贴球面内壁时照片本来就是竖着朝向球心的）。不再有 blur/
+        // opacity —— 照片一律清晰、不透明。
         q.el.style.transform = 'translate(' + (pt[0] - wpx / 2).toFixed(1) + 'px,' +
           (pt[1] - hpx / 2).toFixed(1) + 'px) perspective(1500px) rotateY(' +
           tilt.toFixed(2) + 'deg)';
-        q.el.style.filter = blur ? 'blur(' + blur + 'px)' : '';
-        q.el.style.opacity = String(1 - dim);
+        q.el.style.filter = '';
+        q.el.style.opacity = '1';
         q.el.style.zIndex = String(2000 - Math.round(zz * 100));
       }
     }
@@ -416,8 +426,13 @@
       gl.uniform3fv(loc.uSweepRGB, SWEEP_RGB);
       gl.uniform3fv(loc.uInk, INK);
 
-      var half = BAND_HALF * BAND_FRAC * 0.5;
-      var c0 = -BAND_HALF + phase * (2 * BAND_HALF);
+      // 🔴 亮带要在**相机当前纬度附近**扫，不能在整个球带 -55..+55 上扫。
+      // 朝外看之后相机只看到一小块墙（fov 58°、墙距约 0.9），按全域扫时亮带绝大部分
+      // 时间在视野之外 —— 用户："还有扫光特效去哪里了"。以相机纬度为中心、上下各
+      // SWEEP_SPAN 度来回扫，亮带就始终在画面里。
+      var SWEEP_SPAN = 26;
+      var half = SWEEP_SPAN * BAND_FRAC * 0.5;
+      var c0 = camPhi - SWEEP_SPAN + phase * (2 * SWEEP_SPAN);
       gl.uniform1f(loc.uBandLo, c0 - half);
       gl.uniform1f(loc.uBandHi, c0 + half);
       gl.uniform1f(loc.uSweepOn, 1);
@@ -798,8 +813,13 @@
       dragX = e.clientX; dragY = e.clientY;
       dragged += Math.abs(dx) + Math.abs(dy);
       // 转成视角：水平拖动绕竖直轴，竖直拖动改变纬度
-      camLon -= dx * 0.22;
-      camPhi = Math.max(-32, Math.min(32, camPhi + dy * 0.16));
+      // 方向反过来 —— 要的是"抓住穹顶拉着走"：相机朝外看时 camLon 增加 = 视线向右
+      // 转 = 墙上的东西向左跑；要让人觉得是把穹顶往右拉，camLon 就得加。
+      // 竖直方向同理，并且把范围收紧（用户："上下移动范围太大了"）。
+      camLon += dx * 0.22;
+      // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
+      // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
+      camPhi = Math.max(-12, Math.min(12, camPhi - dy * 0.09));
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
