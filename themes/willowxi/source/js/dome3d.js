@@ -47,7 +47,9 @@
   var GRID_RGB = [196 / 255, 224 / 255, 236 / 255];
   var GRID_A = 0.5;
   var SWEEP_RGB = [214 / 255, 240 / 255, 255 / 255];
-  var SWEEP_A = 0.45;
+  // 🎛️ 只让线发亮之后，光带就只剩细线上的一点亮度，0.45 根本看不见
+  // （用户："扫光怎么又没了"）。线很细，所以亮度必须给足。
+  var SWEEP_A = 1.8;
   var WALL_A = 0.55;
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -215,7 +217,10 @@
     '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
     '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
-    '  col += uSweepRGB * m * sw * uSweepA;',
+    // 亮带经过时线也变宽一点，光带才成型（只影响扫光这一项，底网格不变）
+    '  float mw = max(lineMask(lat, uLatStep, 1.15 + 1.6 * sw),',
+    '                 lineMask(lon, uLonStep, 1.15 + 1.6 * sw));',
+    '  col += uSweepRGB * mw * sw * uSweepA;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
     // 是只有网格线发亮"。去掉这一项。
@@ -719,8 +724,11 @@
       }
       // 🔴 标题删完 = 镜头拉远。因为开场就是"怼着墙上那张拍"，这里只要把缩放拉回
       // 最远（相机位置不动），穹顶就自然展开了 —— 没有任何过渡动画要写。
-      ready = true;       // 到这里才允许缩放
-      target = 0;
+      // 🔴 不要自己拉开。
+      //
+      // 用户："镜头开屏拉开不是动画做的，是我滚轮动的"。所以标题删完之后相机就
+      // **停在照片前**，只是把缩放解锁；拉远由用户滚轮驱动。
+      ready = true;
     }
 
     // ---- 阶段⑤：探索与聚焦 ---------------------------------------------
