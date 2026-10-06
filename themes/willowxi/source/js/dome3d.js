@@ -28,8 +28,8 @@
   // 它只在**顶点**上做，而三角形内部是屏幕空间线性插值的，非线性形变于是
   // 让每条网格线在三角形边界折一下（用户截图里的折角）。
   // 相机模型修正之后，真球面投影本身已经够弯，不再需要它。
-  var BOW = 0.14;            // 穹顶夸张：水平收腰
-  var HOOP = 0.10;           // 穹顶夸张：横线外弓
+  var BOW = 0.34;            // 穹顶夸张：水平收腰
+  var HOOP = 0.24;           // 穹顶夸张：横线外弓
   var SWEEP_MS = 9000;       // 扫光一轮毫秒（原站 4s，穹顶视野更大故放慢）
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
@@ -54,7 +54,7 @@
   var SWEEP_RGB = [214 / 255, 240 / 255, 255 / 255];
   // 🎛️ 只让线发亮之后，光带就只剩细线上的一点亮度，0.45 根本看不见
   // （用户："扫光怎么又没了"）。线很细，所以亮度必须给足。
-  var SWEEP_A = 3.2;
+  var SWEEP_A = 1.15;   // 3.2 会过曝成一整片白
   var WALL_A = 0.55;
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -229,9 +229,9 @@
     // lineMask 的衰减 smoothstep(w*0.35, w*1.15, d) 很硬，给大了就是一坨均匀粗线。
     // 用单独的 glowMask（平方衰减 + 大半径）才是一圈光。
     '  float haloA = max(glowMask(lat, uLatStep, 26.0), glowMask(lon, uLonStep, 26.0));',
-    '  col += uSweepRGB * haloA * sw * uSweepA * 0.55;',
+    '  col += uSweepRGB * haloA * sw * uSweepA * 0.16;',
     '  float haloB = max(glowMask(lat, uLatStep, 70.0), glowMask(lon, uLonStep, 70.0));',
-    '  col += uSweepRGB * haloB * sw * uSweepA * 0.22;',
+    '  col += uSweepRGB * haloB * sw * uSweepA * 0.06;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
     // 是只有网格线发亮"。去掉这一项。
