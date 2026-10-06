@@ -29,6 +29,10 @@
   var GLOW = [[2.6, 0.6], [5.5, 0.42], [10, 0.26], [17, 0.14], [27, 0.07]];
   // 亮带厚度占球带张角的比例（原版是屏高的 55%）
   var BAND_FRAC = 0.55;
+  // SWEEP: one full pass in ms. The original scene uses 4s, but that sits on a
+  // 46px-blurred plate; the dome is a crisp field with a much wider view, so the same
+  // 4s reads as a flash. User: the sweep is too fast.
+  var SWEEP_MS = 9000;
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
@@ -66,8 +70,8 @@
   // 原站那个"穹顶感"来自刻意把平面网格掰弯（bow .17 / hoop .13），比真实球面弯得多。
   // 所以这里在**真投影之上**再叠一层同类形变，把穹顶弯度补回来。
   // 0 = 纯真球面（很平）；越大越像原站。
-  var BOW = 0.16;      // 水平"收腰"：屏幕中部往里挤
-  var HOOP = 0.12;     // 横线向外"弓"
+  var BOW = 0.26;      // 水平"收腰"：屏幕中部往里挤
+  var HOOP = 0.20;     // 横线向外"弓"
 
   function exaggerate(x, y, W, H) {
     if (!BOW && !HOOP) return [x, y];
@@ -142,13 +146,22 @@
       canvas.style.height = H + 'px';
     }
 
-    // 壁纸拼接：瓦片宽度 = 焦平面上一段世界长度 / 到墙的距离，所以贴近时瓦片变大
-    function tileSize(focal) {
-      return Math.max(40, focal * 0.46 / Math.max(0.12, 1 - radius()));
-    }
+    // WALLPAPER: its size must be DERIVED FROM THE GRID, never computed on its own.
+    //
+    // It used to be `focal * 0.46 / max(0.12, 1 - r)`. That inner max clamped the
+    // divisor once r passed 0.88, so the wallpaper stopped growing while the grid kept
+    // growing -- the reported opposite-direction scaling. It was also a screen-space 2D
+    // tiling while the grid is a real projection, so the two could never agree.
+    //
+    // Now one tile spans WALL_CELLS grid cells and its screen width comes from the very
+    // same formula the grid uses (same focal, same distance to the wall), so scale,
+    // rate and anchor all match by construction.
+    var WALL_CELLS = 4;          // how many longitude cells one tile spans
+    var LON_STEP = 10;           // MUST match the longitude step in traceGrid
 
-    // 预模糊：把壁纸画进一张离屏画布并做一次 blur。之后每帧只是 drawImage 缩放，
-    // 既软化了拼接缝，又避免了每帧对整屏做 filter:blur()。
+    // Pre-blur the wallpaper ONCE into an offscreen tile, then only drawImage it.
+    // Blurring the whole viewport every frame would be far too expensive, and blurring
+    // each tile separately is what left hard edges between tiles before.
     function buildTile() {
       if (!wallReady) return;
       var ar = wall.naturalHeight / wall.naturalWidth;
@@ -156,10 +169,15 @@
       c.width = wallTile; c.height = Math.max(1, Math.round(wallTile * ar));
       var x = c.getContext('2d');
       x.filter = 'blur(10px)';
-      // 多画一圈，模糊后边缘才不会透明
       x.drawImage(wall, -20, -20, c.width + 40, c.height + 40);
       x.filter = 'none';
       tile = c;
+    }
+    function tileSize(focal) {
+      // Distance to the wall straight ahead: camera is r from the centre, wall at 1 - r.
+      var d = Math.max(0.06, 1 - radius());
+      var world = 2 * Math.PI * (LON_STEP * WALL_CELLS) / 360;
+      return Math.max(24, focal * world / d);
     }
 
     function drawWallpaper(focal) {
@@ -167,28 +185,21 @@
       var t = tileSize(focal);
       var ar = tile.height / tile.width;
       var th = t * ar;
-      // 以视口中心为锚，向外铺满。每帧最多 ~ (W/t+2)*(H/th+2) 次 drawImage。
-      // 🔴 锚点必须是视口中心，和 3D 投影同心。
-      // 之前用 (0.5W, 0.42H)：壁纸是绕 0.42H 的纯 2D 缩放，网格是绕 0.5H 的
-      // 真投影，同一次缩放里两者朝不同方向跑 —— 用户："背景和网格缩放方向不一致"。
       var ox = W * 0.5, oy = H * 0.5;
       var i0 = Math.floor(-ox / t) - 1, i1 = Math.ceil((W - ox) / t) + 1;
       var j0 = Math.floor(-oy / th) - 1, j1 = Math.ceil((H - oy) / th) + 1;
       ctx.save();
       ctx.globalAlpha = 0.42;
-      // 🔴 镜像拼接：相邻瓦片交替水平/垂直翻转。
-      //
-      // 直接把同一张图平铺会在块与块之间留下硬边 —— 每块是各自模糊的副本，边缘
-      // 天然对不上。镜像之后，两块相接处是"同一列像素的镜像"，边缘必然连续，
-      // 缝就没了。这是瓷砖铺法的老办法，不需要跨块模糊（那要每帧模糊整屏）。
       for (var j = j0; j <= j1; j++) {
         for (var i = i0; i <= i1; i++) {
           var px = ox + i * t, py = oy + j * th;
-          var fx = (i % 2 !== 0), fy = (j % 2 !== 0);
-          if (!fx && !fy) { ctx.drawImage(tile, px, py, t, th); continue; }
+          // Mirror HORIZONTALLY only. Mirroring both axes is what made the seam-free
+          // tiling read as a kaleidoscope; left-right mirroring alone still makes the
+          // seam continuous while leaving the vertical repeat untouched.
+          if (i % 2 === 0) { ctx.drawImage(tile, px, py, t, th); continue; }
           ctx.save();
-          ctx.translate(px + (fx ? t : 0), py + (fy ? th : 0));
-          ctx.scale(fx ? -1 : 1, fy ? -1 : 1);
+          ctx.translate(px + t, py);
+          ctx.scale(-1, 1);
           ctx.drawImage(tile, 0, 0, t, th);
           ctx.restore();
         }
@@ -301,7 +312,7 @@
       if (Math.abs(target - zoom) > 0.0004) zoom += (target - zoom) * k;
       else zoom = target;
       // 扫光 4s 一轮（与 _config.yml 的 sweep_duration 一致）
-      phase = (phase + dt / 4000) % 1;
+      phase = (phase + dt / SWEEP_MS) % 1;
       diag.tickN++;
       render();
     }
