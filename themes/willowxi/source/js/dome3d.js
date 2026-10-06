@@ -27,7 +27,11 @@
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.5;        // 网格：纬线间距（度）
   var LON_STEP = 10.0;       // 网格：经线间距（度）
-  var WALL_REPEAT = 4;       // 壁纸绕球几圈
+  var WALL_REPEAT = 4;       // 壁纸绕球几圈（横向）
+  var WALL_AR = 1280 / 533;  // 壁纸原始宽高比，用来定纵向重复次数
+  // 一个横向重复覆盖 360/WALL_REPEAT 度经度；按原图比例，它应当覆盖
+  // (360/WALL_REPEAT)/WALL_AR 度纬度。球带高 2*BAND_HALF，于是纵向需要重复：
+  var WALL_VREP = (2 * BAND_HALF) / ((360 / WALL_REPEAT) / WALL_AR);
 
   // 与站上一致的色值
   var INK = [0.035, 0.043, 0.059];
@@ -91,7 +95,15 @@
     // divide and the near-plane clip back to the GPU, and the exaggeration survives
     // because it is applied before this conversion.
     '  float zc = max(z, 0.01);',
-    '  gl_Position = vec4((sx2 / uHalfW - 1.0) * zc, (1.0 - sy2 / uHalfH) * zc, 0.0, zc);',
+    // Real perspective depth, so overlapping geometry (the band wraps all the way
+    // around the camera, and its far and near parts can land on the same pixel) is
+    // resolved by the depth buffer instead of by draw order. With clip.z pinned to 0
+    // and the depth test off, whichever triangle happened to be rasterised last won --
+    // which is exactly what made the UV field jump along a hard line.
+    '  const float NEAR = 0.02;',
+    '  const float FAR = 10.0;',
+    '  float ndcZ = (FAR + NEAR) / (FAR - NEAR) - 2.0 * FAR * NEAR / ((FAR - NEAR) * zc);',
+    '  gl_Position = vec4((sx2 / uHalfW - 1.0) * zc, (1.0 - sy2 / uHalfH) * zc, ndcZ * zc, zc);',
     '  vLat = aLat;',
     '  vLon = aLon;',
     '  vUV = aUV;',
@@ -109,6 +121,7 @@
     // (headless/software WebGL in particular) and the shader then fails to compile, which
     // takes the whole scene down with it.
     'uniform float uDegPerPx;',
+    'uniform float uDebug;',
     'uniform vec3 uGridRGB, uSweepRGB, uInk;',
     'varying float vLat;',
     'varying float vLon;',
@@ -130,7 +143,7 @@
     '}',
     'void main() {',
     '  vec3 col = uInk;',
-    '  vec4 w = texture2D(uTex, vUV);',
+    '  vec4 w = texture2D(uTex, fract(vUV));',
     '  col = mix(col, w.rgb, w.a * uWallA);',
     '  float m = max(lineMask(vLat, uLatStep, 1.15), lineMask(vLon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
@@ -140,6 +153,7 @@
     // wallpaper rather than as only the lines glowing.
     '  col += uSweepRGB * sw * 0.045;',
     '  gl_FragColor = vec4(col, 1.0);',
+    '  if (uDebug > 0.5) gl_FragColor = vec4(fract(vUV.x), vUV.y, 0.0, 1.0);',
     '}'
   ].join('\n');
 
@@ -180,7 +194,7 @@
             var q = quad[tri[t]], P = sph(q[0], q[1]);
             v.push(P[0], P[1], P[2], q[1], q[0],
               ((q[0] + 180) / 360) * WALL_REPEAT,
-              1 - (q[1] + BAND_HALF) / (2 * BAND_HALF));
+              ((q[1] + BAND_HALF) / (2 * BAND_HALF)) * WALL_VREP);
           }
         }
       }
@@ -205,8 +219,9 @@
     function render() {
       if (!gl || !prog || !W || !H) return;
       gl.clearColor(INK[0], INK[1], INK[2], 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.disable(gl.DEPTH_TEST);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
       gl.disable(gl.BLEND);              // the fragment composes everything, opaque out
 
       var cam = makeCamera(camLon, camPhi, radius());
@@ -239,6 +254,7 @@
       gl.uniform1f(loc.uBandLo, c0 - half);
       gl.uniform1f(loc.uBandHi, c0 + half);
       gl.uniform1f(loc.uSweepOn, 1);
+      gl.uniform1f(loc.uDebug, /[?&]uvdebug=1/.test(location.search) ? 1 : 0);
 
       if (tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); }
       gl.uniform1i(loc.uTex, 0);
@@ -298,7 +314,7 @@
       });
       ['uEye', 'uRight', 'uUp', 'uFwd', 'uFocal', 'uHalfW', 'uHalfH', 'uBow', 'uHoop',
        'uLatStep', 'uLonStep', 'uGridA', 'uSweepA', 'uWallA', 'uSweepOn', 'uDegPerPx',
-       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex'].forEach(function (n) {
+       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex', 'uDebug'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       buildMesh();
@@ -311,7 +327,14 @@
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wall);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        // 🔴 BOTH axes must be CLAMP_TO_EDGE.
+        //
+        // The wallpaper is 1280x533 -- NOT a power of two. In WebGL1 an NPOT texture
+        // with REPEAT wrap is INCOMPLETE, and an incomplete texture samples as pure
+        // black: that is why the wall stayed dark no matter how correct the UVs and the
+        // geometry were. The tiling is done in the shader with fract() instead, which
+        // needs no REPEAT mode at all.
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
