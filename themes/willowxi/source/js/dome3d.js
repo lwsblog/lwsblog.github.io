@@ -64,6 +64,22 @@
     };
   }
 
+  // CPU 侧的投影 + 夸张。必须与顶点着色器里的公式逐字一致 —— 相纸是 DOM，
+  // 网格是 WebGL，两者只有共用同一份公式才不会在缩放/移动时错开。
+  function projectPoint(cam, focal, W, H, P) {
+    var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
+    var z = dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2];
+    if (z <= 0.06) return null;
+    var xc = dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2];
+    var yc = dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2];
+    var sx = W * 0.5 + focal * xc / z, sy = H * 0.5 - focal * yc / z;
+    var ty = (sy - H * 0.5) / (H * 0.5);
+    var waist = 1 - BOW * Math.max(0, 1 - ty * ty);
+    var sx2 = W * 0.5 + (sx - W * 0.5) * waist;
+    var tx = (sx - W * 0.5) / (W * 0.5);
+    var sy2 = sy + HOOP * tx * tx * (sy - H * 0.5);
+    return [sx2, sy2];
+  }
   var VS = [
     'attribute vec3 aPos;',
     'attribute float aLat;',
@@ -172,6 +188,145 @@
     var prog = null, loc = {}, buf = null, nVerts = 0;
     var diag = { tickN: 0, wheelN: 0, verts: 0, err: '', draws: 0 };
 
+    // ---- 相纸：贴在内壁上的照片 ----------------------------------------
+    var MATTE_ARC = 13.0;        // 一张相纸占的弧长（度）—— 统一弧长
+    var MATTE_AR = 1.30;         // 相纸本身的宽高比（不是照片的）
+    var perRowMin = 10, perRowMax = 14;
+    var photos = [];             // {el, img, lat, lon}
+
+    // 从页面上已有的相框里取数据。旧相册的 DOM 还在（阶段④才移除），正好复用
+    // 它的 data-id / --ratio / 图片地址，不必再引一份数据。
+    function collectPhotos() {
+      var frames = root.querySelectorAll('[data-photo-frame]');
+      var out = [];
+      for (var i = 0; i < frames.length; i++) {
+        var f = frames[i];
+        var img = f.querySelector('img');
+        if (!img) continue;
+        var ratio = parseFloat(img.getAttribute('width')) /
+                    parseFloat(img.getAttribute('height'));
+        out.push({
+          id: f.getAttribute('data-id') || String(i + 1),
+          tally: f.getAttribute('data-tally') || String(i + 1),
+          src: img.getAttribute('src'),
+          ratio: isFinite(ratio) && ratio > 0 ? ratio : 1.5
+        });
+      }
+      return out;
+    }
+
+    // 排数与每排张数随总数自适应，让每排落在 perRowMin..perRowMax 张之间。
+    // 这与样张 dome-lab 里定稿的规则一致。
+    function assignSlots(list) {
+      var n = list.length;
+      if (!n) return;
+      var rows = 3;
+      for (var r = 2; r <= 8; r++) {
+        var per = n / r;
+        if (per >= perRowMin - 1 && per <= perRowMax + 1) { rows = r; break; }
+      }
+      var base = Math.floor(n / rows);
+      var counts = [], extra = n % rows;
+      for (var i = 0; i < rows; i++) counts.push(base + (i < extra ? 1 : 0));
+      // 行纬度必须落在**竖直视场角以内**，否则上下排整个跑到画面外。
+      //
+      // fov 58 是水平视场角；1440x900 下竖直视场角 = 2*atan(tan(29°)/1.6) ≈ 38°，
+      // 所以行的纬度要收在 ±19° 之内。之前用 BAND_HALF*0.82 = ±45.1°，两排全在
+      // 屏幕外 —— 这就是相纸一张都看不见的原因（zz 和尺寸检查都通过，只是位置在
+      // 画面之外）。
+      var span = Math.min(BAND_HALF * 0.82, 11);
+      var lat = [], k = 0;
+      for (var ri = 0; ri < rows; ri++) {
+        lat.push(rows === 1 ? 0 : span - 2 * span * ri / (rows - 1));
+      }
+      for (var ri2 = 0; ri2 < rows; ri2++) {
+        var step = 360 / counts[ri2];
+        for (var j = 0; j < counts[ri2]; j++) {
+          // 奇偶排错半格（交错排布）
+          list[k].lat = lat[ri2];
+          list[k].lon = j * step + (ri2 % 2) * step * 0.5;
+          k++;
+        }
+      }
+    }
+
+    function buildMatte(p) {
+      var el = document.createElement('div');
+      el.setAttribute('data-dome-matte', '');
+      el.setAttribute('data-id', p.id);
+      var win = document.createElement('div');
+      win.className = 'win';
+      var img = document.createElement('img');
+      img.src = p.src;
+      img.alt = '';
+      img.draggable = false;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      win.appendChild(img);
+      el.appendChild(win);
+      var cap = document.createElement('span');
+      cap.className = 'cap';
+      cap.textContent = p.tally;
+      el.appendChild(cap);
+      // 照片按原比例内嵌：宽高比由图片自身决定，用 max-width/height 居中留边
+      var iw = 1 - 2 * 0.055;
+      if (p.ratio >= MATTE_AR * (iw / (1 - 0.055 - 0.14))) {
+        img.style.width = '100%';
+      } else {
+        img.style.height = '100%';
+      }
+      p.el = el; p.img = img;
+      layer.appendChild(el);
+    }
+
+    var layer = null;
+    var matteWorld = 2 * Math.sin(MATTE_ARC * Math.PI / 360);
+
+    // 每帧按与 WebGL 完全相同的投影 + 夸张写位置，所以相纸与网格不可能错位。
+    function updatePhotos(cam, focal) {
+      if (!layer || !photos.length) return;
+      var zmin = 1e9;
+      for (var i = 0; i < photos.length; i++) {
+        var P = sph(photos[i].lon, photos[i].lat);
+        var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
+        var z = dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2];
+        photos[i].z = z;
+        if (z > 0.06 && z < zmin) zmin = z;
+      }
+      if (zmin > 1e8) zmin = 1;
+      for (var k = 0; k < photos.length; k++) {
+        var q = photos[k];
+        var Q = sph(q.lon, q.lat);
+        var ex = Q[0] - cam.pos[0], ey = Q[1] - cam.pos[1], ez = Q[2] - cam.pos[2];
+        var zz = ex * cam.fwd[0] + ey * cam.fwd[1] + ez * cam.fwd[2];
+        if (zz <= 0.06) { q.el.style.display = 'none'; continue; }
+        if (!diag.m0) diag.m0 = { lon: q.lon, lat: q.lat, zz: zz, fwd: cam.fwd.slice(), pos: cam.pos.slice() };
+        var pt = projectPoint(cam, focal, W, H, Q);
+        var wpx = focal * matteWorld / zz;
+        if (wpx < 6) { q.el.style.display = 'none'; continue; }
+        var hpx = wpx / MATTE_AR;
+        if (!diag.m1) diag.m1 = { zz: zz, wpx: wpx, focal: focal, mw: matteWorld, pt: pt };
+        // 侧倾：相机坐标系里该点的横向角
+        var xc = ex * cam.right[0] + ey * cam.right[1] + ez * cam.right[2];
+        var tilt = Math.atan2(xc, zz) * 180 / Math.PI;
+        if (tilt > 40) tilt = 40; if (tilt < -40) tilt = -40;
+        // 景深：按相对最近距离分档（绝对距离在相机后退时会让整屏一起糊）
+        var rel = zz / zmin;
+        var blur = 0, dim = 0;
+        if (rel > 2.6) { blur = 7; dim = 0.42; }
+        else if (rel > 1.8) { blur = 3.6; dim = 0.22; }
+        else if (rel > 1.3) { blur = 1.6; dim = 0.08; }
+        q.el.style.display = '';
+        q.el.style.width = wpx.toFixed(1) + 'px';
+        q.el.style.height = hpx.toFixed(1) + 'px';
+        q.el.style.transform = 'translate(' + (pt[0] - wpx / 2).toFixed(1) + 'px,' +
+          (pt[1] - hpx / 2).toFixed(1) + 'px) perspective(1500px) rotateY(' +
+          tilt.toFixed(2) + 'deg)';
+        q.el.style.filter = blur ? 'blur(' + blur + 'px)' : '';
+        q.el.style.opacity = String(1 - dim);
+        q.el.style.zIndex = String(2000 - Math.round(zz * 100));
+      }
+    }
     var D_OUT = 1 - R_OUT, D_IN = 1 - R_IN;
     function radius() { return 1 - D_OUT * Math.pow(D_IN / D_OUT, zoom); }
 
@@ -271,6 +426,7 @@
       gl.vertexAttribPointer(loc.aUV, 2, gl.FLOAT, false, S, 20);
       gl.drawArrays(gl.TRIANGLES, 0, nVerts);
       diag.draws++;
+      updatePhotos(cam, focal);
     }
 
     function tick(now) {
@@ -318,6 +474,16 @@
         loc[n] = gl.getUniformLocation(prog, n);
       });
       buildMesh();
+      layer = document.createElement('div');
+      layer.setAttribute('data-dome-photos', '');
+      // 必须挂进穹顶容器内部。挂到 body 时它的 z-index 低于 [data-dome] 的 900，
+      // 会被穹顶整层盖住 —— 相纸一个都看不见。
+      (canvas.parentNode || document.body).appendChild(layer);
+      var list = collectPhotos();
+      assignSlots(list);
+      for (var pi = 0; pi < list.length; pi++) buildMatte(list[pi]);
+      photos = list;
+      diag.photos = photos.length;
 
       wall = new window.Image();
       wall.decoding = 'async';
@@ -368,7 +534,8 @@
           zoom: zoom, target: target, radius: radius(), phase: phase,
           W: W, H: H, ratio: ratio, wallReady: wallReady,
           tickN: diag.tickN, wheelN: diag.wheelN, scrollY: window.scrollY,
-          verts: diag.verts, draws: diag.draws, err: diag.err, bow: BOW, hoop: HOOP
+          verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
+          m0: diag.m0 || null, m1: diag.m1 || null, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
     };
