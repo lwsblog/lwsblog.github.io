@@ -34,7 +34,9 @@
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
   var LON_STEP = 7.0;        // 网格：经线间距（度）
-  var WALL_REPEAT = 7;       // 壁纸绕球几圈（横向）
+  // 平铺份数：横向 3 圈（原来是 7）。份数越多，重模糊之后相邻份互相渗透越厉害，
+  // 就是"一堆图叠在一起的"重影"来源之一（用户报的正是这个）。
+  var WALL_REPEAT = 3;
   var WALL_AR = 1280 / 533;  // 壁纸原始宽高比，用来定纵向重复次数
   // 一个横向重复覆盖 360/WALL_REPEAT 度经度；按原图比例，它应当覆盖
   // (360/WALL_REPEAT)/WALL_AR 度纬度。球带高 2*BAND_HALF，于是纵向需要重复：
@@ -49,7 +51,7 @@
   var SWEEP_RGB = [214 / 255, 240 / 255, 255 / 255];
   // 🎛️ 只让线发亮之后，光带就只剩细线上的一点亮度，0.45 根本看不见
   // （用户："扫光怎么又没了"）。线很细，所以亮度必须给足。
-  var SWEEP_A = 1.8;
+  var SWEEP_A = 3.2;
   var WALL_A = 0.55;
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -191,28 +193,15 @@
     '  vec3 nrm = normalize(vPos);',
     '  float lat = degrees(asin(clamp(nrm.y, -1.0, 1.0)));',
     '  float lon = degrees(atan(nrm.x, nrm.z));',
-    // 🔴 亚克力（acrylic），不是普通图像模糊。
+    // 🔴 亚克力模糊在 **CPU 上预热一次**，不在这里做。
     //
-    // 用户："你这壁纸是什么模糊我要的是亚克力模糊"。原站那层是：壁纸 46px 重模糊
-    // **再叠一层亚克力色罩**（--scene-acrylic: rgba(9,11,15,.64)），所以它读起来
-    // 是磨砂玻璃，而不是"一张糊掉的画"。
-    //
-    // 这里做同样两件事：
-    //   1) 16 抽头双环采样，半径够大才是"磨砂"而不是"柔化"
-    //   2) 再往亚克力色混一层
-    // NPOT 纹理没有 mipmap，只能靠多次采样。
-    '  vec4 w = vec4(0.0);',
-    '  for (int bi = 0; bi < 12; bi++) {',
-    '    float ang = float(bi) * 0.523599;',
-    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang), sin(ang)) * 0.030));',
-    '  }',
-    '  for (int bj = 0; bj < 4; bj++) {',
-    '    float ang2 = float(bj) * 1.570796;',
-    '    w += texture2D(uTex, fract(vUV + vec2(cos(ang2), sin(ang2)) * 0.070));',
-    '  }',
-    '  w /= 16.0;',
-    // 亚克力色罩：把磨砂后的壁纸再往亚克力色拉一层，得到磨砂玻璃的乳白感。
-    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
+    // 之前是着色器里 16 抽头采样。问题有两个：
+    //   1) 半径有限，糊不透 —— 壁纸平铺了 7x3 份，糊不透就看出"一堆图叠在一起"的
+    //      重影（用户报的正是这个）
+    //   2) 每像素 16 次纹理采样，白花钱
+    // 现在壁纸在加载时就被画进一张离屏画布并做一次真正的高斯模糊（ctx.filter），
+    // 上传的就是那张模糊图。这里只剩 1 次采样。
+    '  vec4 w = texture2D(uTex, fract(vUV));',    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
     '  col = mix(col, wall, w.a * uWallA);',
     '  float m = max(lineMask(lat, uLatStep, 1.15), lineMask(lon, uLonStep, 1.15));',
     '  col += uGridRGB * m * uGridA;',
@@ -221,6 +210,9 @@
     '  float mw = max(lineMask(lat, uLatStep, 1.15 + 1.6 * sw),',
     '                 lineMask(lon, uLonStep, 1.15 + 1.6 * sw));',
     '  col += uSweepRGB * mw * sw * uSweepA;',
+    // 光晕：亮带核心再叠一层，让"光"真的溢出来（只加在线附近，不铺满面片）
+    '  float glow = sw * sw * sw;',
+    '  col += uSweepRGB * max(m, mw * 0.55) * glow * uSweepA * 0.8;',
     // 只让**网格线**发亮。之前这里还给整个面片加了一点亮度（原站的做法），但在
     // 穹顶上读起来是"网格里也发亮" —— 用户："扫光做错了，连网格里都发亮，我要的
     // 是只有网格线发亮"。去掉这一项。
@@ -570,10 +562,22 @@
       wall.decoding = 'async';
       wall.onload = function () {
         wallReady = true;
+        // 预模糊：画进离屏画布并做一次真正的高斯模糊，再上传这张模糊图。
+        // 半径给足（相对一张 640px 宽的缩略图），目的是把平铺的重影彻底糊成色块，
+        // 而不是留下一堆可辨认的糊影。
+        var bw = 640;
+        var bh = Math.max(1, Math.round(bw * wall.naturalHeight / wall.naturalWidth));
+        var off = document.createElement('canvas');
+        off.width = bw; off.height = bh;
+        var octx = off.getContext('2d');
+        octx.filter = 'blur(14px)';
+        // 多画一圈，模糊后边缘才不会透
+        octx.drawImage(wall, -24, -24, bw + 48, bh + 48);
+        octx.filter = 'none';
         tex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wall);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
         // 🔴 BOTH axes must be CLAMP_TO_EDGE.
         //
         // The wallpaper is 1280x533 -- NOT a power of two. In WebGL1 an NPOT texture
