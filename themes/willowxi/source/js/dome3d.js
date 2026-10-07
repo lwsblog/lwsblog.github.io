@@ -331,6 +331,23 @@
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
     var openingId = null;
     var vLon = 0, vPhi = 0, gliding = false;
+    // 照片占用的经度范围（assignSlots 里填），相机据此钳位
+    var lonMin = 0, lonMax = 0;
+    // 把经度钳在照片区域内、两边各留 LON_PAD 度余量。
+    //
+    // 用户："惯性滑动过程中有概率定位不到"。复现发现未命中的点击全部落在
+    // lon 157~233，而照片只占 0~140（LON_SPAN = 150）—— 惯性把相机甩进了那 210 度的
+    // 空墙，那里没有任何可点的东西。钳位之后就不会再漂到空区。
+    // 余量要小：34 度时相机会被钉在最后一张照片外侧、视野里什么都没有。
+    // 6 度以内可以保证"贴边时仍看得到照片"。
+    var LON_PAD = 6;
+    function clampLon(v) {
+      if (lonMax <= lonMin) return v;
+      var lo = lonMin - LON_PAD, hi = lonMax + LON_PAD;
+      if (v < lo) return lo;
+      if (v > hi) return hi;
+      return v;
+    }
     var diag = { tickN: 0, wheelN: 0, verts: 0, err: '', draws: 0 };
 
     // ---- 相纸：贴在内壁上的照片 ----------------------------------------
@@ -386,6 +403,8 @@
         var per = n / r;
         if (per >= perRowMin - 1 && per <= perRowMax + 1) { rows = r; break; }
       }
+      // 记录照片占用的经度范围，供相机钳位用（见 clampLon）
+      lonMin = 1e9; lonMax = -1e9;
       var base = Math.floor(n / rows);
       var counts = [], extra = n % rows;
       for (var i = 0; i < rows; i++) counts.push(base + (i < extra ? 1 : 0));
@@ -406,6 +425,8 @@
           // 奇偶排错半格（交错排布）
           list[k].lat = lat[ri2];
           list[k].lon = j * step + (ri2 % 2) * step * 0.5;
+          if (list[k].lon < lonMin) lonMin = list[k].lon;
+          if (list[k].lon > lonMax) lonMax = list[k].lon;
           k++;
         }
       }
@@ -711,7 +732,7 @@
 
       // 惯性：松手后继续漂，速度按 INERTIA_KEEP 衰减（放在相机建立之前）
       if (gliding) {
-        camLon += vLon;
+        camLon = clampLon(camLon + vLon);
         camPhi = Math.max(-12, Math.min(12, camPhi + vPhi));
         tLon = camLon; tPhi = camPhi;
         vLon *= INERTIA_KEEP; vPhi *= INERTIA_KEEP;
@@ -1016,7 +1037,7 @@
           var big = pick.light || pick.screen;
           if (big) { pick.img.style.opacity = '0'; pick.img.src = big; }
         }
-        camLon = pick.lon;
+        camLon = clampLon(pick.lon);
         camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
         flyFrom = null;
@@ -1117,7 +1138,10 @@
     }
 
     function focusOn(p, ms) {
-      focusId = p.id;
+      // 必须先停掉惯性：惯性块每帧覆盖 tLon/tPhi，会把这里的 animateCameraTo 顶掉，
+        // 于是"定位到之后还在继续跑".
+        gliding = false; vLon = 0; vPhi = 0;
+        focusId = p.id;
       // 🔴 相机必须落在照片的**对侧**。
       //
       // makeCamera 的朝向是 "从相机位置指向球心"（fwd = -pos），所以坐在 (lon,lat)
@@ -1304,7 +1328,7 @@
       var K11 = 1.26;
       var focalNow = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
       var DRAG_DEG_PER_PX = K11 * 57.2958 / Math.max(1, focalNow);
-      camLon += dx * DRAG_DEG_PER_PX;
+      camLon = clampLon(camLon + dx * DRAG_DEG_PER_PX);
       vLon = dx * DRAG_DEG_PER_PX;
       vPhi = dy * DRAG_DEG_PER_PX;
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
@@ -1348,9 +1372,14 @@
         if (z <= 0.06) continue;
         var wpx = focal * matteWorld / z;
         var hpx = wpx / matteAR(q.ratio);
-        if (Math.abs(cx - pr[0]) <= wpx * 0.5 && Math.abs(cy - pr[1]) <= hpx * 0.5) {
-          if (z < bestZ) { bestZ = z; best = q; }
-        }
+        var inside = Math.abs(cx - pr[0]) <= wpx * 0.5 && Math.abs(cy - pr[1]) <= hpx * 0.5;
+        // 照片之间有间隔（LON_SPAN=150、每行 8 张 -> 约 18.75 度），点在空隙上时
+        // 什么都不发生，用户会觉得"定位不到"。所以直接命中不到就退而取**最近**的一张，
+        // 但限制在相纸尺寸的 1.6 倍以内，免得点到很远的地方也飞过去。
+        var dx2 = Math.abs(cx - pr[0]) / (wpx * 0.5), dy2 = Math.abs(cy - pr[1]) / (hpx * 0.5);
+        var score = inside ? (dx2 + dy2) : (dx2 + dy2) + 100;
+        if (dx2 > 1.6 || dy2 > 1.6) continue;
+        if (score < bestZ) { bestZ = score; best = q; }
       }
       return best;
     }
