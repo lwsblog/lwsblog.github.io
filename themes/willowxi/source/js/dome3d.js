@@ -831,6 +831,23 @@
       animateCameraTo(p.lon, p.lat, ms || 900);
       // 按相纸实际尺寸算"刚好盖满"的缩放（见 zoomToFill）
       target = zoomToFill(p);
+      // 🔴 聚焦时换**全尺寸**图。
+      //
+      // 墙上用的是 640 缩略图（在墙上很小，够用）；聚焦会把照片放到铺满视口，
+      // 640 放大到 1440 明显糊 —— 用户："聚焦时没有切换全尺寸图"。
+      // 开屏已经做过同样的事，聚焦漏了。
+      useFullImage(p, true);
+    }
+
+    // 换到 1600 灯箱档 / 换回 640 缩略图。换之前先把 opacity 归 0，
+    // 由 load 事件再渐显，避免看到"模糊的旧图 -> 清晰的新图"这一跳。
+    function useFullImage(p, full) {
+      if (!p || !p.img) return;
+      var want = full ? (p.light || p.screen || p.src) : p.src;
+      if (!want || p.img.getAttribute('src') === want) return;
+      p.img.style.opacity = '0';
+      p.img.src = want;
+      p.fullLoaded = full;
     }
 
     // 🎯 让某张相纸**刚好盖满视口**的缩放值。
@@ -863,6 +880,12 @@
     }
 
     function leaveFocus() {
+      // 换回缩略图：那张大图（1600 档，最大 349KB）在墙上用不到，
+      // 留着白占内存。等它缩小到墙上的尺寸之前就换，看不出差别。
+      if (focusId) {
+        var prev = photoById(focusId);
+        if (prev) useFullImage(prev, false);
+      }
       focusId = null;
       target = 0;
     }
