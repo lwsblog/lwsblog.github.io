@@ -20,7 +20,10 @@
   var BAND_HALF = 55.0;      // 球带半张角（度）
   // 窄视场角 = "大半径球带"的观感。视场越窄，画面里覆盖的球面弧长越短，
   // 看上去就越像一条半径很大的缓坡，而不是一颗小球的陡壁。
-  var FOV = 40.0;   // 收窄视场角：边缘透视更平，与弯度解耦            // 水平视场角（度），固定
+  // 视场角同时决定"立体感"和"坡度"：BOW/HOOP 归零后，唯一的弯度来源就是真实
+  // 球面投影，视场越窄看到的弧长越短、越平。40 太平时用户说"看不出来立体透视"，
+  // 52 又偏陡，取 50。
+  var FOV = 50.0;   // 收窄视场角：边缘透视更平，与弯度解耦            // 水平视场角（度），固定
   // 🎛️ 朝外看之后，r 越大离墙越近。缩小到底 = 尽量靠近球心，让面前那面墙尽量远
   // （距离 1-r），从而看到更多内壁。0.32 在旧模型里是"最远"，在新模型里其实离墙
   // 只剩 0.68，壁纸被放得很大。
@@ -320,6 +323,9 @@
     var prog = null, loc = {}, buf = null, nVerts = 0;
     var progMatte = null, mLoc = {}, paperBuf = null, paperVerts = 0;
     var photoBuf = null, photoRanges = [];
+    // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
+    // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
+    var openingId = null;
     var diag = { tickN: 0, wheelN: 0, verts: 0, err: '', draws: 0 };
 
     // ---- 相纸：贴在内壁上的照片 ----------------------------------------
@@ -522,7 +528,13 @@
       var P1 = sph(lonL, latTop), P2 = sph(lonR, latTop);
       var P3 = sph(lonR, latBot), P4 = sph(lonL, latBot);
       // 图片行 0 在上 -> v 与纬度反向
-      var tri = [[P1, 0, 0], [P2, 1, 0], [P3, 1, 1], [P1, 0, 0], [P3, 1, 1], [P4, 0, 1]];
+      // 🔴 u 必须与屏幕的左右一致。
+      //
+      // right = (-fwd.z, 0, fwd.x) 归一化 -> 屏幕 x ∝ dot(d, right) = -d.x。
+      // 而 sph() 里经度增大时 x = sin(lon) 也增大 -> **经度增大是往屏幕左边走**。
+      // 所以 lonL（经度小）在屏幕右边、lonR 在左边。原来把 lonL 当 u=0（图片左
+      // 边缘），于是照片**水平镜像**了（用户："为什么照片反过来了"）。
+      var tri = [[P1, 1, 0], [P2, 0, 0], [P3, 0, 1], [P1, 1, 0], [P3, 0, 1], [P4, 1, 1]];
       for (var t = 0; t < 6; t++) {
         var v = tri[t];
         out.push(v[0][0], v[0][1], v[0][2], v[1], v[2]);
@@ -652,7 +664,7 @@
       gl.uniform1i(mLoc.uTex, 0);
       for (var i = 0; i < photoRanges.length; i++) {
         var r = photoRanges[i];
-        ensureTexture(r.p, r.p.id === focusId);
+        ensureTexture(r.p, r.p.id === focusId || r.p.id === openingId);
         var rec = texOf[r.p.id];
         if (!rec) continue;
         // 新贴图没就绪就先用后备（缩略图）顶替，别让照片整块消失
@@ -913,6 +925,15 @@
 
     // 开场要怼着拍的那张：直接从已经排布好的相纸里随机挑一张（它有经纬度，
     // 相机对着它就行）。不再自己去翻 DOM、拼图片地址。
+    // 临时诊断用：把每张的高清地址暴露出来
+    function lightInfo() {
+      var out = [];
+      for (var i = 0; i < Math.min(3, photos.length); i++) {
+        out.push(photos[i].id + ':' + String(photos[i].light).slice(-18));
+      }
+      return out.join(' | ');
+    }
+
     function pickOpeningPhotoEntry() {
       // 🔴 只挑**横屏**图。
       //
@@ -984,6 +1005,8 @@
         tLon = camLon; tPhi = camPhi;
         flyFrom = null;
         // 刚好盖满视口，不怼到边角浪费（见 zoomToFill）
+        openingId = pick.id;
+        ensureTexture(pick, true);     // 开屏这张也换全尺寸贴图
         zoom = target = zoomToFill(pick);
       }
       startTypingOpen();
@@ -1201,7 +1224,12 @@
       dragging = true; dragged = 0;
       dragX = e.clientX; dragY = e.clientY;
       flyFrom = null;
-      if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+      // 🔴 不要 setPointerCapture。
+      //
+      // pointerdown 已经改挂 window（因为透明相纸盖在 canvas 上），事件目标常常是
+      // **相纸**。此时对 canvas 调 setPointerCapture 会把后续事件（包括最终的 click）
+      // 全部重定向到 canvas —— 相纸的点击处理永远收不到，于是"照片点不动了"。
+      // pointermove/pointerup 本来就挂在 window 上，不需要捕获。
     }
     function onPointerMove(e) {
       if (pointers[e.pointerId]) { pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY; }
@@ -1302,6 +1330,7 @@
           matteVerts: diag.matteVerts || 0, matteDraws: diag.matteDraws || 0,
           fDraw: diag.fDraw || 0, fSkip: diag.fSkip || 0,
           ftReady: diag.ftReady, ftFb: diag.ftFb, ftUse: diag.ftUse, ftSrc: diag.ftSrc,
+          lights: lightInfo(), openingId: openingId,
           open: openState, ready: ready, focusId: focusId, pointers: livePointers().length, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
