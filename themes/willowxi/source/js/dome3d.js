@@ -27,6 +27,10 @@
   // 🎛️ 朝外看之后，r 越大离墙越近。缩小到底 = 尽量靠近球心，让面前那面墙尽量远
   // （距离 1-r），从而看到更多内壁。0.32 在旧模型里是"最远"，在新模型里其实离墙
   // 只剩 0.68，壁纸被放得很大。
+  // 惯性：松手后继续漂移（用户："给这个背景加上惯性，往大了加，漂移幅度大一点"）
+  var INERTIA_KEEP = 0.988;   // 每帧保留比例，越接近 1 漂得越久
+  var INERTIA_MIN = 0.0004;   // 低于此速度就停
+  var INERTIA_BOOST = 2.6;    // 松手瞬间把速度放大，做出"甩出去"的幅度
   var R_OUT = 0.08;          // 缩小到底（最远）
   var R_IN = 0.94;           // 放大到底（最近）
   // 🔴 归零：这个装饰性形变正是"折线"的根源 ——
@@ -326,6 +330,7 @@
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
     var openingId = null;
+    var vLon = 0, vPhi = 0, gliding = false;
     var diag = { tickN: 0, wheelN: 0, verts: 0, err: '', draws: 0 };
 
     // ---- 相纸：贴在内壁上的照片 ----------------------------------------
@@ -704,6 +709,16 @@
       gl.depthFunc(gl.LEQUAL);
       gl.disable(gl.BLEND);              // the fragment composes everything, opaque out
 
+      // 惯性：松手后继续漂，速度按 INERTIA_KEEP 衰减（放在相机建立之前）
+      if (gliding) {
+        camLon += vLon;
+        camPhi = Math.max(-12, Math.min(12, camPhi + vPhi));
+        tLon = camLon; tPhi = camPhi;
+        vLon *= INERTIA_KEEP; vPhi *= INERTIA_KEEP;
+        if (Math.abs(vLon) < INERTIA_MIN && Math.abs(vPhi) < INERTIA_MIN) {
+          gliding = false; vLon = 0; vPhi = 0;
+        }
+      }
       var cam = makeCamera(camLon, camPhi, radius());
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
 
@@ -1222,6 +1237,7 @@
         return;
       }
       dragging = true; dragged = 0;
+      vLon = 0; vPhi = 0; gliding = false;
       dragX = e.clientX; dragY = e.clientY;
       flyFrom = null;
       // 🔴 不要 setPointerCapture。
@@ -1259,6 +1275,8 @@
       //  屏幕正中，还叠了 BOW/HOOP 的夸张形变，所以以实测为准。）
       var DRAG_DEG_PER_PX = 0.049;
       camLon += dx * DRAG_DEG_PER_PX;
+      vLon = dx * DRAG_DEG_PER_PX;
+      vPhi = -dy * DRAG_DEG_PER_PX;
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
       // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
       camPhi = Math.max(-12, Math.min(12, camPhi - dy * DRAG_DEG_PER_PX));
@@ -1266,6 +1284,8 @@
     }
     function onPointerUp(e) {
       if (pointers[e.pointerId]) delete pointers[e.pointerId];
+      vLon *= INERTIA_BOOST; vPhi *= INERTIA_BOOST;
+      if (vLon !== 0 || vPhi !== 0) gliding = true;
       if (livePointers().length < 2) pinchDist = 0;
       if (!dragging) return;
       dragging = false;
