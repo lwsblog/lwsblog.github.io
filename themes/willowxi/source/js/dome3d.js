@@ -40,8 +40,10 @@
   // 🔴 归零。这个屏幕空间的夸张是**按顶点**作用的，而相纸四边形和照片四边形顶点不同，
   // 于是两者被不同程度地扭曲 —— 用户看到的"相框和照片不一样""相纸诡异的变形"
   // 全是它造成的。穹顶的弯度改由真实球面投影 + 窄视场角提供（见 FOV）。
-  var BOW = 0;            // 穹顶夸张：水平收腰
-  var HOOP = 0;           // 穹顶夸张：横线外弓
+  // 🎛️ 主页那套屏幕形变（willowxi.js buildGrid 里就是这两个量）。
+  // 管轴朝左右时，平行于轴的直线**几何上就是直的** —— 要它弯只能靠这一层。
+  var BOW = 0.17;            // 穹顶夸张：水平收腰
+  var HOOP = 0.45;           // 穹顶夸张：横线外弓
   var SWEEP_MS = 9000;       // 扫光一轮毫秒（原站 4s，穹顶视野更大故放慢）
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 2.0;        // 网格：纬线间距（度）
@@ -351,6 +353,18 @@
     // 🔴 相机在**管轴上**（y=0），照片在壁上周向角 th 处。要正对它，俯仰角不是 th，
     // 而是 atan2(sin th, cos th - r)。例：th=-8.5 度、r=0.866 时需要 -50 度 ——
     // 之前直接拿 th 当俯仰角，照片全被推出视野，点击也就全丢。
+    // 俯仰的允许范围随缩放收放：
+    //   拉到最远（zoom 0）-> 限制 0，也就是**强制回中**，三排都在画面里；
+    //   拉近（zoom >= 0.45）-> 放开到 ±75 度，可以抬头低头看某一排。
+    // 不做"动画式回中"，否则会和手动俯仰打架；这样拖到最远时俯仰自然停在中位。
+    function pitchLimit() { return 75 * Math.min(1, zoom / 0.45); }
+    function clampPitch() {
+      var lim = pitchLimit();
+      if (camPhi > lim) camPhi = lim;
+      if (camPhi < -lim) camPhi = -lim;
+      tPhi = camPhi;
+    }
+
     function pitchFor(thDeg, r) {
       var t = thDeg * Math.PI / 180;
       return Math.atan2(Math.sin(t), Math.cos(t) - r) * 180 / Math.PI;
@@ -590,20 +604,30 @@
     // 把每张相纸的白纸四边形与照片四边形按球面经纬度算出来。
     // 相纸宽 = MATTE_ARC 度经度；相纸高按照片宽高比换算成纬度跨度：
     //   世界高 = 世界宽 / matteAR(ratio)，而世界高 = 2*sin(dLat/2) -> 解 dLat
-    function pushQuadUV(out, latTop, latBot, lonL, lonR) {
-      var P1 = sph(lonL, latTop), P2 = sph(lonR, latTop);
-      var P3 = sph(lonR, latBot), P4 = sph(lonL, latBot);
-      // 图片行 0 在上 -> v 与纬度反向
-      // 🔴 u 必须与屏幕的左右一致。
+    function pushQuadUV(out, latTop, latBot, lonL, lonR, rmul) {
+      rmul = rmul || 1;
+      // 🔴 必须细分。
       //
-      // right = (-fwd.z, 0, fwd.x) 归一化 -> 屏幕 x ∝ dot(d, right) = -d.x。
-      // 而 sph() 里经度增大时 x = sin(lon) 也增大 -> **经度增大是往屏幕左边走**。
-      // 所以 lonL（经度小）在屏幕右边、lonR 在左边。原来把 lonL 当 u=0（图片左
-      // 边缘），于是照片**水平镜像**了（用户："为什么照片反过来了"）。
-      var tri = [[P1, 1, 0], [P2, 0, 0], [P3, 0, 1], [P1, 1, 0], [P3, 0, 1], [P4, 1, 1]];
-      for (var t = 0; t < 6; t++) {
-        var v = tri[t];
-        out.push(v[0][0], v[0][1], v[0][2], v[1], v[2]);
+      // BOW/HOOP 是**屏幕空间**的非线性形变，按顶点作用、三角形内线性插值。粗分成两个
+      // 三角形时，一条本该平滑弯曲的边会被折成直线，相邻四边形之间对不上 ——
+      // 表现就是相纸白框被撕出缺口（管状透视一开就非常明显）。
+      // 细分到 SUB x SUB 后逐段逼近一致，边框就完整了。
+      var SUB = 6;
+      for (var ia = 0; ia < SUB; ia++) {
+        for (var ib = 0; ib < SUB; ib++) {
+          var v0 = ia / SUB, v1 = (ia + 1) / SUB;
+          var u0 = ib / SUB, u1 = (ib + 1) / SUB;
+          var la0 = latTop + (latBot - latTop) * v0, la1 = latTop + (latBot - latTop) * v1;
+          var lo0 = lonL + (lonR - lonL) * u0, lo1 = lonL + (lonR - lonL) * u1;
+          var P1 = sph(lo0, la0), P2 = sph(lo1, la0);
+          var P3 = sph(lo1, la1), P4 = sph(lo0, la1);
+          var tri = [[P1, u0, v0], [P2, u1, v0], [P3, u1, v1],
+                     [P1, u0, v0], [P3, u1, v1], [P4, u0, v1]];
+          for (var t = 0; t < 6; t++) {
+            var q = tri[t];
+            out.push(q[0][0] * rmul, q[0][1] * rmul, q[0][2] * rmul, q[1], q[2]);
+          }
+        }
       }
     }
 
@@ -638,7 +662,9 @@
         var la0 = q.lat + dLatP, la1 = q.lat - dLatP;
         var lo0 = q.lon - dLonP, lo1 = q.lon + dLonP;
         var start = photo.length / 5;
-        pushQuadUV(photo, la0, la1, lo0, lo1);
+        // 照片在几何上朝**相机**方向凸出 0.4%（相机在管内，半径更小 = 更近）：
+        // 不必再靠 depthFunc(ALWAYS)（那样重叠的两张会按绘制顺序互相覆盖、切出缺口）。
+        pushQuadUV(photo, la0, la1, lo0, lo1, 0.996);
         photoRanges.push({ p: q, start: start, count: photo.length / 5 - start });
       }
       paperBuf = gl.createBuffer();
@@ -721,7 +747,8 @@
       // 相同，uBias 和 polygonOffset 都不足以稳定地把照片压在相纸之上（实测仍被盖住）。
       // 相机是朝外看的，球体另一侧的相纸在相机背后、会被近平面裁掉，所以这里关掉深度
       // 比较不会带来"透过去看到背面"的问题。画完恢复 LEQUAL。
-      gl.depthFunc(gl.ALWAYS);
+      // 恢复正常深度比较：照片已几何凸出，能正常压过白相纸
+      gl.depthFunc(gl.LEQUAL);
       gl.disable(gl.POLYGON_OFFSET_FILL);
       gl.uniform1f(mLoc.uBias, 0);
       gl.uniform1f(mLoc.uUseTex, 1);
@@ -752,7 +779,6 @@
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
         diag.matteDraws = (diag.matteDraws || 0) + 1;
       }
-      gl.depthFunc(gl.LEQUAL);
     }
 
     function resize() {
@@ -777,13 +803,16 @@
       // 惯性：松手后继续漂，速度按 INERTIA_KEEP 衰减（放在相机建立之前）
       if (gliding) {
         camLon = clampLon(camLon + vLon);
-        camPhi = Math.max(-12, Math.min(12, camPhi + vPhi));
+        camPhi = camPhi + vPhi;
+        clampPitch();
         tLon = camLon; tPhi = camPhi;
         vLon *= INERTIA_KEEP; vPhi *= INERTIA_KEEP;
         if (Math.abs(vLon) < INERTIA_MIN && Math.abs(vPhi) < INERTIA_MIN) {
           gliding = false; vLon = 0; vPhi = 0;
         }
       }
+      // 每帧按当前缩放夹一次俯仰：拉远自动回中、三排都在画面里
+      clampPitch();
       var cam = makeCamera(camLon, camPhi, radius());
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
 
@@ -1385,8 +1414,9 @@
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
       // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
       // 上下 = 俯仰角
-      // 俯仰范围放宽：近距离看下面那排需要很大的角度
-      camPhi = Math.max(-75, Math.min(75, camPhi + dy * DRAG_DEG_PER_PX));
+      // 俯仰范围由 clampPitch() 按缩放统一夹（见 pitchLimit）
+      camPhi = camPhi + dy * DRAG_DEG_PER_PX;
+      clampPitch();
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
