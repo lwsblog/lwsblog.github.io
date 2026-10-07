@@ -307,34 +307,44 @@
     '}'
   ].join(String.fromCharCode(10));
   var FS_MATTE = [
-    'precision mediump float;',
+    'precision highp float;',
     'uniform sampler2D uTex;',
     'uniform float uUseTex;',
-    'uniform float uBlur;',    // 边缘失焦的模糊半径（UV 单位）
-    'uniform float uFade;',    // 边缘淡出
+    // 从屏幕中心向外发散的模糊：模糊量按像素到中心的距离给，
+    // 所以是**叠在整个照片层上的一层效果**，而不是每张一个固定值。
+    // 同一张照片里，靠中心的部分清楚、朝外的部分越来越糊。
+    'uniform float uBlurMax;',   // 最外圈的最大模糊半径（UV 单位）
+    'uniform float uBlurT0;',    // 从多远开始糊（0=中心, 1=角）
+    'uniform float uBlurT1;',
 
     'uniform vec3 uPaper;',
+    // 放射状模糊要按设备像素算"离屏幕中心多远"
+    'uniform float uHalfW, uHalfH;',
     'varying vec2 vUV;',
     'void main() {',
     '  if (uUseTex > 0.5) {',
     '    vec4 c = texture2D(uTex, vUV);',
-    // 9 抽头盒式模糊。半径由 JS 按"到视轴的角度"给：正中 0，越斜越大。
-    // 掠射角那几张的透视拉伸本来躲不掉，糊掉之后读起来就是焦外虚化。
+    // 放射状模糊：模糊半径只取决于**这个像素离屏幕中心多远**。
+    // gl_FragCoord 是设备像素，uHalfW/uHalfH 也是 —— 两者一致。
+    '    float _dx = (gl_FragCoord.x - uHalfW) / uHalfW;',
+    '    float _dy = (gl_FragCoord.y - uHalfH) / uHalfH;',
+    '    float _dr = sqrt(_dx * _dx + _dy * _dy) / 1.41421356;',   // 0 = 中心, 1 = 角
+    '    float uBlur = smoothstep(uBlurT0, uBlurT1, _dr) * uBlurMax;',
     '    if (uBlur > 0.0) {',
-    '      vec4 s = c * 0.2;',
-    '      s += texture2D(uTex, vUV + vec2(uBlur, 0.0)) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(-uBlur, 0.0)) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(0.0, uBlur)) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(0.0, -uBlur)) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(uBlur, uBlur) * 0.7) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(-uBlur, uBlur) * 0.7) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(uBlur, -uBlur) * 0.7) * 0.1;',
-    '      s += texture2D(uTex, vUV + vec2(-uBlur, -uBlur) * 0.7) * 0.1;',
-    '      c = s;',
+    '      vec4 s2 = c * 0.2;',
+    '      s2 += texture2D(uTex, vUV + vec2(uBlur, 0.0)) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, 0.0)) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(0.0, uBlur)) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(0.0, -uBlur)) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(uBlur, uBlur) * 0.7) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, uBlur) * 0.7) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(uBlur, -uBlur) * 0.7) * 0.1;',
+    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, -uBlur) * 0.7) * 0.1;',
+    '      c = s2;',
     '    }',
-    '    gl_FragColor = vec4(c.rgb, c.a * uFade);',
+    '    gl_FragColor = vec4(c.rgb, 1.0);',
     '  } else {',
-    '    gl_FragColor = vec4(uPaper, uFade);',
+    '    gl_FragColor = vec4(uPaper, 1.0);',
     '  }',
     '}'
   ].join(String.fromCharCode(10));
@@ -414,10 +424,9 @@
   // 第三排被挤出画面；11 度时约 660px，三排都在画面内。
   // 边缘失焦：按"照片方向与视轴的夹角"给模糊与淡出。
   // 夹角小于 A0 全清，超过 A1 时到达最大模糊/最大淡出。
-  var BLUR_A0 = 0.34;     // 约 19 度
-  var BLUR_A1 = 0.80;     // 约 46 度
-  var BLUR_MAX = 0.022;   // 最大模糊半径（UV 单位）
-  var BLUR_FADE = 0.55;   // 边缘最多淡掉多少
+  var BLUR_T0 = 0.30;     // 到屏幕中心的归一距离，从这里开始糊（0=中心, 1=角）
+  var BLUR_T1 = 0.98;     // 到这里到达最大模糊
+  var BLUR_MAXUV = 0.030; // 最大模糊半径（UV 单位）
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -766,22 +775,15 @@
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(mLoc.uTex, 0);
-      var _fw = cam.fwd;
+      // 放射状模糊的参数整批给一次（模糊量由片元按像素位置自己算）
+      gl.uniform1f(mLoc.uBlurMax, BLUR_MAXUV);
+      gl.uniform1f(mLoc.uBlurT0, BLUR_T0);
+      gl.uniform1f(mLoc.uBlurT1, BLUR_T1);
       for (var i = 0; i < photoRanges.length; i++) {
         var r = photoRanges[i];
         // 该照片方向与视轴的夹角 -> 模糊量与淡出量
-        var P = sph(r.p.lon, r.p.lat);
-        var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
-        var L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-        var ca = (dx * _fw[0] + dy * _fw[1] + dz * _fw[2]) / L;
-        var ang = Math.acos(Math.max(-1, Math.min(1, ca)));
-        var t = Math.max(0, Math.min(1, (ang - BLUR_A0) / (BLUR_A1 - BLUR_A0)));
-        var blur = t * BLUR_MAX;
-        var fade = 1 - t * BLUR_FADE;
-        gl.uniform1f(mLoc.uFade, fade);
 
         gl.uniform1f(mLoc.uUseTex, 0);
-        gl.uniform1f(mLoc.uBlur, 0);
         gl.uniform1f(mLoc.uBias, -0.00002);
         gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
         gl.enableVertexAttribArray(mLoc.aPos);
@@ -797,7 +799,6 @@
                 : (rec.fallback && rec.fallback.ready ? rec.fallback : null);
         if (!use) continue;
         gl.uniform1f(mLoc.uUseTex, 1);
-        gl.uniform1f(mLoc.uBlur, blur);
         gl.uniform1f(mLoc.uBias, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
         gl.enableVertexAttribArray(mLoc.aPos);
@@ -852,7 +853,10 @@
         var _op = photoById(openingId);
         if (_op) camPhi = pitchFor(_op.lat, radius());
       }
-      var _wk = Math.max(0, Math.min(1, 1 - zoom / 0.55));
+      // 聚焦/开屏时形变**归零**：用户要求"聚焦的时候照片应该刚好到看不出立体透视
+      // 而不是弯的"。只有拉远看全局时才给满强度做管状透视。
+      var _wk = (focusId || (openingId && openState !== 'done')) ? 0
+               : Math.max(0, Math.min(1, 1 - zoom / 0.55));
       bowNow = BOW * _wk; hoopNow = HOOP * _wk;
       var cam = makeCamera(camLon, camPhi, radius());
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
@@ -980,7 +984,7 @@
         gl.linkProgram(progMatte);
         if (gl.getProgramParameter(progMatte, gl.LINK_STATUS)) {
           var names = ['aPos', 'aUV', 'uEye', 'uRight', 'uUp', 'uFwd', 'uFocal',
-                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper', 'uBlur', 'uFade'];
+                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper', 'uBlurMax', 'uBlurT0', 'uBlurT1'];
           for (var mi = 0; mi < names.length; mi++) {
             var nm = names[mi];
             mLoc[nm] = nm.charAt(0) === 'a' ? gl.getAttribLocation(progMatte, nm)
