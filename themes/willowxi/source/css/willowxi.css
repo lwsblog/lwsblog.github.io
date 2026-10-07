@@ -5515,7 +5515,9 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
   position: fixed;
   inset: 0;
   z-index: 900;              /* 必须高于顶栏，否则导航条会压在穹顶上 */
-  background: #090b0f;
+  /* 背景必须**透明**：主题自己的 [data-scene-background] 就在下面，用的是同一份
+     willowxi.js 画的主页场景。这里一旦有不透明底色，就把那层一模一样的背景挡掉了。 */
+  background: transparent;
   overflow: hidden;
 }
 [data-dome-wall] {

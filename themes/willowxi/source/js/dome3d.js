@@ -44,6 +44,8 @@
   // 管轴朝左右时，平行于轴的直线**几何上就是直的** —— 要它弯只能靠这一层。
   var BOW = 0.17;            // 穹顶夸张：水平收腰
   var HOOP = 0.45;           // 穹顶夸张：横线外弓
+  // 实际使用的强度（随缩放收放，见 render）；projectPoint 也用它，保持一致。
+  var bowNow = 0, hoopNow = 0;
   var SWEEP_MS = 9000;       // 扫光一轮毫秒（原站 4s，穹顶视野更大故放慢）
   var BAND_FRAC = 0.55;      // 亮带厚度 / 球带张角
   var LAT_STEP = 5.5;        // 网格：纬线间距（度）
@@ -117,10 +119,10 @@
     var yc = dx * cam.up[0] + dy * cam.up[1] + dz * cam.up[2];
     var sx = W * 0.5 + focal * xc / z, sy = H * 0.5 - focal * yc / z;
     var ty = (sy - H * 0.5) / (H * 0.5);
-    var waist = 1 - BOW * Math.max(0, 1 - ty * ty);
+    var waist = 1 - bowNow * Math.max(0, 1 - ty * ty);
     var sx2 = W * 0.5 + (sx - W * 0.5) * waist;
     var tx = (sx - W * 0.5) / (W * 0.5);
-    var sy2 = sy + HOOP * tx * tx * (sy - H * 0.5);
+    var sy2 = sy + hoopNow * tx * tx * (sy - H * 0.5);
     return [sx2, sy2];
   }
   var VS = [
@@ -197,7 +199,7 @@
     'float lineMask(float v, float st, float px) {',
     '  float d = abs(fract(v / st + 0.5) - 0.5) * st;',
     '  float w = uDegPerPx * px;',
-    '  return 1.0 - smoothstep(w * 0.35, w * 1.15, d);',
+    '  return 1.0 - smoothstep(w * 0.30, w * 1.60, d);',
     '}',
     // 光晕掩码：从线心到 w 平滑衰减（平方），是一圈光而不是一条粗线。
     'float glowMask(float v, float st, float px) {',
@@ -242,7 +244,8 @@
     '  float seamK = smoothstep(0.0, 0.055, seam);',
     '  w = mix((w + w2) * 0.5, w, seamK);',    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
     '  col = mix(col, wall, w.a * uWallA);',
-    '  float m = max(lineMask(lat, uLatStep, 1.9), lineMask(lon, uLonStep, 1.9));',
+    // 线太细时在部分角度会细到亚像素、断成一段一段，看起来就是折线；加粗并放宽过渡。
+    '  float m = max(lineMask(lat, uLatStep, 3.2), lineMask(lon, uLonStep, 3.2));',
     '  col += uGridRGB * m * uGridA;',
     '  float sw = profile((lat - uBandLo) / max(uBandHi - uBandLo, 0.001)) * uSweepOn;',
     // 亮带经过时线也变宽一点，光带才成型（只影响扫光这一项，底网格不变）
@@ -322,7 +325,9 @@
   function createDome(root) {
     var canvas = root.querySelector('[data-dome-canvas]');
     if (!canvas) return null;
-    var gl = canvas.getContext('webgl', { alpha: false, antialias: true }) ||
+    // alpha: true —— 画布透明，露出主题自己的 [data-scene-background]（同一份 willowxi.js 画的），
+// 这样相册页的背景与主页**由构造保证一模一样**，不需要我去仿。
+    var gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false }) ||
              canvas.getContext('experimental-webgl');
     if (!gl) return null;
 
@@ -586,8 +591,10 @@
       // 都按三角形边界折成折线。三角形越小折线段越短，折角就越不可见 —— 这是
       // 保留弯度同时消掉折线的唯一办法（除非放弃夸张）。
       // 沿轴按**世界长度**循环（原来写的是 -180..180 的角度，会把管子建成 360 单位长）
-      var v = [], LON = XPITCH, LAT = 0.5;
-      for (var la = -BAND_HALF; la < BAND_HALF; la += LAT) {
+      var v = [], LON = XPITCH, LAT = 0.4;
+      // 周向覆盖必须够：俯仰允许到 75 度，加视野半角约 21 度 -> 会看到约 96 度，
+      // 而原来只铺 ±BAND_HALF（±55 度），越过去就是空洞。铺到 ±100 度。
+      for (var la = -100; la < 100; la += LAT) {
         for (var lo = -XHALF; lo < XHALF; lo += LON) {
           var quad = [[lo, la], [lo + LON, la], [lo + LON, la + LAT], [lo, la + LAT]];
           var tri = [0, 1, 2, 0, 2, 3];
@@ -727,8 +734,8 @@
       gl.uniform1f(mLoc.uFocal, focal * ratio);
       gl.uniform1f(mLoc.uHalfW, canvas.width * 0.5);
       gl.uniform1f(mLoc.uHalfH, canvas.height * 0.5);
-      gl.uniform1f(mLoc.uBow, BOW);
-      gl.uniform1f(mLoc.uHoop, HOOP);
+      gl.uniform1f(mLoc.uBow, bowNow);
+      gl.uniform1f(mLoc.uHoop, hoopNow);
       gl.uniform3f(mLoc.uPaper, 0.957, 0.957, 0.945);
       gl.disable(gl.BLEND);
       // 1) 所有白相纸一批画完
@@ -799,7 +806,7 @@
 
     function render() {
       if (!gl || !prog || !W || !H) return;
-      gl.clearColor(INK[0], INK[1], INK[2], 1);
+      gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
       gl.depthFunc(gl.LEQUAL);
@@ -818,6 +825,11 @@
       }
       // 每帧按当前缩放夹一次俯仰：拉远自动回中、三排都在画面里
       clampPitch();
+      // 形变强度随缩放收放：拉远给满强度做管状透视，放大趋近 0（看细节时是直的）。
+      // 固定强度时，照片铺满屏幕后其上下边缘落在 ty=±1，那里 waist=1-BOW，
+      // 等于把上下横向压掉 17%，相框被拉得很诡异。
+      var _wk = Math.max(0, Math.min(1, 1 - zoom / 0.55));
+      bowNow = BOW * _wk; hoopNow = HOOP * _wk;
       var cam = makeCamera(camLon, camPhi, radius());
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
 
@@ -829,8 +841,8 @@
       gl.uniform1f(loc.uFocal, focal * ratio);
       gl.uniform1f(loc.uHalfW, canvas.width * 0.5);
       gl.uniform1f(loc.uHalfH, canvas.height * 0.5);
-      gl.uniform1f(loc.uBow, BOW);
-      gl.uniform1f(loc.uHoop, HOOP);
+      gl.uniform1f(loc.uBow, bowNow);
+      gl.uniform1f(loc.uHoop, hoopNow);
       // 57.2958 = 180/PI：把"球面上的世界长度"换成度
       var degPerPx = 57.2958 * (1 - radius()) / (focal * ratio);
       gl.uniform1f(loc.uDegPerPx, degPerPx);
@@ -871,7 +883,9 @@
       gl.vertexAttribPointer(loc.aLon, 1, gl.FLOAT, false, S, 16);
       gl.enableVertexAttribArray(loc.aUV);
       gl.vertexAttribPointer(loc.aUV, 2, gl.FLOAT, false, S, 20);
-      gl.drawArrays(gl.TRIANGLES, 0, nVerts);
+      // 球带（网格 + 壁纸 + 扫光）不再自己画 —— 主题的 [data-scene-background] 已经在下面
+      // 用同一份 willowxi.js 画好了，自己再画一层反而对不上。
+      // gl.drawArrays(gl.TRIANGLES, 0, nVerts);
       diag.draws++;
       // 相纸与照片：同一套投影画在球面上（深度略前移，盖在墙纸之上）
       drawMattes(cam, focal);
@@ -1535,7 +1549,7 @@
       detachers.length = 0;
       document.documentElement.classList.remove('is-dome');
       document.body.classList.remove('is-dome');
-      if (gl) { gl.clearColor(INK[0], INK[1], INK[2], 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+      if (gl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
     }
 
     return {
