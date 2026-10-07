@@ -424,7 +424,9 @@
   // 夹角小于 A0 全清，超过 A1 时到达最大模糊/最大淡出。
   var BLUR_T0 = 0.30;     // 到屏幕中心的归一距离，从这里开始糊（0=中心, 1=角）
   var BLUR_T1 = 0.98;     // 到这里到达最大模糊
-  var EDGE_FEATHER = 0.10; // 相纸边的最大羽化（UV 比例）
+  // 0.10（相纸宽度的 10%）太大了：相机靠近时相纸占满屏幕，那圈羽化就是一大团白雾，
+  // 还会糊掉照片边缘。羽化要小到读起来是边缘失焦，而不是白雾。
+  var EDGE_FEATHER = 0.012;
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -796,7 +798,8 @@
       gl.uniform1i(mLoc.uTexB, 1);
       // 放射状模糊的参数整批给一次（模糊量由片元按像素位置自己算）
       // 聚焦/开屏时**一点都不糊**（用户："距离达到聚焦的程度的时候就不要模糊了"）
-      var _blurOn = (focusId || (openingId && openState !== 'done')) ? 0 : 1;
+      var _blurOn = (focusId || (openingId && openState !== 'done')) ? 0
+                  : Math.max(0, Math.min(1, 1 - zoom / 0.55));
       gl.uniform1f(mLoc.uBlurAmt, _blurOn);
       gl.uniform1f(mLoc.uBlurT0, BLUR_T0);
       gl.uniform1f(mLoc.uBlurT1, BLUR_T1);
