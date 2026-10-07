@@ -5647,3 +5647,11 @@ html.is-dome .photo-lightbox {
   background: transparent !important;
   box-shadow: none !important;
 }
+
+/* 穹顶内一律不接受浏览器手势：滚轮、拖动、双指全部由脚本接管。
+   缺了这条，浏览器会把双指当成页面缩放/滚动，pointer 事件会被 cancel 掉。 */
+[data-dome], [data-dome-canvas], [data-dome-photos], [data-dome-matte] {
+  touch-action: none !important;
+  -webkit-user-select: none;
+  user-select: none;
+}

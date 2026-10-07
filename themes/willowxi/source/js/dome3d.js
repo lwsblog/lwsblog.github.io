@@ -211,7 +211,17 @@
     //   2) 每像素 16 次纹理采样，白花钱
     // 现在壁纸在加载时就被画进一张离屏画布并做一次真正的高斯模糊（ctx.filter），
     // 上传的就是那张模糊图。这里只剩 1 次采样。
-    '  vec4 w = texture2D(uTex, fract(vUV));',    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
+    // 🔴 接缝淡化。
+    //
+    // 壁纸横向只绕球一圈（WALL_REPEAT = 1），u 从 0 绕回 1 的地方左边缘直接接右
+    // 边缘，是一条硬缝。这里在接缝附近把它和"平移半圈"的版本交叉淡化，缝就散了。
+    // 因为图片本来就重度模糊，融合后看不出重复。
+    '  vec2 uvw = fract(vUV);',
+    '  vec4 w = texture2D(uTex, uvw);',
+    '  vec4 w2 = texture2D(uTex, fract(vUV + vec2(0.5, 0.0)));',
+    '  float seam = min(uvw.x, 1.0 - uvw.x);',
+    '  float seamK = smoothstep(0.0, 0.055, seam);',
+    '  w = mix((w + w2) * 0.5, w, seamK);',    '  vec3 wall = mix(w.rgb, uAcrylic.rgb, uAcrylic.a);',
     '  col = mix(col, wall, w.a * uWallA);',
     '  float m = max(lineMask(lat, uLatStep, 1.9), lineMask(lon, uLonStep, 1.9));',
     '  col += uGridRGB * m * uGridA;',
@@ -844,7 +854,12 @@
       document.body.classList.add('is-dome');
       window.addEventListener('wheel', onWheel, { passive: false });
       window.addEventListener('keydown', onKey);
-      canvas.addEventListener('pointerdown', onPointerDown);
+      // 🔴 挂在 window，不是 canvas。
+    //
+    // 相纸（DOM 那层，透明但可点）盖在 canvas 之上，手指按在相纸上时事件目标是
+    // 相纸、并不会经过 canvas —— 于是拖动/双指在按到照片上时完全失效（实测
+    // pointers 始终是 0）。挂 window 就都能收到。
+    window.addEventListener('pointerdown', onPointerDown);
       window.addEventListener('pointermove', onPointerMove, { passive: true });
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerUp);
