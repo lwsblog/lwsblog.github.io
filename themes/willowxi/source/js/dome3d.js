@@ -861,7 +861,8 @@
       photos = list;
       buildMatteMesh();
       for (var ti = 0; ti < photos.length; ti++) ensureTexture(photos[ti], false);
-      layer.addEventListener('click', onMatteClick);
+      // 点击改挂 window：命中靠 pickAt 自己算，不再依赖透明且位置不准的 DOM 相纸
+      window.addEventListener('click', onMatteClick);
       detachers.push(function () { layer.removeEventListener('click', onMatteClick); });
       diag.photos = photos.length;
 
@@ -1163,14 +1164,16 @@
       // 本身铺满视口。用相纸尺寸算的话，白边正好卡在画面里 —— 所以这里按照片算，
       // 白边就被推到视口之外。
       //   相纸宽 = 照片宽 * (1 + 2*BORDER)  ->  照片宽 = matteWorld / (1 + 2*BORDER)
-      var photoW = matteWorld / (1 + 2 * MATTE_BORDER);
+      // 用户："定位之后拉太近了，要完整看到相纸边框并且留有空隙"
+      // 按**相纸**（不是照片）算入画距离，再往后退一截留边距。
+      var ar2 = matteAR(p.ratio);
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
-      var dw = focal * photoW / Math.max(1, W);
-      var dh = focal * (photoW / p.ratio) / Math.max(1, H);
+      var dw = focal * matteWorld / Math.max(1, W);
+      var dh = focal * (matteWorld / ar2) / Math.max(1, H);
       // 再乘 0.93：让照片**略微盖过**视口。CSS 的百分比内边距是按相纸自身宽高算
       // 的，和我这里按照片宽算的白边并不严格相等；留一点余量才能保证白边一定在
       // 画面之外，而不是露出几像素。
-      var d = Math.min(dw, dh) * 0.93;
+      var d = Math.min(dw, dh) * 1.30;   // >1 = 后退，留出白边与四周空隙
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
       var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
@@ -1273,13 +1276,20 @@
       // 反推 1:1 的值：44° 换来 1313px，即 29.8px/度 -> 200px 需要 6.7° -> 0.0335°/px。
       // （理论上 focal 1299px 时应为 57.3/1299 = 0.044°/px，实测偏小是因为内容不在
       //  屏幕正中，还叠了 BOW/HOOP 的夸张形变，所以以实测为准。）
-      var DRAG_DEG_PER_PX = 0.049;
+      // 1:1 跟手：每像素拖动应当让画面里的内容正好移动一像素。
+      // 视角每转 Δ 弧度，内容移动约 focal*Δ 像素 -> Δ = dx/focal（弧度）。
+      // 注意**必须由当前 focal 推导**：之前写死 0.049 是按 FOV 52 标定的，
+      // 后来 FOV 改成 50、焦距变了，就悄悄快了约 1.3 倍（用户又报"有点快"）。
+      // K 是实测标定系数（含 BOW/HOOP 与内容不在屏幕正中的影响）。
+      var K11 = 1.26;
+      var focalNow = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
+      var DRAG_DEG_PER_PX = K11 * 57.2958 / Math.max(1, focalNow);
       camLon += dx * DRAG_DEG_PER_PX;
       vLon = dx * DRAG_DEG_PER_PX;
-      vPhi = -dy * DRAG_DEG_PER_PX;
+      vPhi = dy * DRAG_DEG_PER_PX;
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
       // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
-      camPhi = Math.max(-12, Math.min(12, camPhi - dy * DRAG_DEG_PER_PX));
+      camPhi = Math.max(-12, Math.min(12, camPhi + dy * DRAG_DEG_PER_PX));
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
@@ -1299,15 +1309,37 @@
     }
 
     // 点相纸 = 直接过去那张（Q19=C）。拖动过程里不触发，避免"拖完就跳"。
+    // 🎯 点击命中：用与画面**完全相同**的投影自己算。
+    //
+    // 之前靠 DOM 相纸的位置做命中，而 DOM 那层是另一套投影（perspective + rotateY）。
+    // 探索一会儿之后两者越走越偏，于是点到空隙或点到另一张图
+    // （用户："点击图片定位不对"）。
+    function pickAt(cx, cy) {
+      var cam = makeCamera(camLon, camPhi, radius());
+      var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
+      var best = null, bestZ = 1e9;
+      for (var i = 0; i < photos.length; i++) {
+        var q = photos[i];
+        var P = sph(q.lon, q.lat);
+        var pr = projectPoint(cam, focal, W, H, P);
+        if (!pr) continue;
+        var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
+        var z = dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2];
+        if (z <= 0.06) continue;
+        var wpx = focal * matteWorld / z;
+        var hpx = wpx / matteAR(q.ratio);
+        if (Math.abs(cx - pr[0]) <= wpx * 0.5 && Math.abs(cy - pr[1]) <= hpx * 0.5) {
+          if (z < bestZ) { bestZ = z; best = q; }
+        }
+      }
+      return best;
+    }
+
     function onMatteClick(e) {
       if (!ready) return;
       if (dragged > 6) return;
-      var el = e.target;
-      while (el && el !== layer && !el.getAttribute('data-id')) el = el.parentNode;
-      if (!el || el === layer) return;
-      var id = el.getAttribute('data-id');
-      var p2 = photoById(id);
-      if (p2) { e.stopPropagation(); focusOn(p2, 900); }
+      var p2 = pickAt(e.clientX, e.clientY);
+      if (p2) focusOn(p2, 900);
     }
 
     function onKey(e) {
