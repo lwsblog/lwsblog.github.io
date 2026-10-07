@@ -345,7 +345,17 @@
     // 空墙，那里没有任何可点的东西。钳位之后就不会再漂到空区。
     // 余量要小：34 度时相机会被钉在最后一张照片外侧、视野里什么都没有。
     // 6 度以内可以保证"贴边时仍看得到照片"。
-    var LON_PAD = 6;
+    // 现在是**世界单位**（圆柱模型）：照片只占 ±LON_SPAN/2 = ±2.5，
+    // 给 6 的话相机会滑到 ±8.5，那里没有任何照片。
+    var LON_PAD = 0.6;
+    // 🔴 相机在**管轴上**（y=0），照片在壁上周向角 th 处。要正对它，俯仰角不是 th，
+    // 而是 atan2(sin th, cos th - r)。例：th=-8.5 度、r=0.866 时需要 -50 度 ——
+    // 之前直接拿 th 当俯仰角，照片全被推出视野，点击也就全丢。
+    function pitchFor(thDeg, r) {
+      var t = thDeg * Math.PI / 180;
+      return Math.atan2(Math.sin(t), Math.cos(t) - r) * 180 / Math.PI;
+    }
+
     function clampLon(v) {
       if (lonMax <= lonMin) return v;
       var lo = lonMin - LON_PAD, hi = lonMax + LON_PAD;
@@ -364,7 +374,9 @@
   // 收窄到 150°（8 张 -> 间隔约 18.8°）后，窄视场下一屏能看到 2-3 张，既有"长焦看
   // 一段缓坡"的观感，又不至于空。
   var LON_SPAN = 5.0;      // 三排照片沿管轴占用的世界长度
-  var ROW_ANG = 17.0;      // 相邻两排的周向角间距（度）
+  // 相邻两排的周向角间距。17 度时三排的屏幕 y 跨度约 1138px，超过 900 的视口，
+  // 第三排被挤出画面；11 度时约 660px，三排都在画面内。
+  var ROW_ANG = 11.0;
   var XHALF = 6.0;         // 管子沿轴半长（世界单位）
   var XPITCH = 0.25;       // 管壁沿轴的网格步长        // 一张相纸占的弧长（度）—— 统一弧长
     // 🔴 相纸的宽高比**由照片决定**，不是常数。
@@ -409,10 +421,8 @@
       // 用户："照片不要只排一排，排三排，而且这个不定死，后期改成随机排"。
       // 先写死三排；以后改随机排只动这一段。
       var rows = 3;
-      for (var r = 2; r <= 8; r++) {
-        var per = n / r;
-        if (per >= perRowMin - 1 && per <= perRowMax + 1) { rows = r; break; }
-      }
+      // 用户要求**先写死三排**（后期改成随机排）。
+      // 原来这段自适应搜索会把 22 张算成 2 排（per=11 落在区间内），所以这里不再搜索。
       // 记录照片占用的经度范围，供相机钳位用（见 clampLon）
       lonMin = 1e9; lonMax = -1e9;
       var base = Math.floor(n / rows);
@@ -1056,6 +1066,7 @@
           if (big) { pick.img.style.opacity = '0'; pick.img.src = big; }
         }
         camLon = clampLon(pick.lon);
+        camPhi = pitchFor(pick.lat, radius());
         camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
         flyFrom = null;
@@ -1169,7 +1180,12 @@
       // 之前写成 animateCameraTo(p.lon, p.lat)，相机于是和那张照片同侧、背对着它，
       // "聚焦"之后画面里还是一堆小相纸。
       // 朝外看之后，相机就坐在照片所在的这一侧，正对看它即可。
-      animateCameraTo(p.lon, p.lat, ms || 900);
+      // 俯仰按"真正能看到这张"的角度算（见 pitchFor），用的是聚焦后的半径
+      var rTarget = 1 - Math.min(0.94, Math.max(0.02,
+        (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180)
+        * Math.max(matteWorld / Math.max(1, W), (matteWorld / matteAR(p.ratio)) / Math.max(1, H))
+        * 1.22));
+      animateCameraTo(p.lon, pitchFor(p.lat, 1 - rTarget), ms || 900);
       // 按相纸实际尺寸算"刚好盖满"的缩放（见 zoomToFill）
       target = zoomToFill(p);
       // 🔴 聚焦时换**全尺寸**图。
@@ -1352,7 +1368,8 @@
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
       // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
       // 上下 = 俯仰角
-      camPhi = Math.max(-30, Math.min(30, camPhi + dy * DRAG_DEG_PER_PX));
+      // 俯仰范围放宽：近距离看下面那排需要很大的角度
+      camPhi = Math.max(-75, Math.min(75, camPhi + dy * DRAG_DEG_PER_PX));
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
@@ -1377,6 +1394,27 @@
     // 之前靠 DOM 相纸的位置做命中，而 DOM 那层是另一套投影（perspective + rotateY）。
     // 探索一会儿之后两者越走越偏，于是点到空隙或点到另一张图
     // （用户："点击图片定位不对"）。
+    // 临时诊断：把每张照片的投影结果列出来，用来校准命中盒
+    function pickTable() {
+      var cam = makeCamera(camLon, camPhi, radius());
+      var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
+      var out = [];
+      for (var i = 0; i < photos.length; i++) {
+        var q = photos[i];
+        var P = sph(q.lon, q.lat);
+        var pr = projectPoint(cam, focal, W, H, P);
+        if (!pr) { out.push(q.id + ':-'); continue; }
+        var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
+        var z = dx * cam.fwd[0] + dy * cam.fwd[1] + dz * cam.fwd[2];
+        if (z <= 0.06) { out.push(q.id + ':back'); continue; }
+        var wpx = focal * matteWorld / z;
+        var hpx = wpx / matteAR(q.ratio);
+        out.push(q.id + ':' + Math.round(pr[0]) + ',' + Math.round(pr[1]) +
+                 ' ' + Math.round(wpx) + 'x' + Math.round(hpx) + ' z' + z.toFixed(2));
+      }
+      return out.join(' | ');
+    }
+
     function pickAt(cx, cy) {
       var cam = makeCamera(camLon, camPhi, radius());
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
@@ -1450,7 +1488,7 @@
           matteVerts: diag.matteVerts || 0, matteDraws: diag.matteDraws || 0,
           fDraw: diag.fDraw || 0, fSkip: diag.fSkip || 0,
           ftReady: diag.ftReady, ftFb: diag.ftFb, ftUse: diag.ftUse, ftSrc: diag.ftSrc,
-          lights: lightInfo(), openingId: openingId,
+          lights: lightInfo(), openingId: openingId, pickDbg: pickTable(),
           open: openState, ready: ready, focusId: focusId, pointers: livePointers().length, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
