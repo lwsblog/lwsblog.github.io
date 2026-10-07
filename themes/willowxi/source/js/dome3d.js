@@ -588,6 +588,7 @@
       // 深度偏移：相纸和照片都在同一张球面上，深度逐像素相同。相纸先画、照片后画，
       // 若深度相等则 LEQUAL 有一半像素撞不过 -> 照片画不出来（实测就是"只有白纸"）。
       // 给照片一个明确更大的前移量。
+      gl.disable(gl.POLYGON_OFFSET_FILL);
       gl.uniform1f(mLoc.uBias, -0.00002);
       gl.uniform1f(mLoc.uUseTex, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
@@ -597,7 +598,16 @@
       gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
       gl.drawArrays(gl.TRIANGLES, 0, paperVerts);
       // 2) 照片逐张贴图
-      gl.uniform1f(mLoc.uBias, -0.00040);
+      // 🔴 照片与相纸在同一张球面上、深度逐像素相同。只靠 uBias 不够 —— 实测
+      // 白相纸会把照片整块盖住（把相纸停画，照片立刻铺满，证明了这一点）。
+      // 用标准的"共面贴花"做法：polygonOffset 把照片整体朝观察者拉一点。
+      // 照片这一遍**直接让深度测试永远通过**。相纸和照片在同一张球面上，深度逐像素
+      // 相同，uBias 和 polygonOffset 都不足以稳定地把照片压在相纸之上（实测仍被盖住）。
+      // 相机是朝外看的，球体另一侧的相纸在相机背后、会被近平面裁掉，所以这里关掉深度
+      // 比较不会带来"透过去看到背面"的问题。画完恢复 LEQUAL。
+      gl.depthFunc(gl.ALWAYS);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.uniform1f(mLoc.uBias, 0);
       gl.uniform1f(mLoc.uUseTex, 1);
       gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
       gl.enableVertexAttribArray(mLoc.aPos);
@@ -614,11 +624,19 @@
         // 新贴图没就绪就先用后备（缩略图）顶替，别让照片整块消失
         var use = rec.ready ? rec
                 : (rec.fallback && rec.fallback.ready ? rec.fallback : null);
-        if (!use) continue;
+        if (r.p.id === focusId) {
+          diag.ftReady = !!rec.ready;
+          diag.ftFb = !!(rec.fallback && rec.fallback.ready);
+          diag.ftSrc = String(rec.src).slice(-24);
+          diag.ftUse = !!use;
+        }
+        if (!use) { diag.fSkip = (diag.fSkip || 0) + 1; continue; }
+        diag.fDraw = (diag.fDraw || 0) + 1;
         gl.bindTexture(gl.TEXTURE_2D, use.tex);
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
         diag.matteDraws = (diag.matteDraws || 0) + 1;
       }
+      gl.depthFunc(gl.LEQUAL);
     }
 
     function resize() {
@@ -1243,6 +1261,8 @@
           verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
           m0: diag.m0 || null, m1: diag.m1 || null,
           matteVerts: diag.matteVerts || 0, matteDraws: diag.matteDraws || 0,
+          fDraw: diag.fDraw || 0, fSkip: diag.fSkip || 0,
+          ftReady: diag.ftReady, ftFb: diag.ftFb, ftUse: diag.ftUse, ftSrc: diag.ftSrc,
           open: openState, ready: ready, focusId: focusId, pointers: livePointers().length, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
