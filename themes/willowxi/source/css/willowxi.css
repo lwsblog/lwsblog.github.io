@@ -5640,3 +5640,10 @@ html.is-dome .photo-lightbox {
   font-size: 11px;
   letter-spacing: 0.34em;
 }
+/* 相纸现在由 WebGL 画在球面上（跟随球面曲率）；DOM 这层只保留点击命中，
+   视觉上完全透明 —— 否则又会盖上一层"贴在墙前的卡片"。 */
+[data-dome-matte] {
+  opacity: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}

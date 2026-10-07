@@ -240,6 +240,56 @@
     '}'
   ].join('\n');
 
+  // ---- 相纸：画在球面上的白纸 + 照片贴图 -------------------------------
+  //
+  // 用户："照片为什么很诡异的飘在空中，我要的是照片贴在墙上，像是穹顶上自带的一样"。
+  // 之前相纸是 DOM，只做横向 rotateY，没有跟随球面纵向曲率，读起来就是贴在墙前的
+  // 卡片 + 投影阴影。现在把相纸和照片当球面纹理画（与壁纸同一套投影），它就成为
+  // 球面的一部分了。
+  //
+  // DOM 相纸仍保留但设为透明，只为点击命中服务（省掉自己做拾取）。
+  var VS_MATTE = [
+    'attribute vec3 aPos;',
+    'attribute vec2 aUV;',
+    'uniform vec3 uEye, uRight, uUp, uFwd;',
+    'uniform float uFocal, uHalfW, uHalfH, uBow, uHoop, uBias;',
+    'varying vec2 vUV;',
+    'void main() {',
+    '  vec3 d = aPos - uEye;',
+    '  float z = dot(d, uFwd);',
+    '  float x = dot(d, uRight);',
+    '  float y = dot(d, uUp);',
+    '  float sx = uHalfW + uFocal * x / max(z, 0.01);',
+    '  float sy = uHalfH - uFocal * y / max(z, 0.01);',
+    '  float ty = (sy - uHalfH) / uHalfH;',
+    '  float waist = 1.0 - uBow * max(0.0, 1.0 - ty * ty);',
+    '  float sx2 = uHalfW + (sx - uHalfW) * waist;',
+    '  float tx = (sx - uHalfW) / uHalfW;',
+    '  float sy2 = sy + uHoop * tx * tx * (sy - uHalfH);',
+    '  float zc = max(z, 0.01);',
+    '  const float NEAR = 0.02;',
+    '  const float FAR = 10.0;',
+    '  float ndcZ = (FAR + NEAR) / (FAR - NEAR) - 2.0 * FAR * NEAR / ((FAR - NEAR) * zc);',
+    '  gl_Position = vec4((sx2 / uHalfW - 1.0) * zc, (1.0 - sy2 / uHalfH) * zc, ndcZ * zc + uBias, zc);',
+    '  vUV = aUV;',
+    '}'
+  ].join(String.fromCharCode(10));
+  var FS_MATTE = [
+    'precision mediump float;',
+    'uniform sampler2D uTex;',
+    'uniform float uUseTex;',
+    'uniform vec3 uPaper;',
+    'varying vec2 vUV;',
+    'void main() {',
+    '  if (uUseTex > 0.5) {',
+    '    vec4 c = texture2D(uTex, vUV);',
+    '    gl_FragColor = vec4(c.rgb, 1.0);',
+    '  } else {',
+    '    gl_FragColor = vec4(uPaper, 1.0);',
+    '  }',
+    '}'
+  ].join(String.fromCharCode(10));
+
   function createDome(root) {
     var canvas = root.querySelector('[data-dome-canvas]');
     if (!canvas) return null;
@@ -253,6 +303,8 @@
     var wall = null, wallReady = false, tex = null;
     var detachers = [];
     var prog = null, loc = {}, buf = null, nVerts = 0;
+    var progMatte = null, mLoc = {}, paperBuf = null, paperVerts = 0;
+    var photoBuf = null, photoRanges = [];
     var diag = { tickN: 0, wheelN: 0, verts: 0, err: '', draws: 0 };
 
     // ---- 相纸：贴在内壁上的照片 ----------------------------------------
@@ -441,6 +493,119 @@
       diag.verts = nVerts;
     }
 
+    // 把每张相纸的白纸四边形与照片四边形按球面经纬度算出来。
+    // 相纸宽 = MATTE_ARC 度经度；相纸高按照片宽高比换算成纬度跨度：
+    //   世界高 = 世界宽 / matteAR(ratio)，而世界高 = 2*sin(dLat/2) -> 解 dLat
+    function pushQuadUV(out, latTop, latBot, lonL, lonR) {
+      var P1 = sph(lonL, latTop), P2 = sph(lonR, latTop);
+      var P3 = sph(lonR, latBot), P4 = sph(lonL, latBot);
+      // 图片行 0 在上 -> v 与纬度反向
+      var tri = [[P1, 0, 0], [P2, 1, 0], [P3, 1, 1], [P1, 0, 0], [P3, 1, 1], [P4, 0, 1]];
+      for (var t = 0; t < 6; t++) {
+        var v = tri[t];
+        out.push(v[0][0], v[0][1], v[0][2], v[1], v[2]);
+      }
+    }
+
+    function buildMatteMesh() {
+      var paper = [], photo = [];
+      photoRanges = [];
+      for (var i = 0; i < photos.length; i++) {
+        var q = photos[i];
+        var dLon = MATTE_ARC * 0.5;
+        var ar = matteAR(q.ratio);
+        var dLat = 2 * Math.asin(Math.min(0.999, (matteWorld / ar) / 2)) * 180 / Math.PI * 0.5;
+        var lat0 = q.lat + dLat, lat1 = q.lat - dLat;
+        var lon0 = q.lon - dLon, lon1 = q.lon + dLon;
+        pushQuadUV(paper, lat0, lat1, lon0, lon1);
+        var k = 1 / (1 + 2 * MATTE_BORDER);
+        var la0 = (lat0 - q.lat) * k + q.lat, la1 = (lat1 - q.lat) * k + q.lat;
+        var lo0 = (lon0 - q.lon) * k + q.lon, lo1 = (lon1 - q.lon) * k + q.lon;
+        var start = photo.length / 5;
+        pushQuadUV(photo, la0, la1, lo0, lo1);
+        photoRanges.push({ p: q, start: start, count: photo.length / 5 - start });
+      }
+      paperBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(paper), gl.STATIC_DRAW);
+      paperVerts = paper.length / 5;
+      photoBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(photo), gl.STATIC_DRAW);
+      diag.matteVerts = paperVerts + photo.length / 5;
+    }
+
+    // 每张照片的贴图。先按 640 缩略图建；聚焦时用全尺寸重建一次。
+    var texOf = {};
+    function ensureTexture(q, full) {
+      var src = full ? (q.light || q.screen || q.src) : q.src;
+      var prev = texOf[q.id];
+      if (prev && prev.src === src) return prev.tex;
+      var t = gl.createTexture();
+      var im = new window.Image();
+      var rec = { tex: t, src: src, ready: false };
+      im.onload = function () {
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        rec.ready = true;
+        if (prev) { try { gl.deleteTexture(prev.tex); } catch (e) {} }
+      };
+      im.src = src;
+      texOf[q.id] = rec;
+      return t;
+    }
+
+    function drawMattes(cam, focal) {
+      if (!progMatte || !paperBuf) return;
+      gl.useProgram(progMatte);
+      gl.uniform3fv(mLoc.uEye, cam.pos);
+      gl.uniform3fv(mLoc.uRight, cam.right);
+      gl.uniform3fv(mLoc.uUp, cam.up);
+      gl.uniform3fv(mLoc.uFwd, cam.fwd);
+      gl.uniform1f(mLoc.uFocal, focal * ratio);
+      gl.uniform1f(mLoc.uHalfW, canvas.width * 0.5);
+      gl.uniform1f(mLoc.uHalfH, canvas.height * 0.5);
+      gl.uniform1f(mLoc.uBow, BOW);
+      gl.uniform1f(mLoc.uHoop, HOOP);
+      gl.uniform3f(mLoc.uPaper, 0.957, 0.957, 0.945);
+      gl.disable(gl.BLEND);
+      // 1) 所有白相纸一批画完
+      // 深度偏移：相纸和照片都在同一张球面上，深度逐像素相同。相纸先画、照片后画，
+      // 若深度相等则 LEQUAL 有一半像素撞不过 -> 照片画不出来（实测就是"只有白纸"）。
+      // 给照片一个明确更大的前移量。
+      gl.uniform1f(mLoc.uBias, -0.00002);
+      gl.uniform1f(mLoc.uUseTex, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
+      gl.enableVertexAttribArray(mLoc.aPos);
+      gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(mLoc.aUV);
+      gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
+      gl.drawArrays(gl.TRIANGLES, 0, paperVerts);
+      // 2) 照片逐张贴图
+      gl.uniform1f(mLoc.uBias, -0.00040);
+      gl.uniform1f(mLoc.uUseTex, 1);
+      gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
+      gl.enableVertexAttribArray(mLoc.aPos);
+      gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(mLoc.aUV);
+      gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(mLoc.uTex, 0);
+      for (var i = 0; i < photoRanges.length; i++) {
+        var r = photoRanges[i];
+        var t = ensureTexture(r.p, r.p.id === focusId);
+        if (!texOf[r.p.id] || !texOf[r.p.id].ready) continue;
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.drawArrays(gl.TRIANGLES, r.start, r.count);
+        diag.matteDraws = (diag.matteDraws || 0) + 1;
+      }
+    }
+
     function resize() {
       ratio = Math.min(window.devicePixelRatio || 1, 2);
       W = Math.max(1, window.innerWidth);
@@ -514,6 +679,8 @@
       gl.vertexAttribPointer(loc.aUV, 2, gl.FLOAT, false, S, 20);
       gl.drawArrays(gl.TRIANGLES, 0, nVerts);
       diag.draws++;
+      // 相纸与照片：同一套投影画在球面上（深度略前移，盖在墙纸之上）
+      drawMattes(cam, focal);
       updatePhotos(cam, focal);
     }
 
@@ -571,6 +738,24 @@
         loc[n] = gl.getUniformLocation(prog, n);
       });
       buildMesh();
+      // 相纸用的 program（白纸 + 照片贴图，uUseTex 切换）
+      var vsm = compile(gl.VERTEX_SHADER, VS_MATTE);
+      var fsm = compile(gl.FRAGMENT_SHADER, FS_MATTE);
+      if (vsm && fsm) {
+        progMatte = gl.createProgram();
+        gl.attachShader(progMatte, vsm);
+        gl.attachShader(progMatte, fsm);
+        gl.linkProgram(progMatte);
+        if (gl.getProgramParameter(progMatte, gl.LINK_STATUS)) {
+          var names = ['aPos', 'aUV', 'uEye', 'uRight', 'uUp', 'uFwd', 'uFocal',
+                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper'];
+          for (var mi = 0; mi < names.length; mi++) {
+            var nm = names[mi];
+            mLoc[nm] = nm.charAt(0) === 'a' ? gl.getAttribLocation(progMatte, nm)
+                                            : gl.getUniformLocation(progMatte, nm);
+          }
+        } else { diag.err = String(gl.getProgramInfoLog(progMatte)).slice(0, 200); }
+      } else { diag.err = 'matte shader failed'; }
       layer = document.createElement('div');
       layer.setAttribute('data-dome-photos', '');
       // 必须挂进穹顶容器内部。挂到 body 时它的 z-index 低于 [data-dome] 的 900，
@@ -580,6 +765,8 @@
       assignSlots(list);
       for (var pi = 0; pi < list.length; pi++) buildMatte(list[pi]);
       photos = list;
+      buildMatteMesh();
+      for (var ti = 0; ti < photos.length; ti++) ensureTexture(photos[ti], false);
       layer.addEventListener('click', onMatteClick);
       detachers.push(function () { layer.removeEventListener('click', onMatteClick); });
       diag.photos = photos.length;
@@ -837,6 +1024,7 @@
       // 640 放大到 1440 明显糊 —— 用户："聚焦时没有切换全尺寸图"。
       // 开屏已经做过同样的事，聚焦漏了。
       useFullImage(p, true);
+      ensureTexture(p, true);      // WebGL 那层也换成全尺寸贴图
     }
 
     // 换到 1600 灯箱档 / 换回 640 缩略图。换之前先把 opacity 归 0，
@@ -884,7 +1072,7 @@
       // 留着白占内存。等它缩小到墙上的尺寸之前就换，看不出差别。
       if (focusId) {
         var prev = photoById(focusId);
-        if (prev) useFullImage(prev, false);
+        if (prev) { useFullImage(prev, false); ensureTexture(prev, false); }
       }
       focusId = null;
       target = 0;
@@ -1039,6 +1227,7 @@
           tickN: diag.tickN, wheelN: diag.wheelN, scrollY: window.scrollY,
           verts: diag.verts, draws: diag.draws, photos: diag.photos || 0,
           m0: diag.m0 || null, m1: diag.m1 || null,
+          matteVerts: diag.matteVerts || 0, matteDraws: diag.matteDraws || 0,
           open: openState, ready: ready, focusId: focusId, pointers: livePointers().length, err: diag.err, bow: BOW, hoop: HOOP
         };
       }
