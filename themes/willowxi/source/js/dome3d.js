@@ -617,7 +617,7 @@
       // 三角形时，一条本该平滑弯曲的边会被折成直线，相邻四边形之间对不上 ——
       // 表现就是相纸白框被撕出缺口（管状透视一开就非常明显）。
       // 细分到 SUB x SUB 后逐段逼近一致，边框就完整了。
-      var SUB = 6;
+      var SUB = 12;   // 6 时白框边缘还会"浪"，12 平滑
       for (var ia = 0; ia < SUB; ia++) {
         for (var ib = 0; ib < SUB; ib++) {
           var v0 = ia / SUB, v1 = (ia + 1) / SUB;
@@ -1302,7 +1302,7 @@
       // 要让**两个方向都装得下**，距离必须 >= max(dw, dh)。用 min 时必然有一个方向
       // 溢出，看起来就是"拉太近"；而竖版相纸的 dh 远大于 dw，所以竖屏溢得最厉害
       // （用户："竖屏和横屏的聚焦拉近不一样，竖屏要再远一点"）。
-      var d = Math.max(dw, dh) * 1.22;   // >1 = 再后退一点，留出白边与四周空隙
+      var d = Math.max(dw, dh) * 1.38;   // 再退远一点，四周留出空隙   // >1 = 再后退一点，留出白边与四周空隙
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
       var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
