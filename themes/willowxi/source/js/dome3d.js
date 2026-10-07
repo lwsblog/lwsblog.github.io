@@ -543,7 +543,12 @@
       if (prev && prev.src === src) return prev.tex;
       var t = gl.createTexture();
       var im = new window.Image();
-      var rec = { tex: t, src: src, ready: false };
+      // 🔴 保留旧贴图作为后备。
+      //
+      // 聚焦时要把贴图升级到 1600 全尺寸，但大图要加载一会儿。若这期间直接不画，
+      // 画面就只剩白相纸（线上实测：聚焦后整屏纯白）。所以旧贴图先留着顶替，
+      // 新贴图就绪再换。
+      var rec = { tex: t, src: src, ready: false, fallback: prev || null };
       im.onload = function () {
         gl.bindTexture(gl.TEXTURE_2D, t);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -553,7 +558,12 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         rec.ready = true;
-        if (prev) { try { gl.deleteTexture(prev.tex); } catch (e) {} }
+        // 旧贴图不能立刻删 —— 这一帧可能还在用它顶替。延迟释放。
+        if (prev) {
+          window.setTimeout(function () {
+            try { gl.deleteTexture(prev.tex); } catch (e) {}
+          }, 1500);
+        }
       };
       im.src = src;
       texOf[q.id] = rec;
@@ -598,9 +608,14 @@
       gl.uniform1i(mLoc.uTex, 0);
       for (var i = 0; i < photoRanges.length; i++) {
         var r = photoRanges[i];
-        var t = ensureTexture(r.p, r.p.id === focusId);
-        if (!texOf[r.p.id] || !texOf[r.p.id].ready) continue;
-        gl.bindTexture(gl.TEXTURE_2D, t);
+        ensureTexture(r.p, r.p.id === focusId);
+        var rec = texOf[r.p.id];
+        if (!rec) continue;
+        // 新贴图没就绪就先用后备（缩略图）顶替，别让照片整块消失
+        var use = rec.ready ? rec
+                : (rec.fallback && rec.fallback.ready ? rec.fallback : null);
+        if (!use) continue;
+        gl.bindTexture(gl.TEXTURE_2D, use.tex);
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
         diag.matteDraws = (diag.matteDraws || 0) + 1;
       }
