@@ -377,6 +377,10 @@
   // 相邻两排的周向角间距。17 度时三排的屏幕 y 跨度约 1138px，超过 900 的视口，
   // 第三排被挤出画面；11 度时约 660px，三排都在画面内。
   var ROW_ANG = 11.0;
+  // 随机排布的抖动幅度
+  var ROW_OFF_K = 0.55;   // 整排沿轴错开
+  var COL_JIT_K = 0.50;   // 单张在槽位内左右抖
+  var ANG_JIT_K = 0.60;   // 周向角抖动
   var XHALF = 6.0;         // 管子沿轴半长（世界单位）
   var XPITCH = 0.25;       // 管壁沿轴的网格步长        // 一张相纸占的弧长（度）—— 统一弧长
     // 🔴 相纸的宽高比**由照片决定**，不是常数。
@@ -435,20 +439,33 @@
       // 屏幕外 —— 这就是相纸一张都看不见的原因（zz 和尺寸检查都通过，只是位置在
       // 画面之外）。
       var span = Math.min(BAND_HALF * 0.82, 11);
-      var lat = [], k = 0;
-      for (var ri = 0; ri < rows; ri++) {
-        // 三排周向角：-ROW_ANG / 0 / +ROW_ANG（先写死）
-        lat.push((ri - (rows - 1) / 2) * ROW_ANG);
+      // 🎲 随机排布。
+      //
+      // 用户："这个不定死，后期改成随机排"。
+      // 仍按三排分组（保留疏密手感），但：
+      //   * 每排整体沿轴错开，避免上下对齐成格子
+      //   * 每张在自己的槽位内左右抖动
+      //   * 每张的周向角在排基线附近抖动
+      // 带种子的伪随机：一次加载内位置稳定（不会每帧乱跳），刷新才换一种。
+      var seed = (Date.now() ^ (Math.random() * 1e9)) | 0;
+      function rnd() {
+        seed = (seed * 1664525 + 1013904223) | 0;
+        return ((seed >>> 0) / 4294967296);
       }
+      var k = 0;
       for (var ri2 = 0; ri2 < rows; ri2++) {
-        var step = LON_SPAN / counts[ri2];
-        for (var j = 0; j < counts[ri2]; j++) {
-          // 奇偶排错半格（交错排布）
-          list[k].lat = lat[ri2];
-          // lon = 沿管轴位置（世界单位）；lat = 周向角（度）
-          list[k].lon = -LON_SPAN / 2 + j * step;
-          if (list[k].lon < lonMin) lonMin = list[k].lon;
-          if (list[k].lon > lonMax) lonMax = list[k].lon;
+        var cnt = counts[ri2];
+        var slot = LON_SPAN / Math.max(1, cnt);
+        var baseAng = (ri2 - (rows - 1) / 2) * ROW_ANG;
+        var rowOff = (rnd() - 0.5) * slot * ROW_OFF_K;
+        for (var j = 0; j < cnt; j++) {
+          var x = -LON_SPAN / 2 + slot * (j + 0.5) + rowOff
+                  + (rnd() - 0.5) * slot * COL_JIT_K;
+          var ang = baseAng + (rnd() - 0.5) * ROW_ANG * ANG_JIT_K;
+          list[k].lon = x;
+          list[k].lat = ang;
+          if (x < lonMin) lonMin = x;
+          if (x > lonMax) lonMax = x;
           k++;
         }
       }
