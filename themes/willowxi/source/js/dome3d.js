@@ -1315,7 +1315,8 @@
       var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
       var dw = focal * photoW / Math.max(1, W);
       var dh = focal * (photoW / p.ratio) / Math.max(1, H);
-      var d = Math.min(dw, dh) * 0.93;   // min = 铺满；0.93 = 再靠近一点，确保盖过视口
+      // 0.93 时照片只占约 86%，四周还露相纸边；0.78 才是真正的"铺满"。
+      var d = Math.min(dw, dh) * 0.66;   // min = 铺满；0.93 = 再靠近一点，确保盖过视口
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
       return Math.max(0, Math.min(1, z));
