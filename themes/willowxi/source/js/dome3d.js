@@ -364,6 +364,10 @@
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
     var openingId = null;
     var vLon = 0, vPhi = 0, gliding = false;
+    // 背景驱动：把相机状态映射成"鼠标位置"派发给主题场景。
+    // 主题的视差本来由 window 的 pointermove 驱动（pointer.tx/ty -> 缓动）。
+    // 我们不改它的代码，只喂事件 —— 背景仍由**同一份 willowxi.js** 绘制与驱动。
+    var bgSynth = false, bgLastT = 0, bgLastX = 1e9, bgLastY = 1e9;
     // 照片占用的经度范围（assignSlots 里填），相机据此钳位
     var lonMin = 0, lonMax = 0;
     // 把经度钳在照片区域内、两边各留 LON_PAD 度余量。
@@ -877,6 +881,24 @@
       }
       // 聚焦/开屏时形变**归零**：用户要求"聚焦的时候照片应该刚好到看不出立体透视
       // 而不是弯的"。只有拉远看全局时才给满强度做管状透视。
+      // 驱动主题背景：把 camLon（沿轴平移）/ camPhi（俯仰）映射成鼠标位置。
+      // 主题内部是 nx=(clientX/innerWidth)*2-1，所以这里反着算即可。
+      // 注意 render() 不带参数，不能用 now
+      var _bn = (window.performance && performance.now) ? performance.now() : Date.now();
+      if (_bn - bgLastT > 50) {
+        bgLastT = _bn;
+        var _cx = W * 0.5 + (camLon / 3.2) * (W * 0.5);
+        var _cy = H * 0.5 - (camPhi / 80) * (H * 0.5);
+        if (Math.abs(_cx - bgLastX) > 0.5 || Math.abs(_cy - bgLastY) > 0.5) {
+          bgLastX = _cx; bgLastY = _cy;
+          bgSynth = true;
+          try {
+            window.dispatchEvent(new MouseEvent('pointermove',
+              { clientX: _cx, clientY: _cy, bubbles: true }));
+          } catch (e) { }
+          bgSynth = false;
+        }
+      }
       var _wk = (focusId || (openingId && openState !== 'done')) ? 0
                : Math.max(0, Math.min(1, 1 - zoom / 0.55));
       bowNow = BOW * _wk; hoopNow = HOOP * _wk;
@@ -1445,6 +1467,7 @@
       // pointermove/pointerup 本来就挂在 window 上，不需要捕获。
     }
     function onPointerMove(e) {
+      if (bgSynth) return;   // 我们自己派发的合成事件，不当拖动处理
       if (pointers[e.pointerId]) { pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY; }
       var lp = livePointers();
       if (lp.length >= 2) {
