@@ -310,14 +310,31 @@
     'precision mediump float;',
     'uniform sampler2D uTex;',
     'uniform float uUseTex;',
+    'uniform float uBlur;',    // 边缘失焦的模糊半径（UV 单位）
+    'uniform float uFade;',    // 边缘淡出
+
     'uniform vec3 uPaper;',
     'varying vec2 vUV;',
     'void main() {',
     '  if (uUseTex > 0.5) {',
     '    vec4 c = texture2D(uTex, vUV);',
-    '    gl_FragColor = vec4(c.rgb, 1.0);',
+    // 9 抽头盒式模糊。半径由 JS 按"到视轴的角度"给：正中 0，越斜越大。
+    // 掠射角那几张的透视拉伸本来躲不掉，糊掉之后读起来就是焦外虚化。
+    '    if (uBlur > 0.0) {',
+    '      vec4 s = c * 0.2;',
+    '      s += texture2D(uTex, vUV + vec2(uBlur, 0.0)) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(-uBlur, 0.0)) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(0.0, uBlur)) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(0.0, -uBlur)) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(uBlur, uBlur) * 0.7) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(-uBlur, uBlur) * 0.7) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(uBlur, -uBlur) * 0.7) * 0.1;',
+    '      s += texture2D(uTex, vUV + vec2(-uBlur, -uBlur) * 0.7) * 0.1;',
+    '      c = s;',
+    '    }',
+    '    gl_FragColor = vec4(c.rgb, c.a * uFade);',
     '  } else {',
-    '    gl_FragColor = vec4(uPaper, 1.0);',
+    '    gl_FragColor = vec4(uPaper, uFade);',
     '  }',
     '}'
   ].join(String.fromCharCode(10));
@@ -395,6 +412,12 @@
   var LON_SPAN = 5.0;      // 三排照片沿管轴占用的世界长度
   // 相邻两排的周向角间距。17 度时三排的屏幕 y 跨度约 1138px，超过 900 的视口，
   // 第三排被挤出画面；11 度时约 660px，三排都在画面内。
+  // 边缘失焦：按"照片方向与视轴的夹角"给模糊与淡出。
+  // 夹角小于 A0 全清，超过 A1 时到达最大模糊/最大淡出。
+  var BLUR_A0 = 0.34;     // 约 19 度
+  var BLUR_A1 = 0.80;     // 约 46 度
+  var BLUR_MAX = 0.022;   // 最大模糊半径（UV 单位）
+  var BLUR_FADE = 0.55;   // 边缘最多淡掉多少
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -737,62 +760,56 @@
       gl.uniform1f(mLoc.uBow, bowNow);
       gl.uniform1f(mLoc.uHoop, hoopNow);
       gl.uniform3f(mLoc.uPaper, 0.957, 0.957, 0.945);
-      gl.disable(gl.BLEND);
-      // 1) 所有白相纸一批画完
-      // 深度偏移：相纸和照片都在同一张球面上，深度逐像素相同。相纸先画、照片后画，
-      // 若深度相等则 LEQUAL 有一半像素撞不过 -> 照片画不出来（实测就是"只有白纸"）。
-      // 给照片一个明确更大的前移量。
-      gl.disable(gl.POLYGON_OFFSET_FILL);
-      gl.uniform1f(mLoc.uBias, -0.00002);
-      gl.uniform1f(mLoc.uUseTex, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
-      gl.enableVertexAttribArray(mLoc.aPos);
-      gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
-      gl.enableVertexAttribArray(mLoc.aUV);
-      gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
-      gl.drawArrays(gl.TRIANGLES, 0, paperVerts);
-      // 2) 照片逐张贴图
-      // 🔴 照片与相纸在同一张球面上、深度逐像素相同。只靠 uBias 不够 —— 实测
-      // 白相纸会把照片整块盖住（把相纸停画，照片立刻铺满，证明了这一点）。
-      // 用标准的"共面贴花"做法：polygonOffset 把照片整体朝观察者拉一点。
-      // 照片这一遍**直接让深度测试永远通过**。相纸和照片在同一张球面上，深度逐像素
-      // 相同，uBias 和 polygonOffset 都不足以稳定地把照片压在相纸之上（实测仍被盖住）。
-      // 相机是朝外看的，球体另一侧的相纸在相机背后、会被近平面裁掉，所以这里关掉深度
-      // 比较不会带来"透过去看到背面"的问题。画完恢复 LEQUAL。
-      // 恢复正常深度比较：照片已几何凸出，能正常压过白相纸
-      gl.depthFunc(gl.LEQUAL);
-      gl.disable(gl.POLYGON_OFFSET_FILL);
-      gl.uniform1f(mLoc.uBias, 0);
-      gl.uniform1f(mLoc.uUseTex, 1);
-      gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
-      gl.enableVertexAttribArray(mLoc.aPos);
-      gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
-      gl.enableVertexAttribArray(mLoc.aUV);
-      gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
+      // 逐张画（白纸 + 照片各一次），这样每张才能有自己的**边缘失焦**与淡出。
+      // paperBuf / photoBuf 都是"每张一个四边形、顺序相同"，所以两者范围一致。
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(mLoc.uTex, 0);
+      var _fw = cam.fwd;
       for (var i = 0; i < photoRanges.length; i++) {
         var r = photoRanges[i];
+        // 该照片方向与视轴的夹角 -> 模糊量与淡出量
+        var P = sph(r.p.lon, r.p.lat);
+        var dx = P[0] - cam.pos[0], dy = P[1] - cam.pos[1], dz = P[2] - cam.pos[2];
+        var L = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        var ca = (dx * _fw[0] + dy * _fw[1] + dz * _fw[2]) / L;
+        var ang = Math.acos(Math.max(-1, Math.min(1, ca)));
+        var t = Math.max(0, Math.min(1, (ang - BLUR_A0) / (BLUR_A1 - BLUR_A0)));
+        var blur = t * BLUR_MAX;
+        var fade = 1 - t * BLUR_FADE;
+        gl.uniform1f(mLoc.uFade, fade);
+
+        gl.uniform1f(mLoc.uUseTex, 0);
+        gl.uniform1f(mLoc.uBlur, 0);
+        gl.uniform1f(mLoc.uBias, -0.00002);
+        gl.bindBuffer(gl.ARRAY_BUFFER, paperBuf);
+        gl.enableVertexAttribArray(mLoc.aPos);
+        gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
+        gl.enableVertexAttribArray(mLoc.aUV);
+        gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
+        gl.drawArrays(gl.TRIANGLES, r.start, r.count);
+
         ensureTexture(r.p, r.p.id === focusId || r.p.id === openingId);
         var rec = texOf[r.p.id];
         if (!rec) continue;
-        // 新贴图没就绪就先用后备（缩略图）顶替，别让照片整块消失
         var use = rec.ready ? rec
                 : (rec.fallback && rec.fallback.ready ? rec.fallback : null);
-        if (r.p.id === focusId) {
-          diag.ftReady = !!rec.ready;
-          diag.ftFb = !!(rec.fallback && rec.fallback.ready);
-          diag.ftSrc = String(rec.src).slice(-24);
-          diag.ftUse = !!use;
-        }
-        if (!use) { diag.fSkip = (diag.fSkip || 0) + 1; continue; }
-        diag.fDraw = (diag.fDraw || 0) + 1;
+        if (!use) continue;
+        gl.uniform1f(mLoc.uUseTex, 1);
+        gl.uniform1f(mLoc.uBlur, blur);
+        gl.uniform1f(mLoc.uBias, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, photoBuf);
+        gl.enableVertexAttribArray(mLoc.aPos);
+        gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
+        gl.enableVertexAttribArray(mLoc.aUV);
+        gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
         gl.bindTexture(gl.TEXTURE_2D, use.tex);
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
         diag.matteDraws = (diag.matteDraws || 0) + 1;
       }
+      gl.disable(gl.BLEND);
     }
-
     function resize() {
       ratio = Math.min(window.devicePixelRatio || 1, 2);
       W = Math.max(1, window.innerWidth);
@@ -963,7 +980,7 @@
         gl.linkProgram(progMatte);
         if (gl.getProgramParameter(progMatte, gl.LINK_STATUS)) {
           var names = ['aPos', 'aUV', 'uEye', 'uRight', 'uUp', 'uFwd', 'uFocal',
-                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper'];
+                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper', 'uBlur', 'uFade'];
           for (var mi = 0; mi < names.length; mi++) {
             var nm = names[mi];
             mLoc[nm] = nm.charAt(0) === 'a' ? gl.getAttribLocation(progMatte, nm)
