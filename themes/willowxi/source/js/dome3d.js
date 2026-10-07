@@ -71,15 +71,20 @@
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
-  function sph(lon, phi) {
-    var lo = lon * Math.PI / 180, ph = phi * Math.PI / 180, c = Math.cos(ph);
-    return [Math.sin(lo) * c, Math.sin(ph), Math.cos(lo) * c];
+  // 🔴 轴沿 X（屏幕左右）的圆柱管。
+  //
+  // 用户选 B 并补齐了规格：相机只平移 + 缩放，上下靠俯仰角，照片排三排（先写死）。
+  // sph(a, b)：a = 沿管轴的位置（世界单位）；b = 绕管的周向角（度，0 = 正对相机的 +z）。
+  function sph(a, b) {
+    var r = b * Math.PI / 180;
+    return [a, Math.sin(r), Math.cos(r)];
   }
 
   function makeCamera(camLon, camPhi, cr) {
-    var p = sph(camLon, camPhi);
-    var pos = [p[0] * cr, p[1] * cr, p[2] * cr];
-    var L = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]) || 1;
+    // 相机位置 = (沿轴平移量, 0, 到管轴距离)。水平**只平移**，不旋转。
+    // camPhi 现在是**俯仰角**（用户："上下通过调整摄像机俯仰角看"）。
+    var pr = camPhi * Math.PI / 180;
+    var pos = [camLon, 0, cr];
     // 🔴 相机朝**外**看，不是朝球心看。
     //
     // 这是一个模型级的错，不是参数问题：原来 fwd = -pos（朝球心），于是可见的是
@@ -89,10 +94,9 @@
     //
     // 朝外看（fwd = +pos）时，面前那面墙的距离是 1 - r：r 越大离墙越近、东西越大，
     // 这才是"在穹顶里朝内壁推进"。
-    var fwd = [pos[0] / L, pos[1] / L, pos[2] / L];
-    var rx = -fwd[2], rz = fwd[0];
-    var rl = Math.sqrt(rx * rx + rz * rz) || 1;
-    var right = [rx / rl, 0, rz / rl];
+    var fwd = [0, Math.sin(pr), Math.cos(pr)];
+    // 管轴就是 X；屏幕右方向恒为 -X（维持原来的手性约定，照片才不镜像）
+    var right = [-1, 0, 0];
     return {
       pos: pos, fwd: fwd, right: right,
       up: [right[1] * fwd[2] - right[2] * fwd[1],
@@ -185,6 +189,7 @@
     'varying float vLon;',
     'varying vec2 vUV;',
     'varying vec3 vPos;',
+    'uniform float uYToDeg;',
     // Distance to the nearest grid line (in degrees), compared against a width expressed
     // in degrees, so the line keeps a constant on-screen width.
     'float lineMask(float v, float st, float px) {',
@@ -212,9 +217,9 @@
     // 由球面位置反算精确经纬度（与 JS 的 sph() 一致：y=sin(lat)、x=sin(lon)cos(lat)、
     // z=cos(lon)cos(lat)）。不直接用 vLat/vLon 是因为它们在三角形内是线性插值的，
     // 会把网格线在三角形边界折成折线。
-    '  vec3 nrm = normalize(vPos);',
-    '  float lat = degrees(asin(clamp(nrm.y, -1.0, 1.0)));',
-    '  float lon = degrees(atan(nrm.x, nrm.z));',
+    // 圆柱管：周向角从 yz 方位角读；沿轴位置直接读 x（乘 uYToDeg 换成栅格单位）
+    '  float lat = degrees(atan(vPos.y, vPos.z));',
+    '  float lon = vPos.x * uYToDeg;',
     // 🔴 亚克力模糊在 **CPU 上预热一次**，不在这里做。
     //
     // 之前是着色器里 16 抽头采样。问题有两个：
@@ -358,7 +363,10 @@
   // 于是一屏只看到 1 张、其余全是空墙，"穹顶"读起来反而小。
   // 收窄到 150°（8 张 -> 间隔约 18.8°）后，窄视场下一屏能看到 2-3 张，既有"长焦看
   // 一段缓坡"的观感，又不至于空。
-  var LON_SPAN = 150.0;        // 一张相纸占的弧长（度）—— 统一弧长
+  var LON_SPAN = 5.0;      // 三排照片沿管轴占用的世界长度
+  var ROW_ANG = 17.0;      // 相邻两排的周向角间距（度）
+  var XHALF = 6.0;         // 管子沿轴半长（世界单位）
+  var XPITCH = 0.25;       // 管壁沿轴的网格步长        // 一张相纸占的弧长（度）—— 统一弧长
     // 🔴 相纸的宽高比**由照片决定**，不是常数。
     //
     // 用户："相纸是根据照片来的为什么所有相纸都是一个比例"。之前固定 1.30，竖片
@@ -398,6 +406,8 @@
     function assignSlots(list) {
       var n = list.length;
       if (!n) return;
+      // 用户："照片不要只排一排，排三排，而且这个不定死，后期改成随机排"。
+      // 先写死三排；以后改随机排只动这一段。
       var rows = 3;
       for (var r = 2; r <= 8; r++) {
         var per = n / r;
@@ -417,14 +427,16 @@
       var span = Math.min(BAND_HALF * 0.82, 11);
       var lat = [], k = 0;
       for (var ri = 0; ri < rows; ri++) {
-        lat.push(rows === 1 ? 0 : span - 2 * span * ri / (rows - 1));
+        // 三排周向角：-ROW_ANG / 0 / +ROW_ANG（先写死）
+        lat.push((ri - (rows - 1) / 2) * ROW_ANG);
       }
       for (var ri2 = 0; ri2 < rows; ri2++) {
         var step = LON_SPAN / counts[ri2];
         for (var j = 0; j < counts[ri2]; j++) {
           // 奇偶排错半格（交错排布）
           list[k].lat = lat[ri2];
-          list[k].lon = j * step + (ri2 % 2) * step * 0.5;
+          // lon = 沿管轴位置（世界单位）；lat = 周向角（度）
+          list[k].lon = -LON_SPAN / 2 + j * step;
           if (list[k].lon < lonMin) lonMin = list[k].lon;
           if (list[k].lon > lonMax) lonMax = list[k].lon;
           k++;
@@ -527,15 +539,16 @@
       // 穹顶夸张只在**顶点**上做，三角形内部是屏幕空间线性插值的，所以每条网格线
       // 都按三角形边界折成折线。三角形越小折线段越短，折角就越不可见 —— 这是
       // 保留弯度同时消掉折线的唯一办法（除非放弃夸张）。
-      var v = [], LON = 1, LAT = 1;
+      // 沿轴按**世界长度**循环（原来写的是 -180..180 的角度，会把管子建成 360 单位长）
+      var v = [], LON = XPITCH, LAT = 1;
       for (var la = -BAND_HALF; la < BAND_HALF; la += LAT) {
-        for (var lo = -180; lo < 180; lo += LON) {
+        for (var lo = -XHALF; lo < XHALF; lo += LON) {
           var quad = [[lo, la], [lo + LON, la], [lo + LON, la + LAT], [lo, la + LAT]];
           var tri = [0, 1, 2, 0, 2, 3];
           for (var t = 0; t < 6; t++) {
             var q = quad[tri[t]], P = sph(q[0], q[1]);
             v.push(P[0], P[1], P[2], q[1], q[0],
-              ((q[0] + 180) / 360) * WALL_REPEAT,
+              ((q[0] + XHALF) / (2 * XHALF)) * WALL_REPEAT,
               ((q[1] + BAND_HALF) / (2 * BAND_HALF)) * WALL_VREP);
           }
         }
@@ -572,8 +585,9 @@
       photoRanges = [];
       for (var i = 0; i < photos.length; i++) {
         var q = photos[i];
-        var dLon = MATTE_ARC * 0.5;
+        var dLon = matteWorld * 0.5;   // 沿管轴：世界长度，线性
         var ar = matteAR(q.ratio);
+        // 沿周向：世界高 -> 角跨度（弦长 = 2*sin(Δ/2)）
         var dLat = 2 * Math.asin(Math.min(0.999, (matteWorld / ar) / 2)) * 180 / Math.PI * 0.5;
         var lat0 = q.lat + dLat, lat1 = q.lat - dLat;
         var lon0 = q.lon - dLon, lon1 = q.lon + dLon;
@@ -589,7 +603,10 @@
         // 再把这两个世界长度各自换算回经纬度跨度。
         var sW = matteWorld / (1 + 2 * MATTE_BORDER);   // 照片的世界宽
         var sH = sW / q.ratio;                          // 照片的世界高（保持原比例）
-        var dLonP = 2 * Math.asin(Math.min(0.999, sW / 2)) * 180 / Math.PI * 0.5;
+        // 🔴 轴方向是**世界长度**，半宽就是 sW/2。
+        // 之前这里还留着"角度->弦长"的 asin 公式，算出 4.5 个单位，
+        // 于是每张照片被撑成近 9 单位宽、几乎铺满整根管子（满屏横向条纹）。
+        var dLonP = sW / 2;
         var dLatP = 2 * Math.asin(Math.min(0.999, sH / 2)) * 180 / Math.PI * 0.5;
         var la0 = q.lat + dLatP, la1 = q.lat - dLatP;
         var lo0 = q.lon - dLonP, lo1 = q.lon + dLonP;
@@ -764,6 +781,7 @@
       gl.uniform3fv(loc.uGridRGB, GRID_RGB);
       gl.uniform3fv(loc.uSweepRGB, SWEEP_RGB);
       gl.uniform3fv(loc.uInk, INK);
+      gl.uniform1f(loc.uYToDeg, 20.0);   // 沿轴 1 世界单位 = 20 个栅格单位
       // 亚克力色：与站上 --scene-acrylic 同源
       gl.uniform4f(loc.uAcrylic, ACRYLIC[0], ACRYLIC[1], ACRYLIC[2], ACRYLIC[3]);
 
@@ -849,7 +867,7 @@
       });
       ['uEye', 'uRight', 'uUp', 'uFwd', 'uFocal', 'uHalfW', 'uHalfH', 'uBow', 'uHoop',
        'uLatStep', 'uLonStep', 'uGridA', 'uSweepA', 'uWallA', 'uSweepOn', 'uDegPerPx',
-       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex', 'uDebug', 'uAcrylic'].forEach(function (n) {
+       'uBandLo', 'uBandHi', 'uGridRGB', 'uSweepRGB', 'uInk', 'uTex', 'uDebug', 'uAcrylic', 'uYToDeg'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       buildMesh();
@@ -1333,7 +1351,8 @@
       vPhi = dy * DRAG_DEG_PER_PX;
       // 上下范围收紧：原来 ±32°、灵敏度 0.16，一拖就跑到天顶/天底（用户："上下移动
       // 范围太大了"）。改成 ±12°、灵敏度 0.09 —— 穹顶内容本来也只在球带里。
-      camPhi = Math.max(-12, Math.min(12, camPhi + dy * DRAG_DEG_PER_PX));
+      // 上下 = 俯仰角
+      camPhi = Math.max(-30, Math.min(30, camPhi + dy * DRAG_DEG_PER_PX));
       tLon = camLon; tPhi = camPhi;
     }
     function onPointerUp(e) {
