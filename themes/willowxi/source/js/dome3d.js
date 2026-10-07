@@ -828,6 +828,13 @@
       // 形变强度随缩放收放：拉远给满强度做管状透视，放大趋近 0（看细节时是直的）。
       // 固定强度时，照片铺满屏幕后其上下边缘落在 ty=±1，那里 waist=1-BOW，
       // 等于把上下横向压掉 17%，相框被拉得很诡异。
+      // 开屏期间每帧自己重算俯仰：pitchFor 依赖 radius()，而在 startOpening 里
+      // 调用时 zoom 的更新时机不可靠（拿到的 radius 会是旧值，俯仰因此偏掉、照片出画面）。
+      // 放在渲染循环里就永远与当前缩放一致，不依赖调用顺序。
+      if (openingId && openState !== 'done') {
+        var _op = photoById(openingId);
+        if (_op) camPhi = pitchFor(_op.lat, radius());
+      }
       var _wk = Math.max(0, Math.min(1, 1 - zoom / 0.55));
       bowNow = BOW * _wk; hoopNow = HOOP * _wk;
       var cam = makeCamera(camLon, camPhi, radius());
@@ -1130,16 +1137,16 @@
           var big = pick.light || pick.screen;
           if (big) { pick.img.style.opacity = '0'; pick.img.src = big; }
         }
+        // 🔴 顺序要紧：必须**先**定缩放，再算俯仰。
+        // pitchFor 依赖 radius()，而 radius() 读的是 zoom —— 先算俯仰时 zoom 还是旧值
+        // （初始化时的 0 -> r=0.08），pitchFor(th, 0.08) 约等于 th，照片被推到屏幕外。
+        zoom = target = zoomOpening(pick);
         camLon = clampLon(pick.lon);
         camPhi = pitchFor(pick.lat, radius());
-        camPhi = pick.lat;
         tLon = camLon; tPhi = camPhi;
         flyFrom = null;
-        // 刚好盖满视口，不怼到边角浪费（见 zoomToFill）
         openingId = pick.id;
         ensureTexture(pick, true);     // 开屏这张也换全尺寸贴图
-        // 开屏是"直接全屏展示"，用**铺满**（min + 内缩），与聚焦的"完整入画"相反。
-        zoom = target = zoomOpening(pick);
       }
       startTypingOpen();
     }
