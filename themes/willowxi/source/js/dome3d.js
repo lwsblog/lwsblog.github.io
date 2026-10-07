@@ -1023,7 +1023,8 @@
         // 刚好盖满视口，不怼到边角浪费（见 zoomToFill）
         openingId = pick.id;
         ensureTexture(pick, true);     // 开屏这张也换全尺寸贴图
-        zoom = target = zoomToFill(pick);
+        // 开屏是"直接全屏展示"，用**铺满**（min + 内缩），与聚焦的"完整入画"相反。
+        zoom = target = zoomOpening(pick);
       }
       startTypingOpen();
     }
@@ -1157,6 +1158,19 @@
     //   屏幕宽度 = focal * 世界宽 / d   ->   要 >= 视口宽  ->  d <= focal*世界宽/视口宽
     //   高度同理，取两者中更紧的那个（这样才能两个方向都盖住）。
     //   而 d = 1 - r（朝外看时面前那面墙的距离）。
+    // 开屏用：照片**铺满**屏幕（边角被裁掉没关系）。这正是旧行为，用户确认"是对的"。
+    function zoomOpening(p) {
+      var photoW = matteWorld / (1 + 2 * MATTE_BORDER);
+      var focal = (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180);
+      var dw = focal * photoW / Math.max(1, W);
+      var dh = focal * (photoW / p.ratio) / Math.max(1, H);
+      var d = Math.min(dw, dh) * 0.93;   // min = 铺满；0.93 = 再靠近一点，确保盖过视口
+      var r = Math.max(0, Math.min(R_IN, 1 - d));
+      var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
+      return Math.max(0, Math.min(1, z));
+    }
+
+    // 聚焦用：**完整看到相纸**（含白边）并留空隙。
     function zoomToFill(p) {
       // 🔴 用**照片**的尺寸，不是相纸的尺寸。
       //
@@ -1173,7 +1187,13 @@
       // 再乘 0.93：让照片**略微盖过**视口。CSS 的百分比内边距是按相纸自身宽高算
       // 的，和我这里按照片宽算的白边并不严格相等；留一点余量才能保证白边一定在
       // 画面之外，而不是露出几像素。
-      var d = Math.min(dw, dh) * 1.30;   // >1 = 后退，留出白边与四周空隙
+      // 🔴 必须取 max，不是 min。
+      //
+      // dw = 相纸宽度刚好占满视口宽所需的距离；dh = 高度刚好占满视口高所需的距离。
+      // 要让**两个方向都装得下**，距离必须 >= max(dw, dh)。用 min 时必然有一个方向
+      // 溢出，看起来就是"拉太近"；而竖版相纸的 dh 远大于 dw，所以竖屏溢得最厉害
+      // （用户："竖屏和横屏的聚焦拉近不一样，竖屏要再远一点"）。
+      var d = Math.max(dw, dh) * 1.22;   // >1 = 再后退一点，留出白边与四周空隙
       var r = Math.max(0, Math.min(R_IN, 1 - d));
       // 反解 radius() 的几何映射：r = 1 - D_OUT*(D_IN/D_OUT)^zoom
       var z = Math.log(Math.max(0.02, (1 - r) / D_OUT)) / Math.log(D_IN / D_OUT);
