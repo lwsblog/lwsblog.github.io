@@ -535,9 +535,21 @@
         var lat0 = q.lat + dLat, lat1 = q.lat - dLat;
         var lon0 = q.lon - dLon, lon1 = q.lon + dLon;
         pushQuadUV(paper, lat0, lat1, lon0, lon1);
-        var k = 1 / (1 + 2 * MATTE_BORDER);
-        var la0 = (lat0 - q.lat) * k + q.lat, la1 = (lat1 - q.lat) * k + q.lat;
-        var lo0 = (lon0 - q.lon) * k + q.lon, lo1 = (lon1 - q.lon) * k + q.lon;
+        // 🔴 白边必须按**世界长度**均匀内缩，不能让照片继承相纸的宽高比。
+        //
+        // 用户："你自己看你做出来把我的照片拉成什么了"。
+        // 原来的写法是把相纸的经纬度偏移**乘同一个系数 k**，于是照片四边形和相纸
+        // 宽高比完全相同 —— 照片被拉伸到相纸的形状：
+        //   ratio 1.5 的横片：相纸 ar = 1.398，照片被画成 1.398 -> 横向拉伸 7%
+        //   ratio 0.67 的竖片：相纸 ar = 0.700，照片被画成 0.700 -> 横向拉伸 5%
+        // 正确做法：照片的世界宽 = 相纸宽/(1+2b)，世界高 = 照片宽/ratio，
+        // 再把这两个世界长度各自换算回经纬度跨度。
+        var sW = matteWorld / (1 + 2 * MATTE_BORDER);   // 照片的世界宽
+        var sH = sW / q.ratio;                          // 照片的世界高（保持原比例）
+        var dLonP = 2 * Math.asin(Math.min(0.999, sW / 2)) * 180 / Math.PI * 0.5;
+        var dLatP = 2 * Math.asin(Math.min(0.999, sH / 2)) * 180 / Math.PI * 0.5;
+        var la0 = q.lat + dLatP, la1 = q.lat - dLatP;
+        var lo0 = q.lon - dLonP, lo1 = q.lon + dLonP;
         var start = photo.length / 5;
         pushQuadUV(photo, la0, la1, lo0, lo1);
         photoRanges.push({ p: q, start: start, count: photo.length / 5 - start });
