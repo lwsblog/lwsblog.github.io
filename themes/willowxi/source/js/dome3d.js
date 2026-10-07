@@ -308,12 +308,14 @@
   ].join(String.fromCharCode(10));
   var FS_MATTE = [
     'precision highp float;',
+    'uniform sampler2D uTexB;',   // CPU 预模糊版（unit 1）
     'uniform sampler2D uTex;',
     'uniform float uUseTex;',
     // 从屏幕中心向外发散的模糊：模糊量按像素到中心的距离给，
     // 所以是**叠在整个照片层上的一层效果**，而不是每张一个固定值。
     // 同一张照片里，靠中心的部分清楚、朝外的部分越来越糊。
-    'uniform float uBlurMax;',   // 最外圈的最大模糊半径（UV 单位）
+    'uniform float uBlurAmt;',   // 全局强度门：聚焦/开屏时为 0（那时一点都不糊）
+    'uniform float uEdgeFeather;',
     'uniform float uBlurT0;',    // 从多远开始糊（0=中心, 1=角）
     'uniform float uBlurT1;',
 
@@ -322,32 +324,24 @@
     'uniform float uHalfW, uHalfH;',
     'varying vec2 vUV;',
     'void main() {',
+    // blur = f(该像素离屏幕中心的距离)，是叠在整层上的效果
+    '  float _dx = (gl_FragCoord.x - uHalfW) / uHalfW;',
+    '  float _dy = (gl_FragCoord.y - uHalfH) / uHalfH;',
+    '  float _dr = sqrt(_dx * _dx + _dy * _dy) / 1.41421356;',
+    '  float bt = smoothstep(uBlurT0, uBlurT1, _dr) * uBlurAmt;',
     '  if (uUseTex > 0.5) {',
-    '    vec4 c = texture2D(uTex, vUV);',
-    // 放射状模糊：模糊半径只取决于**这个像素离屏幕中心多远**。
-    // gl_FragCoord 是设备像素，uHalfW/uHalfH 也是 —— 两者一致。
-    '    float _dx = (gl_FragCoord.x - uHalfW) / uHalfW;',
-    '    float _dy = (gl_FragCoord.y - uHalfH) / uHalfH;',
-    '    float _dr = sqrt(_dx * _dx + _dy * _dy) / 1.41421356;',   // 0 = 中心, 1 = 角
-    '    float uBlur = smoothstep(uBlurT0, uBlurT1, _dr) * uBlurMax;',
-    '    if (uBlur > 0.0) {',
-    '      vec4 s2 = c * 0.2;',
-    '      s2 += texture2D(uTex, vUV + vec2(uBlur, 0.0)) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, 0.0)) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(0.0, uBlur)) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(0.0, -uBlur)) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(uBlur, uBlur) * 0.7) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, uBlur) * 0.7) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(uBlur, -uBlur) * 0.7) * 0.1;',
-    '      s2 += texture2D(uTex, vUV + vec2(-uBlur, -uBlur) * 0.7) * 0.1;',
-    '      c = s2;',
-    '    }',
+    // 在清晰版与预模糊版之间插值（预模糊版是 CPU 上一次真正的高斯）。
+    // 之前用 9 抽头在 UV 上拉开采样：抽头太少、间隔太大 -> 几张叠着的重影。
+    '    vec4 c = mix(texture2D(uTex, vUV), texture2D(uTexB, vUV), bt);',
     '    gl_FragColor = vec4(c.rgb, 1.0);',
     '  } else {',
-    '    gl_FragColor = vec4(uPaper, 1.0);',
+    // 相纸：实色 + 边缘羽化，羽化量跟同一个 bt。
+    // 否则会出现"照片糊了、白框还锐利"的诡异对比。
+    '    float e = min(min(vUV.x, 1.0 - vUV.x), min(vUV.y, 1.0 - vUV.y));',
+    '    float a = smoothstep(0.0, max(0.0008, bt * uEdgeFeather), e);',
+    '    gl_FragColor = vec4(uPaper, a);',
     '  }',
-    '}'
-  ].join(String.fromCharCode(10));
+    '}',  ].join(String.fromCharCode(10));
 
   function createDome(root) {
     var canvas = root.querySelector('[data-dome-canvas]');
@@ -426,7 +420,7 @@
   // 夹角小于 A0 全清，超过 A1 时到达最大模糊/最大淡出。
   var BLUR_T0 = 0.30;     // 到屏幕中心的归一距离，从这里开始糊（0=中心, 1=角）
   var BLUR_T1 = 0.98;     // 到这里到达最大模糊
-  var BLUR_MAXUV = 0.030; // 最大模糊半径（UV 单位）
+  var EDGE_FEATHER = 0.10; // 相纸边的最大羽化（UV 比例）
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -734,7 +728,8 @@
       // 聚焦时要把贴图升级到 1600 全尺寸，但大图要加载一会儿。若这期间直接不画，
       // 画面就只剩白相纸（线上实测：聚焦后整屏纯白）。所以旧贴图先留着顶替，
       // 新贴图就绪再换。
-      var rec = { tex: t, src: src, ready: false, fallback: prev || null };
+      var rec = { tex: t, src: src, ready: false, fallback: prev || null,
+                  blurTex: null };
       im.onload = function () {
         gl.bindTexture(gl.TEXTURE_2D, t);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -744,6 +739,25 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         rec.ready = true;
+        // 预模糊版：CPU 上一次 ctx.filter 高斯（与壁纸同一套做法）
+        try {
+          var bw = Math.max(48, Math.min(512, Math.round(im.naturalWidth / 3)));
+          var bh = Math.max(48, Math.round(bw * im.naturalHeight / im.naturalWidth));
+          var off = document.createElement('canvas');
+          off.width = bw; off.height = bh;
+          var octx = off.getContext('2d');
+          octx.filter = 'blur(' + Math.max(3, Math.round(bw * 0.04)) + 'px)';
+          octx.drawImage(im, -bw * 0.08, -bh * 0.08, bw * 1.16, bh * 1.16);
+          octx.filter = 'none';
+          var bt2 = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, bt2);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          rec.blurTex = bt2;
+        } catch (e) { }
         // 旧贴图不能立刻删 —— 这一帧可能还在用它顶替。延迟释放。
         if (prev) {
           window.setTimeout(function () {
@@ -775,10 +789,14 @@
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(mLoc.uTex, 0);
+      gl.uniform1i(mLoc.uTexB, 1);
       // 放射状模糊的参数整批给一次（模糊量由片元按像素位置自己算）
-      gl.uniform1f(mLoc.uBlurMax, BLUR_MAXUV);
+      // 聚焦/开屏时**一点都不糊**（用户："距离达到聚焦的程度的时候就不要模糊了"）
+      var _blurOn = (focusId || (openingId && openState !== 'done')) ? 0 : 1;
+      gl.uniform1f(mLoc.uBlurAmt, _blurOn);
       gl.uniform1f(mLoc.uBlurT0, BLUR_T0);
       gl.uniform1f(mLoc.uBlurT1, BLUR_T1);
+      gl.uniform1f(mLoc.uEdgeFeather, EDGE_FEATHER);
       for (var i = 0; i < photoRanges.length; i++) {
         var r = photoRanges[i];
         // 该照片方向与视轴的夹角 -> 模糊量与淡出量
@@ -805,7 +823,11 @@
         gl.vertexAttribPointer(mLoc.aPos, 3, gl.FLOAT, false, 20, 0);
         gl.enableVertexAttribArray(mLoc.aUV);
         gl.vertexAttribPointer(mLoc.aUV, 2, gl.FLOAT, false, 20, 12);
+        gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, use.tex);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, (use.blurTex || use.tex));
+        gl.activeTexture(gl.TEXTURE0);
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
         diag.matteDraws = (diag.matteDraws || 0) + 1;
       }
@@ -984,7 +1006,7 @@
         gl.linkProgram(progMatte);
         if (gl.getProgramParameter(progMatte, gl.LINK_STATUS)) {
           var names = ['aPos', 'aUV', 'uEye', 'uRight', 'uUp', 'uFwd', 'uFocal',
-                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uUseTex', 'uPaper', 'uBlurMax', 'uBlurT0', 'uBlurT1'];
+                       'uHalfW', 'uHalfH', 'uBow', 'uHoop', 'uBias', 'uTex', 'uTexB', 'uUseTex', 'uPaper', 'uBlurT0', 'uBlurT1', 'uBlurAmt', 'uEdgeFeather'];
           for (var mi = 0; mi < names.length; mi++) {
             var nm = names[mi];
             mLoc[nm] = nm.charAt(0) === 'a' ? gl.getAttribLocation(progMatte, nm)
