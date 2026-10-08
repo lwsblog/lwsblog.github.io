@@ -314,31 +314,56 @@
     '}'
   ].join('\n');
 
+  // ===== 后处理：液态玻璃（liquid glass）=====
+  // 参考 Whynotmetoo/liquid-glass-canvas 的 liquidGlass.frag：
+  // 用圆角矩形 SDF 求"离边缘多近"与外法线，沿法线**偏移采样**（折射），
+  // 三个颜色通道偏移量略不同（色散），再加法线点乘光向的高光（glint）。
+  //
+  // 关键：这是**折射**不是模糊 —— 不会糊、不会晕，边缘是"玻璃把画面折了一下"。
+  // A 方案 = 把整个视口当成一块圆角玻璃。
   var FS_POST = [
     'precision highp float;',
     'uniform sampler2D uSrc;',
-    'uniform float uSmearPx;',   // 最外圈沿半径拖出多少像素
-    'uniform float uT0;',
-    'uniform float uT1;',
-    'uniform float uAmt;',       // 全局强度（聚焦/开屏为 0）
+    'uniform float uAmt;',        // 全局强度（聚焦/开屏为 0，那时不折射）
     'uniform float uHalfW, uHalfH;',
+    'uniform vec4 uG1;',          // x=R 边缘带宽/圆角, y=depth 折射像素, z=feather, w=curve
+    'uniform vec4 uG2;',          // x=chroma 色散, y=glint 高光, z/w 备用
     'varying vec2 vUV;',
+
+    // 圆角矩形 SDF（与参考实现同式）
+    'float sdRoundRect(vec2 p, vec2 b, float r) {',
+    '  vec2 d = abs(p) - b + vec2(r);',
+    '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;',
+    '}',
+    'vec2 getNormal(vec2 p, vec2 b, float r) {',
+    '  vec2 d = abs(p) - b + vec2(r);',
+    '  if (d.x <= 0.0 && d.y <= 0.0) return vec2(0.0);',
+    '  return sign(p) * normalize(max(d, 0.0));',
+    '}',
+
     'void main() {',
-    '  vec2 dv = gl_FragCoord.xy - vec2(uHalfW, uHalfH);',
-    '  float dr = length(dv / vec2(uHalfW, uHalfH)) / 1.41421356;',
-    '  float bt = smoothstep(uT0, uT1, dr) * uAmt;',
-    // 采样步长：方向 = dv 的单位向量；长度 = bt*像素数，再换算成 UV
-    '  vec2 stp = normalize(dv + vec2(1e-5, 1e-5))',
-    '           * (bt * uSmearPx) / vec2(uHalfW * 2.0, uHalfH * 2.0);',
-    '  vec4 c = texture2D(uSrc, vUV) * 0.20;',
-    '  c += texture2D(uSrc, vUV + stp * 0.25) * 0.16;',
-    '  c += texture2D(uSrc, vUV + stp * 0.45) * 0.14;',
-    '  c += texture2D(uSrc, vUV + stp * 0.65) * 0.12;',
-    '  c += texture2D(uSrc, vUV + stp * 0.85) * 0.11;',
-    '  c += texture2D(uSrc, vUV + stp * 1.00) * 0.10;',
-    '  c += texture2D(uSrc, vUV - stp * 0.35) * 0.09;',
-    '  c += texture2D(uSrc, vUV - stp * 0.70) * 0.08;',
-    '  gl_FragColor = c;',
+    // gl_FragCoord 与 vUV*分辨率 同向（FBO 就是按这套坐标画的），直接用
+    '  vec2 p = gl_FragCoord.xy - vec2(uHalfW, uHalfH);',
+    '  vec2 b = vec2(uHalfW, uHalfH);',
+    '  float R = uG1.x;',
+    '  float dist = sdRoundRect(p, b, R);',
+    '  float feather = uG1.z;',
+    '  float edge = clamp((dist + feather) / feather, 0.0, 1.0);',
+    '  float amt = pow(edge, uG1.w) * uAmt;',
+    '  vec2 nrm = getNormal(p, b, R);',
+    '  vec2 base = nrm * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
+    // 色散：R 与 B 的偏移量各差一点
+    '  float ck = uG2.x * amt;',
+    '  float cr = texture2D(uSrc, vUV - base * (1.0 + ck)).r;',
+    '  float cg = texture2D(uSrc, vUV - base).g;',
+    '  float cb = texture2D(uSrc, vUV - base * (1.0 - ck)).b;',
+    '  float ca = texture2D(uSrc, vUV).a;',
+    '  vec3 col = vec3(cr, cg, cb);',
+    // glint：法线与光向点乘后锐化，只在边缘亮起来
+    '  vec2 lightDir = normalize(vec2(-1.0, 1.0));',
+    '  float spec = pow(max(dot(nrm, lightDir), 0.0), 4.0) * amt;',
+    '  col += vec3(spec * uG2.y);',
+    '  gl_FragColor = vec4(col, ca);',
     '}'
   ].join('\n');
 
@@ -427,7 +452,16 @@
     var bgWallTex = null, bgGridTex = null;
     var bgWallEl = null, bgGridEl = null;
     var fb = null, fbTex = null, fbDepth = null, fbW = 0, fbH = 0;
-    var SMEAR_PX = 130.0;     // 最外圈沿半径拖出的长度（屏幕像素）—— 要一眼看得出条纹
+    // 液态玻璃参数（A 方案：整屏一块玻璃）
+    // R     边缘带宽，同时是圆角半径。参考实现里 SDF 法线只在 |d|>0 处非零，
+    //       而 d = |p|-b+R，所以**效果只发生在离边缘 R 像素以内**。
+    // depth 折射位移（屏幕像素）；feather 从边缘往里的过渡宽度；curve 过渡曲线
+    var GLASS_R = 240.0;      // 边缘带宽 240px
+    var GLASS_DEPTH = 46.0;   // 折射位移 46px
+    var GLASS_FEATHER = 240.0;
+    var GLASS_CURVE = 2.2;
+    var GLASS_CHROMA = 0.06;  // 色散强度（相对偏移量）
+    var GLASS_GLINT = 0.30;   // 边缘高光
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
@@ -959,9 +993,8 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, fbTex);
       gl.uniform1i(pLoc.uSrc, 0);
-      gl.uniform1f(pLoc.uSmearPx, SMEAR_PX);
-      gl.uniform1f(pLoc.uT0, BLUR_T0);
-      gl.uniform1f(pLoc.uT1, BLUR_T1);
+      gl.uniform4f(pLoc.uG1, GLASS_R, GLASS_DEPTH, GLASS_FEATHER, GLASS_CURVE);
+      gl.uniform4f(pLoc.uG2, GLASS_CHROMA, GLASS_GLINT, 0, 0);
       gl.uniform1f(pLoc.uAmt, amt);
       gl.uniform1f(pLoc.uHalfW, canvas.width * 0.5);
       gl.uniform1f(pLoc.uHalfH, canvas.height * 0.5);
@@ -1266,7 +1299,8 @@
         if (!gl.getProgramParameter(progPost, gl.LINK_STATUS))
           throw new Error('post link: ' + gl.getProgramInfoLog(progPost));
         pLoc.uSrc = gl.getUniformLocation(progPost, 'uSrc');
-        pLoc.uSmearPx = gl.getUniformLocation(progPost, 'uSmearPx');
+        pLoc.uG1 = gl.getUniformLocation(progPost, 'uG1');
+        pLoc.uG2 = gl.getUniformLocation(progPost, 'uG2');
         pLoc.uT0 = gl.getUniformLocation(progPost, 'uT0');
         pLoc.uT1 = gl.getUniformLocation(progPost, 'uT1');
         pLoc.uAmt = gl.getUniformLocation(progPost, 'uAmt');
