@@ -426,7 +426,10 @@
   var BLUR_T1 = 0.98;     // 到这里到达最大模糊
   // 0.10（相纸宽度的 10%）太大了：相机靠近时相纸占满屏幕，那圈羽化就是一大团白雾，
   // 还会糊掉照片边缘。羽化要小到读起来是边缘失焦，而不是白雾。
-  var EDGE_FEATHER = 0.012;
+  // 相纸边也要跟着一起虚化（用户要求：相纸也要模糊）。
+  // 0.10 曾在近距离变成一团白雾；现在 _blurOn 随缩放收放、近处为 0，
+  // 所以这个值只在远看（相纸在屏幕上很小）时生效，0.045 是安全的。
+  var EDGE_FEATHER = 0.045;
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -752,7 +755,7 @@
           var off = document.createElement('canvas');
           off.width = bw; off.height = bh;
           var octx = off.getContext('2d');
-          octx.filter = 'blur(' + Math.max(3, Math.round(bw * 0.04)) + 'px)';
+          octx.filter = 'blur(' + Math.max(4, Math.round(bw * 0.10)) + 'px)';
           octx.drawImage(im, -bw * 0.08, -bh * 0.08, bw * 1.16, bh * 1.16);
           octx.filter = 'none';
           var bt2 = gl.createTexture();
