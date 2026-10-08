@@ -350,10 +350,16 @@
     '  vec2 d = abs(p) - b + vec2(r);',
     '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;',
     '}',
-    'vec2 getNormal(vec2 p, vec2 b, float r) {',
-    '  vec2 d = abs(p) - b + vec2(r);',
-    '  if (d.x <= 0.0 && d.y <= 0.0) return vec2(0.0);',
-    '  return sign(p) * normalize(max(d, 0.0));',
+    // 用 SDF 的梯度求外法线，替代参考实现里那种"中心直接归零"的写法。
+    // 原来那版在 |p.x| = b.x - r 这条线上，法线从 0 突变成整体长度，
+    // 折射位移也跟着从 0 跳到 amt*depth（约 28px），玻璃里就出现一条硬边
+    // （用户：为什么左边有一条明显的分界线）。梯度是连续的，不会跳变。
+    'vec2 sdfNormal(vec2 p, vec2 b, float r) {',
+    '  float e = 0.75;',
+    '  float dx = sdRoundRect(p + vec2(e, 0.0), b, r) - sdRoundRect(p - vec2(e, 0.0), b, r);',
+    '  float dy = sdRoundRect(p + vec2(0.0, e), b, r) - sdRoundRect(p - vec2(0.0, e), b, r);',
+    '  vec2 g = vec2(dx, dy);',
+    '  return (dot(g, g) < 1e-9) ? vec2(0.0) : normalize(g);',
     '}',
 
     'void main() {',
@@ -366,7 +372,7 @@
     '  float feather = uG1.z;',
     '  float edge = clamp((dist + feather) / feather, 0.0, 1.0);',
     '  float amt = pow(edge, uG1.w) * uAmt;',        // 越靠边越大 -> 只用边缘做折射
-    '  vec2 nrm = getNormal(p, hb, uG1.x);',
+    '  vec2 nrm = sdfNormal(p, hb, uG1.x);',
     '  float inner = -dist;',
 
     // ---- ① 中间磨砂：9 抽头盒式模糊 ----
