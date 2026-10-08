@@ -5657,3 +5657,24 @@ html.is-dome .photo-lightbox {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* ===== 全局放射状模糊层 =====
+   用户要求：不要在照片上算模糊，而是**在全局套一层放射状模糊**，
+   所有可见元素（背景 + 照片）都被模糊。
+
+   做法：backdrop-filter 模糊身后的一切；径向 mask 让它只在"从中心向外"逐渐生效
+   —— 中心透明（完全清晰），四周完全模糊。一层 DOM，纯 CSS，与内容无关。
+   指针事件穿透，不影响点击/拖动。 */
+[data-dome-blur] {
+  position: fixed;
+  inset: 0;
+  z-index: 950;                 /* 高于穹顶画布(900)，低于顶栏交互提示 */
+  pointer-events: none;         /* 不挡点击与拖动 */
+  backdrop-filter: blur(11px) saturate(1.02);
+  -webkit-backdrop-filter: blur(11px) saturate(1.02);
+  /* 中心 22% 完全不模糊，到 78% 处达到最大模糊 */
+  mask-image: radial-gradient(circle at 50% 50%,
+      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,1) 78%, rgba(0,0,0,1) 100%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%,
+      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,1) 78%, rgba(0,0,0,1) 100%);
+}

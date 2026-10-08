@@ -429,7 +429,7 @@
   // 相纸边也要跟着一起虚化（用户要求：相纸也要模糊）。
   // 0.10 曾在近距离变成一团白雾；现在 _blurOn 随缩放收放、近处为 0，
   // 所以这个值只在远看（相纸在屏幕上很小）时生效，0.045 是安全的。
-  var EDGE_FEATHER = 0.045;
+  var EDGE_FEATHER = 0.004;   // 仅保留极小的抗锯齿边；虚化交给全局层
   var ROW_ANG = 9.0;
   // 随机排布的抖动幅度
   var ROW_OFF_K = 0.55;   // 整排沿轴错开
@@ -799,10 +799,9 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(mLoc.uTex, 0);
       gl.uniform1i(mLoc.uTexB, 1);
-      // 放射状模糊的参数整批给一次（模糊量由片元按像素位置自己算）
-      // 聚焦/开屏时**一点都不糊**（用户："距离达到聚焦的程度的时候就不要模糊了"）
-      var _blurOn = (focusId || (openingId && openState !== 'done')) ? 0
-                  : Math.max(0, Math.min(1, 1 - zoom / 0.55));
+      // 模糊已改为**全局一层**（见 CSS 的 [data-dome-blur]：backdrop-filter + 径向 mask），
+      // 它作用于身后的一切（背景与照片都在内）。所以照片这一层不再自己算模糊。
+      var _blurOn = 0;
       gl.uniform1f(mLoc.uBlurAmt, _blurOn);
       gl.uniform1f(mLoc.uBlurT0, BLUR_T0);
       gl.uniform1f(mLoc.uBlurT1, BLUR_T1);
@@ -1182,6 +1181,12 @@
       hint.textContent = '滚轮进入';
       openEl.appendChild(hint);
       host.appendChild(openEl);
+
+      // 全局放射状模糊层（背景与照片一起被模糊），见 CSS [data-dome-blur]
+      var blurEl = document.createElement('div');
+      blurEl.setAttribute('data-dome-blur', '');
+      blurEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(blurEl);
 
       // 标题原文取自页面上那个 h1（data-full 由旧脚本写入，取不到就用兜底）
       var mast = document.querySelector('[data-photo-mast-title]');
