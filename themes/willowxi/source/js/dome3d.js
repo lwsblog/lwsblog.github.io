@@ -404,7 +404,7 @@
     // 后处理：FBO（彩色纹理 + 深度 renderbuffer）与全屏四边形
     var progPost = null, pLoc = {}, quadBuf = null;
     var fb = null, fbTex = null, fbDepth = null, fbW = 0, fbH = 0;
-    var SMEAR_PX = 46.0;      // 最外圈沿半径拖出的长度（屏幕像素）
+    var SMEAR_PX = 130.0;     // 最外圈沿半径拖出的长度（屏幕像素）—— 要一眼看得出条纹
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
@@ -420,6 +420,10 @@
     // 挡住 —— 系统开了"减少动态效果"时它的视差根本不跑，pointer.tx 更新了也没人绘制。
     // 所以这里自己动，保证任何环境下都看得见。
     var bgWrap = null;
+    var BG_KX = 1150;    // 背景横向：px / 世界单位（照片在墙深约 16250，远层取约 7%）
+    var BG_KY = 9;       // 背景纵向：px / 度
+    var BG_CX = 78, BG_CY = 58;   // 位移上限（配合放大，不露边）
+    var BG_SCALE = 1.16;
     // 照片占用的经度范围（assignSlots 里填），相机据此钳位
     var lonMin = 0, lonMax = 0;
     // 把经度钳在照片区域内、两边各留 LON_PAD 度余量。
@@ -474,8 +478,8 @@
   // 第三排被挤出画面；11 度时约 660px，三排都在画面内。
   // 边缘失焦：按"照片方向与视轴的夹角"给模糊与淡出。
   // 夹角小于 A0 全清，超过 A1 时到达最大模糊/最大淡出。
-  var BLUR_T0 = 0.30;     // 到屏幕中心的归一距离，从这里开始糊（0=中心, 1=角）
-  var BLUR_T1 = 0.98;     // 到这里到达最大模糊
+  var BLUR_T0 = 0.52;     // 到屏幕中心的归一距离，从这里开始糊（0=中心, 1=角）
+  var BLUR_T1 = 1.00;     // 到这里到达最大模糊
   // 0.10（相纸宽度的 10%）太大了：相机靠近时相纸占满屏幕，那圈羽化就是一大团白雾，
   // 还会糊掉照片边缘。羽化要小到读起来是边缘失焦，而不是白雾。
   // 相纸边也要跟着一起虚化（用户要求：相纸也要模糊）。
@@ -992,24 +996,35 @@
       // 主题内部是 nx=(clientX/innerWidth)*2-1，所以这里反着算即可。
       // 注意 render() 不带参数，不能用 now
       // 背景跟着相机平移（不依赖主题的动画循环）
+      // 第一次用到时再取：赋值原来放在初始化靠后的位置，渲染循环早就开始跑了，
+      // 于是 bgWrap 一直是 null，位移根本没写进 DOM（实测 translate 为空）。
+      if (!bgWrap) bgWrap = document.querySelector('[data-scene-background]');
       if (bgWrap) {
-        bgWrap.style.transform = 'translate3d('
-          + (-camLon * 12).toFixed(2) + 'px,' + (camPhi * 0.35).toFixed(2) + 'px,0)';
+        // 🔴 增益必须和场景同一量级，否则等于没动。
+        // 原来用 -camLon*12：而一次拖动只改变约 0.07 世界单位 -> 背景动不到 1px。
+        // 照片在墙深处的比例是 focal/d ≈ 16250 px/世界单位；远层取它的约 7%，
+        // 这样拖动时背景明确跟着走，又明显慢于照片（有层次）。
+        // 位移用 ±BG_CX 夹住，配合 scale 放大，保证不会露出边缘。
+        var _bx = Math.max(-BG_CX, Math.min(BG_CX, -camLon * BG_KX));
+        var _by = Math.max(-BG_CY, Math.min(BG_CY, camPhi * BG_KY));
+        // 🔴 必须用**独立属性** translate/scale，不能用 transform：
+        // 主题自己每帧也给这个容器写 transform（它自己的视差），用 transform 会互相覆盖，
+        // 结果是主题的值赢、我的位移整个丢掉（实测：我算 ±78px，页面上只有 11px，正是主题的值）。
+        // translate/scale 与 transform 是**叠加**关系，各写各的，不打架。
+        bgWrap.style.translate = _bx.toFixed(1) + 'px ' + _by.toFixed(1) + 'px';
+        bgWrap.style.scale = String(BG_SCALE);
       }
       var _bn = (window.performance && performance.now) ? performance.now() : Date.now();
       if (_bn - bgLastT > 50) {
         bgLastT = _bn;
         var _cx = W * 0.5 + (camLon / 3.2) * (W * 0.5);
         var _cy = H * 0.5 - (camPhi / 80) * (H * 0.5);
-        if (Math.abs(_cx - bgLastX) > 0.5 || Math.abs(_cy - bgLastY) > 0.5) {
-          bgLastX = _cx; bgLastY = _cy;
-          bgSynth = true;
-          try {
-            window.dispatchEvent(new MouseEvent('pointermove',
-              { clientX: _cx, clientY: _cy, bubbles: true }));
-          } catch (e) { }
-          bgSynth = false;
-        }
+        // 🔴 不再派发合成 pointermove。
+        // 那会让主题按"光标在屏幕上的位置"做它自己的视差（景深），
+        // 于是背景同时响应光标位置**和**拖动，两个效果打架。
+        // 用户："背景一边响应光标位置的景深一边好像在响应拖动，把景深删掉"。
+        // 现在背景只由下面的拖动位移驱动。
+        // （如果将来要恢复，取消注释即可；bgSynth 这个自激保护仍然保留。）
       }
       var _wk = (focusId || (openingId && openState !== 'done')) ? 0
                : Math.max(0, Math.min(1, 1 - zoom / 0.55));

@@ -5670,11 +5670,13 @@ html.is-dome .photo-lightbox {
   inset: 0;
   z-index: 950;                 /* 高于穹顶画布(900)，低于顶栏交互提示 */
   pointer-events: none;         /* 不挡点击与拖动 */
-  backdrop-filter: blur(26px) saturate(1.02);
-  -webkit-backdrop-filter: blur(26px) saturate(1.02);
-  /* 中心 22% 完全不模糊，到 78% 处达到最大模糊 */
+  /* 用户："模糊太多了、再向边角靠一点、看得头晕" —— 减轻强度、把清晰区扩大，
+     让模糊只压在四个角上。 */
+  backdrop-filter: blur(13px) saturate(1.02);
+  -webkit-backdrop-filter: blur(13px) saturate(1.02);
+  /* 中心 52% 完全不模糊，到 96% 才达到最大模糊（几乎只在角上） */
   mask-image: radial-gradient(circle at 50% 50%,
-      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,1) 78%, rgba(0,0,0,1) 100%);
+      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 96%, rgba(0,0,0,1) 100%);
   -webkit-mask-image: radial-gradient(circle at 50% 50%,
-      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,1) 78%, rgba(0,0,0,1) 100%);
+      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 96%, rgba(0,0,0,1) 100%);
 }
