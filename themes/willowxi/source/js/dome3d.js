@@ -326,6 +326,12 @@
   // 两种模式：
   //   uMode=0  原样把场景铺满（照片该在哪儿还在哪儿，不能被玻璃遮掉）
   //   uMode=1  只在 uLens 这块圆角玻璃内重采样：折射 + 色散 + 高光，框外 discard
+  // ===== 后处理：液态玻璃（iOS 那种质感）=====
+  // 参考 Whynotmetoo/liquid-glass-canvas 的 liquidGlass.frag，按用户要求调整质感：
+  //   · 中间 = 磨砂（模糊）
+  //   · 边缘 = 折射，且要明显
+  //   · 边缘 = 一道明亮的内壁高光
+  // 两种模式：uMode=0 场景原样铺满；uMode=1 只在 uLens 这块玻璃内绘制，框外 discard。
   var FS_POST = [
     'precision highp float;',
     'uniform sampler2D uSrc;',
@@ -333,8 +339,11 @@
     'uniform float uHalfW, uHalfH;',
     'uniform vec4 uG1;',          // x=R 边缘带宽/圆角, y=depth 折射像素, z=feather, w=curve
     'uniform vec4 uG2;',          // x=chroma 色散, y=glint 高光
-    'uniform vec4 uLens;',        // 玻璃矩形：x, y, w, h（**DOM 坐标**，左上为原点）
+    'uniform vec4 uLens;',        // 玻璃矩形 x,y,w,h（DOM 坐标）
     'uniform float uMode;',
+    'uniform vec4 uTint;',        // 玻璃底色
+    'uniform vec2 uRim;',         // x=环宽(px), y=环强度
+    'uniform float uFrost;',      // 磨砂模糊半径（UV）
     'varying vec2 vUV;',
 
     'float sdRoundRect(vec2 p, vec2 b, float r) {',
@@ -349,28 +358,51 @@
 
     'void main() {',
     '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
-    // 换成 DOM 坐标（左上原点），才能和页面上量的矩形对齐
     '  vec2 fc = vec2(gl_FragCoord.x, uHalfH * 2.0 - gl_FragCoord.y);',
-    '  vec2 hb = uLens.zw * 0.5;',   // 不能叫 half：那是 GLSL 保留字
+    '  vec2 hb = uLens.zw * 0.5;',
     '  vec2 p = fc - (uLens.xy + hb);',
     '  float dist = sdRoundRect(p, hb, uG1.x);',
-    '  if (dist > 0.0) discard;',      // 玻璃框外：不画，让下面原样的场景露出来
+    '  if (dist > 0.0) discard;',
     '  float feather = uG1.z;',
     '  float edge = clamp((dist + feather) / feather, 0.0, 1.0);',
-    '  float amt = pow(edge, uG1.w) * uAmt;',
+    '  float amt = pow(edge, uG1.w) * uAmt;',        // 越靠边越大 -> 只用边缘做折射
     '  vec2 nrm = getNormal(p, hb, uG1.x);',
-    // 法线是 DOM 坐标（y 向下），UV 的 y 向上，所以 y 取反
+    '  float inner = -dist;',
+
+    // ---- ① 中间磨砂：9 抽头盒式模糊 ----
+    '  float b = uFrost;',
+    '  vec4 bl = texture2D(uSrc, vUV) * 0.20;',
+    '  bl += texture2D(uSrc, vUV + vec2( b, 0.0)) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2(-b, 0.0)) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2(0.0,  b)) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2(0.0, -b)) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2( b,  b) * 0.7) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2(-b,  b) * 0.7) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2( b, -b) * 0.7) * 0.10;',
+    '  bl += texture2D(uSrc, vUV + vec2(-b, -b) * 0.7) * 0.10;',
+
+    // ---- ② 边缘折射 + 色散 ----
     '  vec2 base = vec2(nrm.x, -nrm.y) * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
     '  float ck = uG2.x * amt;',
     '  float cr = texture2D(uSrc, vUV - base * (1.0 + ck)).r;',
     '  float cg = texture2D(uSrc, vUV - base).g;',
     '  float cb = texture2D(uSrc, vUV - base * (1.0 - ck)).b;',
-    '  float ca = texture2D(uSrc, vUV).a;',
-    '  vec3 col = vec3(cr, cg, cb);',
-    '  vec2 lightDir = normalize(vec2(-1.0, -1.0));',   // DOM 空间左上打光
+    '  vec3 sharp = vec3(cr, cg, cb);',
+
+    // 混合：中心取模糊、边缘取折射（用 rim 权重，过渡在同一条带上）
+    '  float rim = 1.0 - smoothstep(0.0, uRim.x, inner);',
+    '  vec3 col = mix(bl.rgb, sharp, rim);',
+    '  col = mix(col, uTint.rgb, uTint.a);',
+    // ---- ③ 内壁高光：贴边一圈，上下最亮 ----
+    '  float nUp = abs(nrm.y);',
+    '  col += vec3(rim * (0.35 + 0.65 * nUp) * uRim.y);',
+    // 折射带本身再提亮一点，像厚玻璃内壁
+    '  col += vec3(amt * 0.14);',
+    // 方向性高光（左上打光）
+    '  vec2 lightDir = normalize(vec2(-1.0, -1.0));',
     '  float spec = pow(max(dot(vec2(nrm.x, -nrm.y), lightDir), 0.0), 4.0) * amt;',
     '  col += vec3(spec * uG2.y);',
-    '  gl_FragColor = vec4(col, ca);',
+    '  gl_FragColor = vec4(col, max(bl.a, uTint.a));',
     '}'
   ].join('\n');
 
@@ -467,11 +499,16 @@
     // 矩形用 DOM 坐标（左上原点），着色器内部自己换算。
     var LENS_X = 56, LENS_Y = 56, LENS_W = 460, LENS_H = 300;
     var LENS_R = 44.0;        // 圆角半径，同时是折射发生的边缘带宽
-    var LENS_DEPTH = 70.0;    // 折射位移（屏幕像素）—— 最直观的一个
+    var LENS_DEPTH = 110.0;    // 折射位移（屏幕像素）—— 最直观的一个
     var LENS_FEATHER = 90.0;  // 从边缘往里的过渡宽度
     var LENS_CURVE = 2.0;
-    var LENS_CHROMA = 0.10;   // 色散强度
-    var LENS_GLINT = 0.55;    // 边缘高光
+    var LENS_CHROMA = 0.16;   // 色散强度（参考图里边缘的彩色边）
+    var LENS_GLINT = 0.70;    // 方向性高光
+    // 玻璃底色：半透明蓝青（参考图的质感来源之一）
+    var LENS_TINT = [0.62, 0.78, 0.92, 0.20];
+    var LENS_FROST = 0.010;   // 中间磨砂的模糊半径（UV 单位）
+    var LENS_RIM_W = 16.0;    // 内壁高光环宽度（px）
+    var LENS_RIM_GAIN = 0.55; // 内壁高光强度
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
@@ -1006,6 +1043,9 @@
       gl.uniform4f(pLoc.uG1, LENS_R, LENS_DEPTH, LENS_FEATHER, LENS_CURVE);
       gl.uniform4f(pLoc.uG2, LENS_CHROMA, LENS_GLINT, 0, 0);
       gl.uniform4f(pLoc.uLens, LENS_X, LENS_Y, LENS_W, LENS_H);
+      gl.uniform4f(pLoc.uTint, LENS_TINT[0], LENS_TINT[1], LENS_TINT[2], LENS_TINT[3]);
+      gl.uniform2f(pLoc.uRim, LENS_RIM_W, LENS_RIM_GAIN);
+      gl.uniform1f(pLoc.uFrost, LENS_FROST);
       gl.uniform1f(pLoc.uAmt, amt);
       gl.uniform1f(pLoc.uHalfW, canvas.width * 0.5);
       gl.uniform1f(pLoc.uHalfH, canvas.height * 0.5);
@@ -1325,6 +1365,9 @@
         pLoc.uG2 = gl.getUniformLocation(progPost, 'uG2');
         pLoc.uLens = gl.getUniformLocation(progPost, 'uLens');
         pLoc.uMode = gl.getUniformLocation(progPost, 'uMode');
+        pLoc.uTint = gl.getUniformLocation(progPost, 'uTint');
+        pLoc.uRim = gl.getUniformLocation(progPost, 'uRim');
+        pLoc.uFrost = gl.getUniformLocation(progPost, 'uFrost');
         pLoc.uT0 = gl.getUniformLocation(progPost, 'uT0');
         pLoc.uT1 = gl.getUniformLocation(progPost, 'uT1');
         pLoc.uAmt = gl.getUniformLocation(progPost, 'uAmt');
