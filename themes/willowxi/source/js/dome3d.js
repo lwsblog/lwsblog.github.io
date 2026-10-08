@@ -294,6 +294,26 @@
     '}'
   ].join('\n');
 
+  // 把主题的背景当纹理画进我的场景：壁纸 img + 它那个网格 canvas。
+  // 这样背景和照片一起进 FBO，后处理的放射模糊就能罩住**全部可见元素**。
+  // 背景仍然是 willowxi.js 画的（我只是用它的输出当纹理），没有换掉那份实现。
+  var FS_BG = [
+    'precision highp float;',
+    'uniform sampler2D uTex;',
+    'uniform float uAlpha;',
+    'uniform vec2 uUVK;',     // UV 缩放（cover 适配 / 仿射）
+    'uniform vec2 uUVO;',
+    'uniform vec4 uTint;',    // 纯色填充（亚克力层）
+    'uniform float uSolid;',  // >0.5 时铺纯色
+    'varying vec2 vUV;',
+    'void main() {',
+    '  if (uSolid > 0.5) { gl_FragColor = vec4(uTint.rgb, uTint.a * uAlpha); return; }',
+    '  vec2 uv = (vUV - 0.5) * uUVK + 0.5 + uUVO;',
+    '  vec4 c = texture2D(uTex, uv);',
+    '  gl_FragColor = vec4(c.rgb, c.a * uAlpha);',
+    '}'
+  ].join('\n');
+
   var FS_POST = [
     'precision highp float;',
     'uniform sampler2D uSrc;',
@@ -403,6 +423,9 @@
     var progMatte = null, mLoc = {}, paperBuf = null, paperVerts = 0;
     // 后处理：FBO（彩色纹理 + 深度 renderbuffer）与全屏四边形
     var progPost = null, pLoc = {}, quadBuf = null;
+    var progBg = null, bLoc = {};
+    var bgWallTex = null, bgGridTex = null;
+    var bgWallEl = null, bgGridEl = null;
     var fb = null, fbTex = null, fbDepth = null, fbW = 0, fbH = 0;
     var SMEAR_PX = 130.0;     // 最外圈沿半径拖出的长度（屏幕像素）—— 要一眼看得出条纹
     var photoBuf = null, photoRanges = [];
@@ -835,6 +858,70 @@
       return t;
     }
 
+    // 把一张 DOM 图/canvas 上传为纹理（每帧调一次；内容没变时浏览器开销很小）
+    function uploadTex(tex, el) {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    function drawBgQuad(tex, alpha, kx, ky, ox, oy, tint, solid) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(bLoc.uTex, 0);
+      gl.uniform1f(bLoc.uAlpha, alpha);
+      gl.uniform2f(bLoc.uUVK, kx, ky);
+      gl.uniform2f(bLoc.uUVO, ox, oy);
+      gl.uniform4f(bLoc.uTint, tint ? tint[0] : 0, tint ? tint[1] : 0,
+                   tint ? tint[2] : 0, tint ? tint[3] : 1);
+      gl.uniform1f(bLoc.uSolid, solid ? 1 : 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    // 主题背景 = 壁纸 img 铺底 + 网格 canvas 叠加
+    function drawThemeBackground() {
+      if (!bgWallEl) bgWallEl = document.querySelector('[data-scene-wallpaper]');
+      if (!bgGridEl) bgGridEl = document.querySelector('[data-scene-canvas]');
+      gl.useProgram(progBg);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      if (bgWallEl && bgWallEl.naturalWidth) {
+        uploadTex(bgWallTex, bgWallEl);
+        // cover 适配：让壁纸铺满视口（与 CSS object-fit: cover 等价）
+        var iw = bgWallEl.naturalWidth, ih = bgWallEl.naturalHeight;
+        var vw = canvas.width, vh = canvas.height;
+        var sc = Math.max(vw / iw, vh / ih);
+        drawBgQuad(bgWallTex, 1.0, (iw * sc) / vw, (ih * sc) / vh, 0, 0);
+      }
+      // 🔴 亚克力（磨砂色罩）层。主题里壁纸上面盖着 --scene-acrylic
+      // （亮色 rgba(244,245,242,.76) / 暗色 rgba(9,11,15,.64)），
+      // 所以壁纸只贡献约 24%~36%。漏了这层壁纸就会**全额显示**、观感大变
+      // （第一版就是这样，背景从"隐约的磨砂"变成了"一张大壁纸"）。
+      if (bgWallEl && bgWallEl.naturalWidth) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        drawBgQuad(bgWallTex, 1.0, 1.0, 1.0, 0, 0,
+                   [ACRYLIC[0], ACRYLIC[1], ACRYLIC[2], ACRYLIC[3]], true);
+        gl.disable(gl.BLEND);
+      }
+      if (bgGridEl && bgGridEl.width) {
+        uploadTex(bgGridTex, bgGridEl);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        drawBgQuad(bgGridTex, 1.0, 1.0, 1.0, 0, 0);
+        gl.disable(gl.BLEND);
+      }
+      gl.enable(gl.DEPTH_TEST);
+    }
+
     // 后处理用的离屏目标（FBO）。尺寸跟画布一致。
     function ensureFBO(w, h) {
       if (fb && fbW === w && fbH === h) return;
@@ -1095,6 +1182,8 @@
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      // 主题背景先进 FBO，于是它也一起被后处理的放射模糊罩住
+      drawThemeBackground();
       drawMattes(cam, focal);
       // 放射拉伸随缩放收放：聚焦/开屏为 0（那时要绝对清晰、居中），远看时最强
       var _smearAmt = (focusId || (openingId && openState !== 'done')) ? 0
@@ -1187,6 +1276,31 @@
         gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
         gl.bufferData(gl.ARRAY_BUFFER,
           new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+      })();
+
+      progBg = gl.createProgram();
+      (function () {
+        var vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, VS_QUAD); gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS))
+          throw new Error('bg vs: ' + gl.getShaderInfoLog(vs));
+        var fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fs, FS_BG); gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS))
+          throw new Error('bg fs: ' + gl.getShaderInfoLog(fs));
+        gl.attachShader(progBg, vs); gl.attachShader(progBg, fs);
+        gl.bindAttribLocation(progBg, 0, 'aXY');
+        gl.linkProgram(progBg);
+        if (!gl.getProgramParameter(progBg, gl.LINK_STATUS))
+          throw new Error('bg link: ' + gl.getProgramInfoLog(progBg));
+        bLoc.uTex = gl.getUniformLocation(progBg, 'uTex');
+        bLoc.uAlpha = gl.getUniformLocation(progBg, 'uAlpha');
+        bLoc.uUVK = gl.getUniformLocation(progBg, 'uUVK');
+        bLoc.uUVO = gl.getUniformLocation(progBg, 'uUVO');
+        bLoc.uTint = gl.getUniformLocation(progBg, 'uTint');
+        bLoc.uSolid = gl.getUniformLocation(progBg, 'uSolid');
+        bgWallTex = gl.createTexture();
+        bgGridTex = gl.createTexture();
       })();
 
       progMatte = gl.createProgram();
@@ -1347,10 +1461,12 @@
       // 全局放射状模糊层（背景与照片一起被模糊），见 CSS [data-dome-blur]
       bgWrap = document.querySelector('[data-scene-background]');
 
-      var blurEl = document.createElement('div');
-      blurEl.setAttribute('data-dome-blur', '');
-      blurEl.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(blurEl);
+      // 不再需要 CSS 的 [data-dome-blur]：背景已进 GL，模糊由后处理统一负责，
+      // 否则会双重模糊。
+      // CSS 那层已经不需要（背景进 GL 了，模糊由后处理统一负责）
+      // 页面里若还残留旧的 [data-dome-blur]，一并移除，避免双重模糊
+      var _oldBlur = document.querySelector('[data-dome-blur]');
+      if (_oldBlur && _oldBlur.parentNode) _oldBlur.parentNode.removeChild(_oldBlur);
 
       // 标题原文取自页面上那个 h1（data-full 由旧脚本写入，取不到就用兜底）
       var mast = document.querySelector('[data-photo-mast-title]');
