@@ -1320,14 +1320,14 @@
       // 之前写成 animateCameraTo(p.lon, p.lat)，相机于是和那张照片同侧、背对着它，
       // "聚焦"之后画面里还是一堆小相纸。
       // 朝外看之后，相机就坐在照片所在的这一侧，正对看它即可。
-      // 俯仰按"真正能看到这张"的角度算（见 pitchFor），用的是聚焦后的半径
-      var rTarget = 1 - Math.min(0.94, Math.max(0.02,
-        (W * 0.5) / Math.tan(FOV * 0.5 * Math.PI / 180)
-        * Math.max(matteWorld / Math.max(1, W), (matteWorld / matteAR(p.ratio)) / Math.max(1, H))
-        * 1.22));
-      animateCameraTo(p.lon, pitchFor(p.lat, 1 - rTarget), ms || 900);
-      // 按相纸实际尺寸算"刚好盖满"的缩放（见 zoomToFill）
+      // 俯仰按"真正能看到这张"的角度算（见 pitchFor）。
+      // 🔴 半径必须来自 zoomToFill **实际给出的** zoom，不能另算：
+      //    原来这里内联算了个 rTarget（公式里还留着旧的 1.22，而 zoomToFill 已改成 1.38），
+      //    而且传参写成 pitchFor(p.lat, 1 - rTarget) —— rTarget 本身就是半径，
+      //    再取反等于把**距离 d 当成半径 r**传进去，俯仰角算错，照片因此不居中。
       target = zoomToFill(p);
+      var rT = 1 - D_OUT * Math.pow(D_IN / D_OUT, target);
+      animateCameraTo(p.lon, pitchFor(p.lat, rT), ms || 900);
       // 🔴 聚焦时换**全尺寸**图。
       //
       // 墙上用的是 640 缩略图（在墙上很小，够用）；聚焦会把照片放到铺满视口，
