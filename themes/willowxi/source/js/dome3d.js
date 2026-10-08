@@ -321,16 +321,22 @@
   //
   // 关键：这是**折射**不是模糊 —— 不会糊、不会晕，边缘是"玻璃把画面折了一下"。
   // A 方案 = 把整个视口当成一块圆角玻璃。
+  // ===== 后处理：液态玻璃 =====
+  // 参考 Whynotmetoo/liquid-glass-canvas 的 liquidGlass.frag。
+  // 两种模式：
+  //   uMode=0  原样把场景铺满（照片该在哪儿还在哪儿，不能被玻璃遮掉）
+  //   uMode=1  只在 uLens 这块圆角玻璃内重采样：折射 + 色散 + 高光，框外 discard
   var FS_POST = [
     'precision highp float;',
     'uniform sampler2D uSrc;',
-    'uniform float uAmt;',        // 全局强度（聚焦/开屏为 0，那时不折射）
+    'uniform float uAmt;',
     'uniform float uHalfW, uHalfH;',
     'uniform vec4 uG1;',          // x=R 边缘带宽/圆角, y=depth 折射像素, z=feather, w=curve
-    'uniform vec4 uG2;',          // x=chroma 色散, y=glint 高光, z/w 备用
+    'uniform vec4 uG2;',          // x=chroma 色散, y=glint 高光
+    'uniform vec4 uLens;',        // 玻璃矩形：x, y, w, h（**DOM 坐标**，左上为原点）
+    'uniform float uMode;',
     'varying vec2 vUV;',
 
-    // 圆角矩形 SDF（与参考实现同式）
     'float sdRoundRect(vec2 p, vec2 b, float r) {',
     '  vec2 d = abs(p) - b + vec2(r);',
     '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;',
@@ -342,26 +348,27 @@
     '}',
 
     'void main() {',
-    // gl_FragCoord 与 vUV*分辨率 同向（FBO 就是按这套坐标画的），直接用
-    '  vec2 p = gl_FragCoord.xy - vec2(uHalfW, uHalfH);',
-    '  vec2 b = vec2(uHalfW, uHalfH);',
-    '  float R = uG1.x;',
-    '  float dist = sdRoundRect(p, b, R);',
+    '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
+    // 换成 DOM 坐标（左上原点），才能和页面上量的矩形对齐
+    '  vec2 fc = vec2(gl_FragCoord.x, uHalfH * 2.0 - gl_FragCoord.y);',
+    '  vec2 hb = uLens.zw * 0.5;',   // 不能叫 half：那是 GLSL 保留字
+    '  vec2 p = fc - (uLens.xy + hb);',
+    '  float dist = sdRoundRect(p, hb, uG1.x);',
+    '  if (dist > 0.0) discard;',      // 玻璃框外：不画，让下面原样的场景露出来
     '  float feather = uG1.z;',
     '  float edge = clamp((dist + feather) / feather, 0.0, 1.0);',
     '  float amt = pow(edge, uG1.w) * uAmt;',
-    '  vec2 nrm = getNormal(p, b, R);',
-    '  vec2 base = nrm * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
-    // 色散：R 与 B 的偏移量各差一点
+    '  vec2 nrm = getNormal(p, hb, uG1.x);',
+    // 法线是 DOM 坐标（y 向下），UV 的 y 向上，所以 y 取反
+    '  vec2 base = vec2(nrm.x, -nrm.y) * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
     '  float ck = uG2.x * amt;',
     '  float cr = texture2D(uSrc, vUV - base * (1.0 + ck)).r;',
     '  float cg = texture2D(uSrc, vUV - base).g;',
     '  float cb = texture2D(uSrc, vUV - base * (1.0 - ck)).b;',
     '  float ca = texture2D(uSrc, vUV).a;',
     '  vec3 col = vec3(cr, cg, cb);',
-    // glint：法线与光向点乘后锐化，只在边缘亮起来
-    '  vec2 lightDir = normalize(vec2(-1.0, 1.0));',
-    '  float spec = pow(max(dot(nrm, lightDir), 0.0), 4.0) * amt;',
+    '  vec2 lightDir = normalize(vec2(-1.0, -1.0));',   // DOM 空间左上打光
+    '  float spec = pow(max(dot(vec2(nrm.x, -nrm.y), lightDir), 0.0), 4.0) * amt;',
     '  col += vec3(spec * uG2.y);',
     '  gl_FragColor = vec4(col, ca);',
     '}'
@@ -456,12 +463,15 @@
     // R     边缘带宽，同时是圆角半径。参考实现里 SDF 法线只在 |d|>0 处非零，
     //       而 d = |p|-b+R，所以**效果只发生在离边缘 R 像素以内**。
     // depth 折射位移（屏幕像素）；feather 从边缘往里的过渡宽度；curve 过渡曲线
-    var GLASS_R = 240.0;      // 边缘带宽 240px
-    var GLASS_DEPTH = 46.0;   // 折射位移 46px
-    var GLASS_FEATHER = 240.0;
-    var GLASS_CURVE = 2.2;
-    var GLASS_CHROMA = 0.06;  // 色散强度（相对偏移量）
-    var GLASS_GLINT = 0.30;   // 边缘高光
+    // 一块摆在**左上角**的玻璃（用户要"看得见的一块正儿八经的液态玻璃"）。
+    // 矩形用 DOM 坐标（左上原点），着色器内部自己换算。
+    var LENS_X = 56, LENS_Y = 56, LENS_W = 460, LENS_H = 300;
+    var LENS_R = 44.0;        // 圆角半径，同时是折射发生的边缘带宽
+    var LENS_DEPTH = 70.0;    // 折射位移（屏幕像素）—— 最直观的一个
+    var LENS_FEATHER = 90.0;  // 从边缘往里的过渡宽度
+    var LENS_CURVE = 2.0;
+    var LENS_CHROMA = 0.10;   // 色散强度
+    var LENS_GLINT = 0.55;    // 边缘高光
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
@@ -993,15 +1003,27 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, fbTex);
       gl.uniform1i(pLoc.uSrc, 0);
-      gl.uniform4f(pLoc.uG1, GLASS_R, GLASS_DEPTH, GLASS_FEATHER, GLASS_CURVE);
-      gl.uniform4f(pLoc.uG2, GLASS_CHROMA, GLASS_GLINT, 0, 0);
+      gl.uniform4f(pLoc.uG1, LENS_R, LENS_DEPTH, LENS_FEATHER, LENS_CURVE);
+      gl.uniform4f(pLoc.uG2, LENS_CHROMA, LENS_GLINT, 0, 0);
+      gl.uniform4f(pLoc.uLens, LENS_X, LENS_Y, LENS_W, LENS_H);
       gl.uniform1f(pLoc.uAmt, amt);
       gl.uniform1f(pLoc.uHalfW, canvas.width * 0.5);
       gl.uniform1f(pLoc.uHalfH, canvas.height * 0.5);
       gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      // 第 1 遍：场景原样铺满。玻璃绝不能遮掉照片 —— 照片在本画布(FBO)里，
+      // 如果只在玻璃框内输出，框外的照片就没了。
+      gl.uniform1f(pLoc.uMode, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // 第 2 遍：玻璃叠上去（框外 discard，露出上面那遍的原样画面）
+      if (amt > 0.001) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.uniform1f(pLoc.uMode, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.disable(gl.BLEND);
+      }
       gl.enable(gl.DEPTH_TEST);
     }
 
@@ -1301,6 +1323,8 @@
         pLoc.uSrc = gl.getUniformLocation(progPost, 'uSrc');
         pLoc.uG1 = gl.getUniformLocation(progPost, 'uG1');
         pLoc.uG2 = gl.getUniformLocation(progPost, 'uG2');
+        pLoc.uLens = gl.getUniformLocation(progPost, 'uLens');
+        pLoc.uMode = gl.getUniformLocation(progPost, 'uMode');
         pLoc.uT0 = gl.getUniformLocation(progPost, 'uT0');
         pLoc.uT1 = gl.getUniformLocation(progPost, 'uT1');
         pLoc.uAmt = gl.getUniformLocation(progPost, 'uAmt');
