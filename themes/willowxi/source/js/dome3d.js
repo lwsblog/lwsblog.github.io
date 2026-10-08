@@ -403,7 +403,7 @@
     '  float nUp = abs(nrm.y);',
     '  col += vec3(rim * (0.35 + 0.65 * nUp) * uRim.y);',
     // 折射带本身再提亮一点，像厚玻璃内壁
-    '  col += vec3(amt * 0.14);',
+    '  col += vec3(amt * 0.05);',
     // 方向性高光（左上打光）
     '  vec2 lightDir = normalize(vec2(-1.0, -1.0));',
     '  float spec = pow(max(dot(vec2(nrm.x, -nrm.y), lightDir), 0.0), 4.0) * amt;',
@@ -509,12 +509,13 @@
     var LENS_FEATHER = 90.0;  // 从边缘往里的过渡宽度
     var LENS_CURVE = 2.0;
     var LENS_CHROMA = 0.16;   // 色散强度（参考图里边缘的彩色边）
-    var LENS_GLINT = 0.70;    // 方向性高光
+    var LENS_GLINT = 0.95;    // 方向性高光
     // 玻璃底色：半透明蓝青（参考图的质感来源之一）
-    var LENS_TINT = [0.62, 0.78, 0.92, 0.20];
-    var LENS_FROST = 0.010;   // 中间磨砂的模糊半径（UV 单位）
-    var LENS_RIM_W = 16.0;    // 内壁高光环宽度（px）
-    var LENS_RIM_GAIN = 0.55; // 内壁高光强度
+    var LENS_TINT = [0.70, 0.84, 0.96, 0.055];   // 近乎透明，只留一丝青蓝
+    // iOS 那块玻璃内部几乎**干净透光**，磨砂一重就变成亚克力（用户对比后指出）。
+    var LENS_FROST = 0.0018;  // 中间只留一点点柔化
+    var LENS_RIM_W = 6.0;     // 边要细才像玻璃；宽了就是塑料
+    var LENS_RIM_GAIN = 0.95; // 细而亮
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
