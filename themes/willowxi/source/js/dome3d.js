@@ -280,6 +280,48 @@
   // 球面的一部分了。
   //
   // DOM 相纸仍保留但设为透明，只为点击命中服务（省掉自己做拾取）。
+  // ===== 后处理：把场景先渲染到 FBO，再用放射模糊着色器画到一个全屏四边形 =====
+  //
+  // 为什么必须这样：放射模糊要的是"沿半径方向拖条纹"，那是**对已合成好的整幅画面**
+  // 做的后处理。在物体着色器里做，等于每张照片各算一遍，边界与相纸必然对不上；
+  // 而且各向同性高斯没有方向感，做不出拉伸。
+  var VS_QUAD = [
+    'attribute vec2 aXY;',
+    'varying vec2 vUV;',
+    'void main() {',
+    '  vUV = aXY * 0.5 + 0.5;',
+    '  gl_Position = vec4(aXY, 0.0, 1.0);',
+    '}'
+  ].join('\n');
+
+  var FS_POST = [
+    'precision highp float;',
+    'uniform sampler2D uSrc;',
+    'uniform float uSmearPx;',   // 最外圈沿半径拖出多少像素
+    'uniform float uT0;',
+    'uniform float uT1;',
+    'uniform float uAmt;',       // 全局强度（聚焦/开屏为 0）
+    'uniform float uHalfW, uHalfH;',
+    'varying vec2 vUV;',
+    'void main() {',
+    '  vec2 dv = gl_FragCoord.xy - vec2(uHalfW, uHalfH);',
+    '  float dr = length(dv / vec2(uHalfW, uHalfH)) / 1.41421356;',
+    '  float bt = smoothstep(uT0, uT1, dr) * uAmt;',
+    // 采样步长：方向 = dv 的单位向量；长度 = bt*像素数，再换算成 UV
+    '  vec2 stp = normalize(dv + vec2(1e-5, 1e-5))',
+    '           * (bt * uSmearPx) / vec2(uHalfW * 2.0, uHalfH * 2.0);',
+    '  vec4 c = texture2D(uSrc, vUV) * 0.20;',
+    '  c += texture2D(uSrc, vUV + stp * 0.25) * 0.16;',
+    '  c += texture2D(uSrc, vUV + stp * 0.45) * 0.14;',
+    '  c += texture2D(uSrc, vUV + stp * 0.65) * 0.12;',
+    '  c += texture2D(uSrc, vUV + stp * 0.85) * 0.11;',
+    '  c += texture2D(uSrc, vUV + stp * 1.00) * 0.10;',
+    '  c += texture2D(uSrc, vUV - stp * 0.35) * 0.09;',
+    '  c += texture2D(uSrc, vUV - stp * 0.70) * 0.08;',
+    '  gl_FragColor = c;',
+    '}'
+  ].join('\n');
+
   var VS_MATTE = [
     'attribute vec3 aPos;',
     'attribute vec2 aUV;',
@@ -359,6 +401,10 @@
     var detachers = [];
     var prog = null, loc = {}, buf = null, nVerts = 0;
     var progMatte = null, mLoc = {}, paperBuf = null, paperVerts = 0;
+    // 后处理：FBO（彩色纹理 + 深度 renderbuffer）与全屏四边形
+    var progPost = null, pLoc = {}, quadBuf = null;
+    var fb = null, fbTex = null, fbDepth = null, fbW = 0, fbH = 0;
+    var SMEAR_PX = 46.0;      // 最外圈沿半径拖出的长度（屏幕像素）
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
     // DOM 那张 img，WebGL 贴图仍是缩略图，所以开屏是糊的。
@@ -368,6 +414,12 @@
     // 主题的视差本来由 window 的 pointermove 驱动（pointer.tx/ty -> 缓动）。
     // 我们不改它的代码，只喂事件 —— 背景仍由**同一份 willowxi.js** 绘制与驱动。
     var bgSynth = false, bgLastT = 0, bgLastX = 1e9, bgLastY = 1e9;
+    // 直接给背景容器一个位移。
+    // 只派发 pointermove 是不够的：主题的动画循环被
+    //   if (animating && visible && !document.hidden && !prefersReducedMotion())
+    // 挡住 —— 系统开了"减少动态效果"时它的视差根本不跑，pointer.tx 更新了也没人绘制。
+    // 所以这里自己动，保证任何环境下都看得见。
+    var bgWrap = null;
     // 照片占用的经度范围（assignSlots 里填），相机据此钳位
     var lonMin = 0, lonMax = 0;
     // 把经度钳在照片区域内、两边各留 LON_PAD 度余量。
@@ -779,6 +831,56 @@
       return t;
     }
 
+    // 后处理用的离屏目标（FBO）。尺寸跟画布一致。
+    function ensureFBO(w, h) {
+      if (fb && fbW === w && fbH === h) return;
+      if (!fb) {
+        fb = gl.createFramebuffer();
+        fbTex = gl.createTexture();
+        fbDepth = gl.createRenderbuffer();
+      }
+      gl.bindTexture(gl.TEXTURE_2D, fbTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, fbDepth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                              gl.TEXTURE_2D, fbTex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+                                 gl.RENDERBUFFER, fbDepth);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      fbW = w; fbH = h;
+    }
+
+    // 全屏四边形 + 放射模糊：把 FBO 里的画面沿半径方向拖出条纹
+    function drawPost(amt) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(progPost);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, fbTex);
+      gl.uniform1i(pLoc.uSrc, 0);
+      gl.uniform1f(pLoc.uSmearPx, SMEAR_PX);
+      gl.uniform1f(pLoc.uT0, BLUR_T0);
+      gl.uniform1f(pLoc.uT1, BLUR_T1);
+      gl.uniform1f(pLoc.uAmt, amt);
+      gl.uniform1f(pLoc.uHalfW, canvas.width * 0.5);
+      gl.uniform1f(pLoc.uHalfH, canvas.height * 0.5);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.enable(gl.DEPTH_TEST);
+    }
+
     function drawMattes(cam, focal) {
       if (!progMatte || !paperBuf) return;
       gl.useProgram(progMatte);
@@ -889,6 +991,11 @@
       // 驱动主题背景：把 camLon（沿轴平移）/ camPhi（俯仰）映射成鼠标位置。
       // 主题内部是 nx=(clientX/innerWidth)*2-1，所以这里反着算即可。
       // 注意 render() 不带参数，不能用 now
+      // 背景跟着相机平移（不依赖主题的动画循环）
+      if (bgWrap) {
+        bgWrap.style.transform = 'translate3d('
+          + (-camLon * 12).toFixed(2) + 'px,' + (camPhi * 0.35).toFixed(2) + 'px,0)';
+      }
       var _bn = (window.performance && performance.now) ? performance.now() : Date.now();
       if (_bn - bgLastT > 50) {
         bgLastT = _bn;
@@ -964,8 +1071,20 @@
       // 用同一份 willowxi.js 画好了，自己再画一层反而对不上。
       // gl.drawArrays(gl.TRIANGLES, 0, nVerts);
       diag.draws++;
-      // 相纸与照片：同一套投影画在球面上（深度略前移，盖在墙纸之上）
+      // ===== 后处理管线 =====
+      // ① 场景 -> FBO   ② 全屏四边形用放射模糊着色器采样它   ③ 输出到屏幕
+      // 这样模糊是对**整幅已合成的画面**做的，不会有"每张照片各算一遍、
+      // 相纸与照片边界对不上"的问题，也才能做出"沿半径拖条纹"的拉伸感。
+      ensureFBO(canvas.width, canvas.height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       drawMattes(cam, focal);
+      // 放射拉伸随缩放收放：聚焦/开屏为 0（那时要绝对清晰、居中），远看时最强
+      var _smearAmt = (focusId || (openingId && openState !== 'done')) ? 0
+                     : Math.max(0, Math.min(1, 1 - zoom / 0.55));
+      drawPost(_smearAmt);
       updatePhotos(cam, focal);
     }
 
@@ -1027,7 +1146,35 @@
       var vsm = compile(gl.VERTEX_SHADER, VS_MATTE);
       var fsm = compile(gl.FRAGMENT_SHADER, FS_MATTE);
       if (vsm && fsm) {
-        progMatte = gl.createProgram();
+        progPost = gl.createProgram();
+      (function () {
+        var vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, VS_QUAD); gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS))
+          throw new Error('quad vs: ' + gl.getShaderInfoLog(vs));
+        var fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fs, FS_POST); gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS))
+          throw new Error('post fs: ' + gl.getShaderInfoLog(fs));
+        gl.attachShader(progPost, vs); gl.attachShader(progPost, fs);
+        gl.bindAttribLocation(progPost, 0, 'aXY');
+        gl.linkProgram(progPost);
+        if (!gl.getProgramParameter(progPost, gl.LINK_STATUS))
+          throw new Error('post link: ' + gl.getProgramInfoLog(progPost));
+        pLoc.uSrc = gl.getUniformLocation(progPost, 'uSrc');
+        pLoc.uSmearPx = gl.getUniformLocation(progPost, 'uSmearPx');
+        pLoc.uT0 = gl.getUniformLocation(progPost, 'uT0');
+        pLoc.uT1 = gl.getUniformLocation(progPost, 'uT1');
+        pLoc.uAmt = gl.getUniformLocation(progPost, 'uAmt');
+        pLoc.uHalfW = gl.getUniformLocation(progPost, 'uHalfW');
+        pLoc.uHalfH = gl.getUniformLocation(progPost, 'uHalfH');
+        quadBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+        gl.bufferData(gl.ARRAY_BUFFER,
+          new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+      })();
+
+      progMatte = gl.createProgram();
         gl.attachShader(progMatte, vsm);
         gl.attachShader(progMatte, fsm);
         gl.linkProgram(progMatte);
@@ -1183,6 +1330,8 @@
       host.appendChild(openEl);
 
       // 全局放射状模糊层（背景与照片一起被模糊），见 CSS [data-dome-blur]
+      bgWrap = document.querySelector('[data-scene-background]');
+
       var blurEl = document.createElement('div');
       blurEl.setAttribute('data-dome-blur', '');
       blurEl.setAttribute('aria-hidden', 'true');
