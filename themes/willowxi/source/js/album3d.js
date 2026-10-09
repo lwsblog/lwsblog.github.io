@@ -109,10 +109,16 @@
       // 被下面的 max(zc,0.12) 一夹就放大上千倍 —— 几百万像素的巨幅四边形 +
       // 极端缩小的纹理采样会把 GPU 拖死（用户：聚焦动画时浏览器卡死）。
       // 所以只要近于 0.55 就整张不画（那张确实已经从镜头旁掠过去了）。
-      '  if (zc < 0.55) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
+      '  if (zc < 0.90) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
       '  float k = uFocal / zc;',
       '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
-      '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
+      // 🔴 最终保险：**夹住 NDC**，让"覆盖几十倍屏幕的巨幅四边形"从数学上不可能出现。
+      // 无头浏览器是软件渲染，遇不到；真实 GPU 驱动遇到这种退化几何会直接挂住。
+      // 同时兜住 NaN（NaN 与任何数比较都为 false，所以用 x != x 检测）。
+      '  if (!(scr.x == scr.x) || !(scr.y == scr.y)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vUV = aUV; return; }',
+      '  float ndcX = clamp(scr.x / (uHalfW * 0.5), -8.0, 8.0);',
+      '  float ndcY = clamp(scr.y / (uHalfH * 0.5), -8.0, 8.0);',
+      '  gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);',
       '  vUV = aUV;',
       '  vFade = 1.0;',
       '}'
@@ -367,7 +373,8 @@
           gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
           gl.uniform3f(loc.uPaperRGB, 0.02, 0.03, 0.05);
           gl.uniform3f(loc.uCenter, scroll, panY, 0);
-          gl.uniform2f(loc.uHalf, camZ * 8, camZ * 8);
+          // 只要盖住屏幕就够；原来用 camZ*8，投影后覆盖十几倍屏幕面积，白白拖慢光栅化
+          gl.uniform2f(loc.uHalf, camZ * 1.2, camZ * 1.2);
           gl.uniform1f(loc.uRot, 0);
           gl.uniform1f(loc.uPaper, 1);
           gl.uniform1f(loc.uAlpha, dimA);
@@ -595,6 +602,9 @@
       var focusZoomGoal = focusCamZ / CAM_DIST;
       var wantZoom = 1 + (focusZoomGoal - 1) * focusT;
       camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
+      // 硬夹：任何情况下都不允许 camZoom 退化（NaN / 0 / 负值都会让投影爆掉）
+      if (!isFinite(camZoom)) camZoom = 1;
+      camZoom = Math.max(0.44, Math.min(1, camZoom));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
       if (focusT > 0.001) {
@@ -744,7 +754,10 @@
         var y = ph.y * (1 - mt) + ph.gy * mt;
         var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var sz = worldSize(ph, mt);
-        var r = projRect(x, y, z, sz.hw, sz.hh);
+        // 🔴 命中框要用**相纸**的尺寸，不是照片的 —— 画面上看到的是相纸（比照片大一圈），
+        // 点在白边上却什么都不发生，感受就是"定位不准确"。
+        var pb = 1 / (1 + 2 * MATTE_BORDER);
+        var r = projRect(x, y, z, sz.hw / pb, sz.hh / pb);
         if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
           if (z > bz) { bz = z; best = i; }
         }
@@ -767,7 +780,11 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
+        // 🔴 必须夹住：z0 为负（远处那张）时 z0 + hh/FILL 可能 <= 0，
+        // 会让 camZoom 趋近 0 甚至为负 -> zc 退化 -> 巨幅四边形 -> GPU 卡死。
         focusCamZ = z0 + hh0 / FOCUS_FILL;
+        if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
+        focusCamZ = Math.max(CAM_DIST * 0.46, Math.min(CAM_DIST, focusCamZ));
       }
     }
 
