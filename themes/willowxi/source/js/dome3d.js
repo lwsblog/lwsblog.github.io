@@ -297,6 +297,26 @@
   // 把主题的背景当纹理画进我的场景：壁纸 img + 它那个网格 canvas。
   // 这样背景和照片一起进 FBO，后处理的放射模糊就能罩住**全部可见元素**。
   // 背景仍然是 willowxi.js 画的（我只是用它的输出当纹理），没有换掉那份实现。
+  // ===== 可分离高斯模糊（两遍：横 + 纵）=====
+  // 为什么必须这样：单遍 9 抽头在 UV 上拉开间距采样，那 9 个点就是 9 张错开的图 —— 
+  // 看起来就是一排重影（用户反复指出）。可分离高斯每遍只沿一个轴取一组
+  // **按高斯权重**加权的样，横纵各一遍后得到一个连续核，没有离散重影。
+  // 半径大时单轮不够平滑，所以做两轮 H→V（共 4 遍）。
+  var FS_BLUR = [
+    'precision highp float;',
+    'uniform sampler2D uSrc;',
+    'uniform vec2 uDir;',     // 一个 texel 的 (1/w,0) 或 (0,1/h) 乘以半径
+    'varying vec2 vUV;',
+    'void main() {',
+    '  vec4 c = texture2D(uSrc, vUV) * 0.196;',
+    '  c += (texture2D(uSrc, vUV + uDir * 1.0) + texture2D(uSrc, vUV - uDir * 1.0)) * 0.175;',
+    '  c += (texture2D(uSrc, vUV + uDir * 2.0) + texture2D(uSrc, vUV - uDir * 2.0)) * 0.120;',
+    '  c += (texture2D(uSrc, vUV + uDir * 3.0) + texture2D(uSrc, vUV - uDir * 3.0)) * 0.066;',
+    '  c += (texture2D(uSrc, vUV + uDir * 4.0) + texture2D(uSrc, vUV - uDir * 4.0)) * 0.028;',
+    '  gl_FragColor = c;',
+    '}'
+  ].join('\n');
+
   var FS_BG = [
     'precision highp float;',
     'uniform sampler2D uTex;',
@@ -334,7 +354,8 @@
   // 两种模式：uMode=0 场景原样铺满；uMode=1 只在 uLens 这块玻璃内绘制，框外 discard。
   var FS_POST = [
     'precision highp float;',
-    'uniform sampler2D uSrc;',
+    'uniform sampler2D uSrc;',     // 清晰版（场景 FBO）
+    'uniform sampler2D uFrostTex;',// 平滑模糊版（两轮可分离高斯）
     'uniform float uAmt;',
     'uniform float uHalfW, uHalfH;',
     'uniform vec4 uG1;',          // x=R 边缘带宽/圆角, y=depth 折射像素, z=feather, w=curve
@@ -375,17 +396,11 @@
     '  vec2 nrm = sdfNormal(p, hb, uG1.x);',
     '  float inner = -dist;',
 
-    // ---- ① 中间磨砂：9 抽头盒式模糊 ----
-    '  float b = uFrost;',
-    '  vec4 bl = texture2D(uSrc, vUV) * 0.20;',
-    '  bl += texture2D(uSrc, vUV + vec2( b, 0.0)) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2(-b, 0.0)) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2(0.0,  b)) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2(0.0, -b)) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2( b,  b) * 0.7) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2(-b,  b) * 0.7) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2( b, -b) * 0.7) * 0.10;',
-    '  bl += texture2D(uSrc, vUV + vec2(-b, -b) * 0.7) * 0.10;',
+    // ---- ① 中间磨砂：直接用**已做好的平滑模糊图**（两轮可分离高斯）----
+    // 原来这里是自己抽 9 个点 —— 那 9 个点就是 9 张错开的图，看起来是一排重影。
+    // 亚克力那套是 CPU ctx.filter 真高斯；这里源是每帧变的 FBO，所以改在 GPU 上
+    // 用可分离高斯（横一遍纵一遍、再来一轮）算出连续核。
+    '  vec4 bl = texture2D(uFrostTex, vUV);',
 
     // ---- ② 边缘折射 + 色散 ----
     '  vec2 base = vec2(nrm.x, -nrm.y) * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
@@ -503,6 +518,9 @@
     var bgWallTex = null, bgGridTex = null;
     var bgWallEl = null, bgGridEl = null;
     var fb = null, fbTex = null, fbDepth = null, fbW = 0, fbH = 0;
+    var fbA = null, fbATex = null, fbB = null, fbBTex = null;
+    var progBlur = null, blLoc = {};
+    var BLUR_RADIUS = 7.0;    // 每遍的半径(px)；两轮 H+V 后等效约 14px
     // 液态玻璃参数（A 方案：整屏一块玻璃）
     // R     边缘带宽，同时是圆角半径。参考实现里 SDF 法线只在 |d|>0 处非零，
     //       而 d = |p|-b+R，所以**效果只发生在离边缘 R 像素以内**。
@@ -1043,6 +1061,53 @@
       fbW = w; fbH = h;
     }
 
+    // 建一个离屏目标（用于模糊的 ping-pong）
+    function makeFBO() {
+      var f = gl.createFramebuffer();
+      var t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height,
+                    0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                              gl.TEXTURE_2D, t, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return { f: f, t: t };
+    }
+
+    // 一遍可分离模糊：srcTex -> dstFbo，沿 dir 方向
+    function blurPass(srcTex, dstFbo, dx, dy) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.useProgram(progBlur);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
+      gl.uniform1i(blLoc.uSrc, 0);
+      var r = BLUR_RADIUS;
+      gl.uniform2f(blLoc.uDir, dx * r / canvas.width, dy * r / canvas.height);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    // 对当前场景做两轮 H+V —— 得到一张**平滑**的磨砂底图（无离散重影）
+    function blurScene() {
+      if (!fbA) { fbA = makeFBO(); fbB = makeFBO(); }
+      fbATex = fbA.t; fbBTex = fbB.t;
+      blurPass(fbTex, fbA.f, 1, 0);
+      blurPass(fbATex, fbB.f, 0, 1);
+      blurPass(fbBTex, fbA.f, 1, 0);
+      blurPass(fbATex, fbB.f, 0, 1);
+      fbATex = fbA.t; fbBTex = fbB.t;
+    }
+
     // 全屏四边形 + 放射模糊：把 FBO 里的画面沿半径方向拖出条纹
     function drawPost(amt) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1055,6 +1120,11 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, fbTex);
       gl.uniform1i(pLoc.uSrc, 0);
+      // 磨砂底图：两轮可分离高斯的结果，绑到 unit 1
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, fbBTex || fbTex);
+      gl.uniform1i(pLoc.uFrostTex, 1);
+      gl.activeTexture(gl.TEXTURE0);
       gl.uniform4f(pLoc.uG1, LENS_R, LENS_DEPTH, LENS_FEATHER, LENS_CURVE);
       gl.uniform4f(pLoc.uG2, LENS_CHROMA, LENS_GLINT, 0, 0);
       gl.uniform4f(pLoc.uLens, LENS_X, LENS_Y, LENS_W, LENS_H);
@@ -1298,6 +1368,8 @@
       // 放射拉伸随缩放收放：聚焦/开屏为 0（那时要绝对清晰、居中），远看时最强
       var _smearAmt = (focusId || (openingId && openState !== 'done')) ? 0
                      : Math.max(0, Math.min(1, 1 - zoom / 0.55));
+      // 先算出平滑的磨砂底图（两轮 H+V 可分离高斯），玻璃再采样它
+      blurScene();
       drawPost(_smearAmt);
       updatePhotos(cam, focal);
     }
@@ -1383,6 +1455,7 @@
         pLoc.uTint = gl.getUniformLocation(progPost, 'uTint');
         pLoc.uRim = gl.getUniformLocation(progPost, 'uRim');
         pLoc.uFrost = gl.getUniformLocation(progPost, 'uFrost');
+        pLoc.uFrostTex = gl.getUniformLocation(progPost, 'uFrostTex');
         pLoc.uT0 = gl.getUniformLocation(progPost, 'uT0');
         pLoc.uT1 = gl.getUniformLocation(progPost, 'uT1');
         pLoc.uAmt = gl.getUniformLocation(progPost, 'uAmt');
@@ -1392,6 +1465,23 @@
         gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
         gl.bufferData(gl.ARRAY_BUFFER,
           new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+      })();
+
+      progBlur = gl.createProgram();
+      (function () {
+        var vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, VS_QUAD); gl.compileShader(vs);
+        var fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fs, FS_BLUR); gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS))
+          throw new Error('blur fs: ' + gl.getShaderInfoLog(fs));
+        gl.attachShader(progBlur, vs); gl.attachShader(progBlur, fs);
+        gl.bindAttribLocation(progBlur, 0, 'aXY');
+        gl.linkProgram(progBlur);
+        if (!gl.getProgramParameter(progBlur, gl.LINK_STATUS))
+          throw new Error('blur link: ' + gl.getProgramInfoLog(progBlur));
+        blLoc.uSrc = gl.getUniformLocation(progBlur, 'uSrc');
+        blLoc.uDir = gl.getUniformLocation(progBlur, 'uDir');
       })();
 
       progBg = gl.createProgram();
