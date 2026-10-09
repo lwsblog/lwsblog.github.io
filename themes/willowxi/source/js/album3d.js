@@ -39,10 +39,19 @@
   var JITTER = 0.62;           // 上下幅度（世界单位）
   var MATTE_BORDER = 0.085;    // 相纸白边（相对相纸短边）
   // 用户定的两项：
-  var GRID_COLS = 6;           // 网格总览的列数
+  var FOCUS_MS = 900;          // 聚焦/退出聚焦的补间时长
+  var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
+  var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
+  var DIM_MAX = 0.55;          // 聚焦时整屏压暗的上限
+  var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
+  // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
+  // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
+  var GRID_COLS = 4;           // 网格总览的列数
   var GRID_GAPX = 0.05;        // 格位横向间隙（相对卡片宽）—— 用户反馈间距太大
   var GRID_GAPY = 0.20;        // 格位纵向间隙（相对卡片高）—— 留一点给编号就够
-  var MODE_MS = 820;           // 两个视图之间的补间时长
+  var MODE_MS = 1500;          // 两个视图之间的补间总时长（用户指定 1.5 秒）
+  // 进列表时按**行**逐行扫描：每行错开 MODE_MS/rows，行内同时到达。
+  var ROW_STAGGER = true;
   var TILT = 0.0;              // 每张照片的随机倾角（0 = 全部端正）。原来 0.045。
   var DOF = 0.0;               // 景深虚化强度（0 = 完全不模糊）。原来是 1.15。
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
@@ -80,7 +89,7 @@
       'uniform vec3 uCenter;',    // 卡片中心（世界坐标：x=横, y=纵, z=深度, 越大越近）
       'uniform vec2 uHalf;',      // 卡片半宽半高（世界单位）
       'uniform float uRot;',      // 卡片自身倾角
-      'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY;',
+      'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY, uCamZoom;',
       'varying vec2 vUV;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
       'void main() {',
@@ -88,8 +97,13 @@
       '  float c = cos(uRot), s = sin(uRot);',
       '  p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);',
       '  vec3 w = vec3(uCenter.xy + p, uCenter.z);',
-      '  float zc = uCamZ - w.z;',                 // 到摄像机的深度
-      '  zc = max(zc, 0.12);',                     // 别穿到摄像机后面
+            // uCamZoom 由 JS 每帧上传（原来那次误放在编号块里、SHOW_NUM=false 从不执行，
+      // 所以值恒为 0 -> zc = -z -> 整排照片消失。根因是上传位置，不是编译器优化。）
+      '  float zc = uCamZ * uCamZoom - w.z;',
+      // 剔除越过摄像机的（聚焦到后排时前排会飞过去）。
+      // 注意：阈值要小，且 zc 用的是 camZ*camZoom —— 阈值太大会把正常画面整片剔掉。
+      '  zc = max(zc, 0.12);',
+      '  if (uCamZ * uCamZoom - w.z < -0.35) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
       '  float k = uFocal / zc;',
       '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
       '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
@@ -126,6 +140,13 @@
   var gridTopY = 0, gridBottomY = 0;
   // 纵向平移（总览视图用）。一排视图下恒为 0。
   var panY = 0, panTarget = 0, panV = 0, panMin = 0, panMax = 0;
+  // 视图切换时视角的补间起止（与 modeT 同一条缓动，所以不会硬切）
+  var viewFrom = { scroll: 0, pan: 0 }, viewTo = { scroll: 0, pan: 0 };
+  var rowDur = 375, rowCount = 1;
+  // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
+  var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
+  var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
+  var preScroll = 0, prePan = 0;      // 进入聚焦前的镜头位置，退出时回到它
   var INERTIA_TAU = 480;           // 惯性衰减时间常数(ms)
   var WHEEL_IMPULSE = 0.13;        // 每格滚轮给多少速度（0.55 时 6 格就冲到底，太大）
     var camZ = CAM_DIST, focusZ = 0;
@@ -255,7 +276,9 @@
       var halfW = camZ * (W / Math.max(1, H));
       var halfH = camZ;
       var gw = cols * cellW, gh = rows * cellH;
-      var gScale = Math.min(1, (halfW * 1.86) / gw, (halfH * 1.70) / gh);
+      // 🔴 用户要求列表**纵向**：所以只按宽度适配，让高度溢出，纵向才滚得动。
+      // （之前同时限制高度 -> 整块网格挤进一屏 -> 竖滚没有内容可滚。）
+      var gScale = Math.min(1, (halfW * 1.86) / gw);
       // 🔴 格距也必须乘 gScale —— 上一版只缩了卡片没缩格子，
       // 结果是小卡片配大间隔，一屏只看得见两列。
       cellW *= gScale;
@@ -271,6 +294,9 @@
       }
       gridTopY = ((rows - 1) / 2) * cellH;
       gridBottomY = -((rows - 1) / 2) * cellH;
+      // 逐行扫描：总时长 MODE_MS 分摊到 rows 行，每行自己走完 rowDur
+      rowCount = rows;
+      rowDur = MODE_MS / Math.max(1, rows);
       var vis = camZ * 0.72;
       panMin = gridBottomY + vis;
       panMax = gridTopY - vis;
@@ -329,7 +355,7 @@
         var rz = p.z + (p.fromZ * (1 - e));
         var rsc = (p.scale || 1);
         // 与网格格位补间 —— modeT=0 一排，1 网格
-        var mt = modeT;
+        var mt = (p.mt === undefined) ? modeT : p.mt;   // 每张自己的进度（按行错峰）
         var x = rx * (1 - mt) + p.gx * mt;
         var y = ry * (1 - mt) + p.gy * mt;
         var z = rz * (1 - mt) + (p.gz || 0) * mt;
@@ -344,8 +370,20 @@
 
         // 景深：离对焦面越远越糊
         var blur = Math.min(1, Math.abs(z - focusZ) * DOF);
+        // 聚焦时：比目标更近的那些（z 更大）会被镜头掠过 -> 越来越糊、越来越淡
+        var fadeA = 1;
+        if (focusT > 0.001 && focusIdx >= 0) {
+          var zf = photos[focusIdx].z;
+          if (p.z > zf) {
+            var gap = (camZ * camZoom) - z;              // 到镜头的距离
+            var pass = clamp01(1 - gap / 1.5);           // 越近越像"正在飞过"
+            blur = Math.max(blur, pass);
+            fadeA = 1 - pass * 0.95;
+          }
+        }
 
         gl.uniform1f(loc.uScroll, scroll);
+        gl.uniform1f(loc.uCamZoom, camZoom);
         // 相纸
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
@@ -354,13 +392,13 @@
         gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
         gl.uniform1f(loc.uRot, rot);
         gl.uniform1f(loc.uPaper, 1);
-        gl.uniform1f(loc.uAlpha, alpha);
+        gl.uniform1f(loc.uAlpha, alpha * fadeA);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         // 照片
         gl.uniform2f(loc.uHalf, hw, hh);
         gl.uniform1f(loc.uPaper, 0);
         gl.uniform1f(loc.uMix, blur);
-        gl.uniform1f(loc.uAlpha, alpha);
+        gl.uniform1f(loc.uAlpha, alpha * fadeA);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, p.tex);
         gl.uniform1i(loc.uTex, 0);
@@ -370,7 +408,7 @@
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // ---- 编号：只在网格总览里淡入 ----
-        if (numTex && mt > 0.02) {
+        if (SHOW_NUM && numTex && mt > 0.02) {
           var idx = p.num;                       // 1 起
           var cells = 6, rowsN = 4;               // 图集布局
           var cu = (idx - 1) % cells, cv = Math.floor((idx - 1) / cells);
@@ -408,6 +446,8 @@
       else            scrollV += d * WHEEL_IMPULSE;
     }
     function tickScroll(dt) {
+      // 视图切换动画期间由上面的补间接管视角，这里直接让路，免得两者打架。
+      if (modeFrom !== mode) return;
       // 惯性：按速度推进，速度本身指数衰减 —— 只衰减、不回拉，所以不会弹。
       // 到两端硬停（速度清零），没有任何回弹。
       // 用户先前要求删掉的是弹簧；这里保留的是惯性：滚轮给一次速度，之后滑行衰减。
@@ -504,11 +544,54 @@
       tickOpening(now);
       if (ready) tickScroll(dt);
       // 两个视图之间的补间
-      if (modeFrom !== mode) {          // 原来写成 modeT !== modeFrom：点击后两者都还是 0，条件恒假，补间永不启动
+      // ---- 聚焦补间 ----
+      if (focusT !== focusTo) {
+        var fpr = clamp01((now - focusAt) / FOCUS_MS);
+        var fe = fpr < 0.5 ? 4 * fpr * fpr * fpr : 1 - Math.pow(-2 * fpr + 2, 3) / 2;
+        focusT = focusFrom + (focusTo - focusFrom) * fe;
+        if (fpr >= 1) { focusT = focusTo; focusFrom = focusTo; if (focusTo === 0) focusIdx = -1; }
+      }
+      // 相机推近 + 居中（聚焦时）
+      // 相机推近：目标 camZ 由上面按目标照片深度算出（原来用固定 0.40 倍，
+      // 结果照片贴在镜头上，放大成一片糊）
+      var focusZoomGoal = focusCamZ / CAM_DIST;
+      var wantZoom = 1 + (focusZoomGoal - 1) * focusT;
+      camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
+      // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
+      // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
+      if (focusT > 0.001) {
+        scroll += (focusScroll - scroll) * (1 - Math.exp(-dt / 140));
+        panY += (focusPan - panY) * (1 - Math.exp(-dt / 140));
+        scrollTarget = scroll; panTarget = panY;
+      }
+      if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
+
+      var switching = (modeFrom !== mode);
+      if (switching) {
         var pr = clamp01((now - modeAt) / MODE_MS);
         var ee = pr < 0.5 ? 4 * pr * pr * pr : 1 - Math.pow(-2 * pr + 2, 3) / 2;  // easeInOutCubic
         modeT = modeFrom + (mode - modeFrom) * ee;
-        if (pr >= 1) { modeT = mode; modeFrom = mode; }
+        // 视角与形状用同一条缓动一起走
+        scroll = viewFrom.scroll + (viewTo.scroll - viewFrom.scroll) * ee;
+        panY   = viewFrom.pan    + (viewTo.pan    - viewFrom.pan)    * ee;
+        scrollTarget = scroll; panTarget = panY;
+        // 照片：**按行逐行扫描**。行内同时到达，逐行错开一个 rowDur。
+        for (var q = 0; q < photos.length; q++) {
+          var ph = photos[q];
+          var rowI = Math.floor((ph.num - 1) / GRID_COLS);
+          var dly = ROW_STAGGER ? rowI * rowDur : 0;
+          var ppr = clamp01((now - modeAt - dly) / rowDur);
+          var pee = ppr < 0.5 ? 4 * ppr * ppr * ppr : 1 - Math.pow(-2 * ppr + 2, 3) / 2;
+          ph.mt = modeFrom + (mode - modeFrom) * pee;
+        }
+        if (pr >= 1) {
+          modeT = mode; modeFrom = mode;
+          scroll = viewTo.scroll; panY = viewTo.pan;
+          scrollTarget = scroll; panTarget = panY;
+          for (var q2 = 0; q2 < photos.length; q2++) photos[q2].mt = mode;
+        }
+      } else {
+        for (var q3 = 0; q3 < photos.length; q3++) photos[q3].mt = modeT;
       }
       draw();
     }
@@ -537,7 +620,7 @@
 
       prog = program(VS, FS);
       ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll',
-       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY'].forEach(function (n) {
+       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       quad = gl.createBuffer();
@@ -562,8 +645,19 @@
       resize();
       window.addEventListener('resize', resize);
       window.addEventListener('wheel', onWheel, { passive: false });
-      document.addEventListener('mousedown', function () {
-        if (openState === 'typing' || openState === 'hold') beginDelete();
+      document.addEventListener('mousedown', function (e) {
+        if (e.target && e.target.closest && e.target.closest('[data-album-toggle]')) return;
+        if (openState === 'typing' || openState === 'hold') { beginDelete(); return; }
+        if (!ready) return;
+        if (modeFrom !== mode) return;                 // 视图补间中不接受聚焦
+        // 屏幕坐标 -> NDC
+        var nx = (e.clientX * dpr / W) * 2 - 1;
+        var ny = 1 - (e.clientY * dpr / H) * 2;
+        var hit = pickPhoto(nx, ny);
+        setFocus(hit);                                 // 没命中 -> -1 = 退出聚焦
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') setFocus(-1);
       });
 
       // 打字机光标闪烁的 keyframes
@@ -573,7 +667,69 @@
 
       buildOpening();
       buildToggle();
+      // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
+      dimEl = document.createElement('div');
+      dimEl.setAttribute('data-album-dim', '');
+      dimEl.style.cssText = 'position:fixed;inset:0;z-index:38;pointer-events:none;' +
+        'background:#05070b;opacity:0;';
+      host.appendChild(dimEl);
       raf = requestAnimationFrame(frame);
+    }
+
+    // CPU 侧投影：必须与顶点着色器完全一致，否则点击会偏。
+    // VS: scr = (w - (scroll,panY)) * k;  k = focal/(camZ - w.z);  ndc = scr/(half*0.5)
+    function projRect(px, py, pz, hw, hh) {
+      var zc = Math.max(0.12, camZ * camZoom - pz);
+      var k = (FOCAL * H * 0.5) / zc;
+      return {
+        cx: (px - scroll) * k / (W * 0.5),
+        cy: (py - panY) * k / (H * 0.5),
+        hx: hw * k / (W * 0.5),
+        hy: hh * k / (H * 0.5)
+      };
+    }
+    // 每张照片当前的世界尺寸（与绘制里的算法一致）
+    function worldSize(p, mt) {
+      var shortSide = CARD_H * ((p.scale || 1) * (1 - mt) + (p.gs || 1) * mt);
+      var hw, hh;
+      if (p.ratio >= 1) { hh = shortSide * 0.5; hw = hh * p.ratio; }
+      else { hw = shortSide * 0.5; hh = hw / p.ratio; }
+      return { hw: hw, hh: hh };
+    }
+    // 拾取：命中则返回最近的（z 最大）那张的下标
+    function pickPhoto(nx, ny) {
+      var best = -1, bz = -1e9;
+      for (var i = 0; i < photos.length; i++) {
+        var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
+        var x = ph.x * (1 - mt) + ph.gx * mt;
+        var y = ph.y * (1 - mt) + ph.gy * mt;
+        var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+        var sz = worldSize(ph, mt);
+        var r = projRect(x, y, z, sz.hw, sz.hh);
+        if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
+          if (z > bz) { bz = z; best = i; }
+        }
+      }
+      return best;
+    }
+
+    // 聚焦到第 i 张（-1 = 退出）。相机推近 + 整屏压暗，全部走补间。
+    function setFocus(i) {
+      focusIdx = i;
+      focusFrom = focusT;
+      focusTo = (i < 0) ? 0 : 1;
+      focusAt = performance.now();
+      if (i < 0) { focusScroll = preScroll; focusPan = prePan; }   // 退出：目标回到原位
+      if (i >= 0) {
+        var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
+        preScroll = scroll; prePan = panY;             // 先记住原位
+        focusScroll = ph.x * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
+        focusPan = ph.y * (1 - mt) + ph.gy * mt;
+        var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+        var hh0 = worldSize(ph, mt).hh;
+        // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
+        focusCamZ = z0 + hh0 / FOCUS_FILL;
+      }
     }
 
     // 数字图集：6x4 格，每格 128x64，画 01..22
@@ -618,13 +774,18 @@
         e.stopPropagation();
         mode = mode ? 0 : 1;
         modeFrom = modeT; modeAt = performance.now();
-        // 用户要求：切到总览时视角也要锁过去 —— 横向归中、纵向回到顶部。
+        // 用户要求：切到总览时视角要锁定过去，**而且要有动画、不要硬切**。
+        // 所以这里只记下起点与终点，实际位移交给下面那条与 modeT 同步的补间。
+        viewFrom.scroll = scroll;
+        viewFrom.pan = panY;
         if (mode === 1) {
-          scroll = 0;            // 真的归零：原来只清了速度，scroll 还停在原处
-          scrollTarget = 0;
-          panY = panTarget = panMax;
-          panV = 0; scrollV = 0;
+          viewTo.scroll = 0;          // 总览：横向归中
+          viewTo.pan = panMax;        // 纵向到网格顶部
+        } else {
+          viewTo.scroll = scrollTarget;   // 回一排：保持当前横向位置
+          viewTo.pan = 0;                 // 纵向回中
         }
+        scrollV = 0; panV = 0;
         b.textContent = mode ? '浏览' : '总览';
       });
       // 别让点击落到"跳过开屏"的处理上
