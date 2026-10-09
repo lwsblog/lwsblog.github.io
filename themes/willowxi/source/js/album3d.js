@@ -39,6 +39,10 @@
   var JITTER = 0.62;           // 上下幅度（世界单位）
   var MATTE_BORDER = 0.085;    // 相纸白边（相对相纸短边）
   // 用户定的两项：
+  var GRID_COLS = 6;           // 网格总览的列数
+  var GRID_GAPX = 0.05;        // 格位横向间隙（相对卡片宽）—— 用户反馈间距太大
+  var GRID_GAPY = 0.20;        // 格位纵向间隙（相对卡片高）—— 留一点给编号就够
+  var MODE_MS = 820;           // 两个视图之间的补间时长
   var TILT = 0.0;              // 每张照片的随机倾角（0 = 全部端正）。原来 0.045。
   var DOF = 0.0;               // 景深虚化强度（0 = 完全不模糊）。原来是 1.15。
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
@@ -76,7 +80,7 @@
       'uniform vec3 uCenter;',    // 卡片中心（世界坐标：x=横, y=纵, z=深度, 越大越近）
       'uniform vec2 uHalf;',      // 卡片半宽半高（世界单位）
       'uniform float uRot;',      // 卡片自身倾角
-      'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll;',
+      'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY;',
       'varying vec2 vUV;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
       'void main() {',
@@ -87,7 +91,7 @@
       '  float zc = uCamZ - w.z;',                 // 到摄像机的深度
       '  zc = max(zc, 0.12);',                     // 别穿到摄像机后面
       '  float k = uFocal / zc;',
-      '  vec2 scr = vec2(w.x - uScroll, w.y) * k;',// uScroll 走 uniform
+      '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
       '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
       '  vUV = aUV;',
       '  vFade = 1.0;',
@@ -98,13 +102,17 @@
       'precision highp float;',
       'uniform sampler2D uTex, uBlur;',
       'uniform float uMix, uAlpha, uPaper, uTint;',
+    'uniform vec4 uUVO;',        // xy = uv 偏移, zw = uv 缩放
+    'uniform vec3 uPaperRGB;',   // 相纸/数字的颜色
       'varying vec2 vUV;',
       'varying float vFade;',
       'void main() {',
-      '  if (uPaper > 0.5) { gl_FragColor = vec4(vec3(0.957,0.957,0.945), uAlpha); return; }',
-      '  vec4 a = texture2D(uTex, vUV);',
-      '  vec4 b = texture2D(uBlur, vUV);',
-      '  vec3 c = mix(a.rgb, b.rgb, uMix);',
+      '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
+      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB, uAlpha); return; }',
+      '  vec4 a = texture2D(uTex, uv);',
+      '  if (uPaper > 1.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
+      '  vec4 bb = texture2D(uBlur, uv);',
+      '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
       '  gl_FragColor = vec4(c, uAlpha);',
       '}'
     ].join('\n');
@@ -115,11 +123,18 @@
     var photos = [];        // {id, ratio, x, y, z, rot, startAt, dur, overshoot, tex, blurTex, ready}
     var scroll = 0, scrollTarget = 0, scrollMin = 0, scrollMax = 0;
   var scrollV = 0;                 // 惯性速度（只衰减、不回拉 —— 与弹簧的区别）
+  var gridTopY = 0, gridBottomY = 0;
+  // 纵向平移（总览视图用）。一排视图下恒为 0。
+  var panY = 0, panTarget = 0, panV = 0, panMin = 0, panMax = 0;
   var INERTIA_TAU = 480;           // 惯性衰减时间常数(ms)
   var WHEEL_IMPULSE = 0.13;        // 每格滚轮给多少速度（0.55 时 6 格就冲到底，太大）
     var camZ = CAM_DIST, focusZ = 0;
     var openState = 'idle', openAt = 0, openText = '', overlay = null, h1 = null;
     var startedAt = 0, ready = false, raf = 0;
+  // 双视图：row = 横向一排（浏览）；grid = 网格总览
+  var mode = 0, modeT = 0, modeAt = 0, modeFrom = 0;   // modeT: 0=row 1=grid
+  var numTex = null, numCell = [0, 0];                 // 数字图集
+
 
     function collect() {
       var frames = root.querySelectorAll('[data-photo-frame]');
@@ -213,6 +228,55 @@
         p.fromZ = 1.6 + rnd() * 1.4;
       }
       var halfW = 0.5 * (1 + 2 * 0) * 0; // 占位，避免未用变量告警
+      // ---- 网格总览的格位 ----
+      // 用户反馈列表太宽：根因是格距按**最宽的那张**算（全景图 hw≈1.8），
+      // 6 列就 13.6 世界单位，而可见宽度只有 camZ*(W/H)≈10.2 -> 两边被裁。
+      // 改为：格距按**卡片中位数**算；网格里所有卡片**统一大小**；
+      // 再按可视范围自动算 gScale，让整块网格刚好落进屏幕（这才是总览）。
+      var cols = GRID_COLS;
+      var rows = Math.ceil(n / cols);
+      // 中位数短边（各张的 CARD_H*scale 的中位数）
+      var shorts = [];
+      for (var z0 = 0; z0 < n; z0++) shorts.push(CARD_H * (photos[z0].scale || 1));
+      shorts.sort(function (a, b) { return a - b; });
+      var medShort = shorts[Math.floor(shorts.length / 2)] || CARD_H;
+      // 用"典型卡片"的半宽半高（横竖各取一种代表，避免被极端比例带偏）
+      var typHW = 0, typHH = 0;
+      for (var z1 = 0; z1 < n; z1++) {
+        var hh = medShort * 0.5;
+        var hw = photos[z1].ratio >= 1 ? hh * photos[z1].ratio : hh;
+        var hh2 = photos[z1].ratio >= 1 ? hh : (hw / photos[z1].ratio);
+        if (hw > typHW) typHW = hw;
+        if (hh2 > typHH) typHH = hh2;
+      }
+      var cellW = typHW * 2 * (1 + GRID_GAPX);
+      var cellH = typHH * 2 * (1 + GRID_GAPY);
+      // 可视范围（世界单位）。可见半宽 = (W/2)*camZ/focal = camZ*(W/H)；可见半高 = camZ
+      var halfW = camZ * (W / Math.max(1, H));
+      var halfH = camZ;
+      var gw = cols * cellW, gh = rows * cellH;
+      var gScale = Math.min(1, (halfW * 1.86) / gw, (halfH * 1.70) / gh);
+      // 🔴 格距也必须乘 gScale —— 上一版只缩了卡片没缩格子，
+      // 结果是小卡片配大间隔，一屏只看得见两列。
+      cellW *= gScale;
+      cellH *= gScale;
+      for (var m = 0; m < n; m++) {
+        var r0 = Math.floor(m / cols), c0 = m % cols;
+        var inRow = Math.min(cols, n - r0 * cols);
+        photos[m].gx = (c0 - (inRow - 1) / 2) * cellW;
+        photos[m].gy = ((rows - 1) / 2 - r0) * cellH;
+        photos[m].gz = 0;
+        // 统一大小：抵消各张自己的 scale，让网格里所有卡片一样大
+        photos[m].gs = gScale / (photos[m].scale || 1);
+      }
+      gridTopY = ((rows - 1) / 2) * cellH;
+      gridBottomY = -((rows - 1) / 2) * cellH;
+      var vis = camZ * 0.72;
+      panMin = gridBottomY + vis;
+      panMax = gridTopY - vis;
+      if (panMin > panMax) { var mid = (panMin + panMax) / 2; panMin = panMax = mid; }
+      panY = panTarget = panMax;
+
       // 滚动范围：让首尾都能到屏幕中央
       scrollMin = photos[0].x;
       scrollMax = photos[n - 1].x;
@@ -259,14 +323,21 @@
         if (t <= 0) continue;
         var e = p.overshoot ? easeOutBack(t, 1.9) : easeOutBack(t, 1.22);
 
-        var x = p.x + (p.fromX * (1 - e));
-        var y = p.y + (p.fromY * (1 - e));
-        var z = p.z + (p.fromZ * (1 - e));
+        // 一排的坐标（含飞入位移）
+        var rx = p.x + (p.fromX * (1 - e));
+        var ry = p.y + (p.fromY * (1 - e));
+        var rz = p.z + (p.fromZ * (1 - e));
+        var rsc = (p.scale || 1);
+        // 与网格格位补间 —— modeT=0 一排，1 网格
+        var mt = modeT;
+        var x = rx * (1 - mt) + p.gx * mt;
+        var y = ry * (1 - mt) + p.gy * mt;
+        var z = rz * (1 - mt) + (p.gz || 0) * mt;
         var alpha = easeOutCubic(clamp01(t * 1.6));
-        var rot = p.rot + (p.overshoot ? p.rot * 2.6 * (1 - e) : p.rot * 0.9 * (1 - e));
+        var rot = (p.rot + (p.overshoot ? p.rot * 2.6 * (1 - e) : p.rot * 0.9 * (1 - e))) * (1 - mt);
 
         // 卡片世界尺寸：短边固定，长边按比例
-        var shortSide = CARD_H * (p.scale || 1);
+        var shortSide = CARD_H * (rsc * (1 - mt) + (p.gs || 1) * mt);
         var hw, hh;
         if (p.ratio >= 1) { hh = shortSide * 0.5; hw = hh * p.ratio; }
         else { hw = shortSide * 0.5; hh = hw / p.ratio; }
@@ -276,6 +347,8 @@
 
         gl.uniform1f(loc.uScroll, scroll);
         // 相纸
+        gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
+        gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
@@ -295,6 +368,31 @@
         gl.bindTexture(gl.TEXTURE_2D, p.blurTex || p.tex);
         gl.uniform1i(loc.uBlur, 1);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // ---- 编号：只在网格总览里淡入 ----
+        if (numTex && mt > 0.02) {
+          var idx = p.num;                       // 1 起
+          var cells = 6, rowsN = 4;               // 图集布局
+          var cu = (idx - 1) % cells, cv = Math.floor((idx - 1) / cells);
+          var nH = CARD_H * 0.20, nW = nH * 2;    // 数字格子世界尺寸
+          gl.uniform1f(loc.uScroll, scroll);
+          gl.uniform1f(loc.uPanY, panY);
+          gl.uniform3f(loc.uCenter, x, y - hh - nH * 0.85, z + 0.01);
+          gl.uniform2f(loc.uHalf, nW * 0.5, nH * 0.5);
+          gl.uniform1f(loc.uRot, 0);
+          gl.uniform1f(loc.uPaper, 2);
+          gl.uniform1f(loc.uAlpha, alpha * mt);
+          gl.uniform3f(loc.uPaperRGB, 0.88, 0.92, 0.96);
+          // 🔴 v 坐标要按**从下往上**数：图集上传时 FLIP_Y=true，
+          // 画布第 0 行到了 v=1。原来用 cv/rowsN 会导致编号整体错位
+          // （顶行显示 19~22，实际是第 1 行）。
+          gl.uniform4f(loc.uUVO, cu / cells, (rowsN - 1 - cv) / rowsN, 1 / cells, 1 / rowsN);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, numTex);
+          gl.uniform1i(loc.uTex, 0);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);      // 还原，免得影响下一张
+        }
       }
     }
 
@@ -304,19 +402,31 @@
       if (!ready) return;
       e.preventDefault();
       var d = (e.deltaY || e.deltaX || 0) / 100;
-      // 滚轮只给速度；之后由上面的惯性推进（松手后还会滑一段）
-      scrollV += d * WHEEL_IMPULSE;
+      // 滚轮只给速度；之后由惯性推进（松手后还会滑一段）。
+      // 用户要求：总览视图下滚轮变成**竖向**。
+      if (mode === 1) panV += d * WHEEL_IMPULSE;
+      else            scrollV += d * WHEEL_IMPULSE;
     }
     function tickScroll(dt) {
       // 惯性：按速度推进，速度本身指数衰减 —— 只衰减、不回拉，所以不会弹。
       // 到两端硬停（速度清零），没有任何回弹。
       // 用户先前要求删掉的是弹簧；这里保留的是惯性：滚轮给一次速度，之后滑行衰减。
+      // 横向
       scroll += scrollV * (dt / 16);
       scrollV *= Math.exp(-dt / INERTIA_TAU);
       if (Math.abs(scrollV) < 1e-5) scrollV = 0;
       if (scroll <= scrollMin) { scroll = scrollMin; if (scrollV < 0) scrollV = 0; }
       if (scroll >= scrollMax) { scroll = scrollMax; if (scrollV > 0) scrollV = 0; }
       scrollTarget = scroll;
+      // 纵向（总览视图）
+      panY += panV * (dt / 16);
+      panV *= Math.exp(-dt / INERTIA_TAU);
+      if (Math.abs(panV) < 1e-5) panV = 0;
+      if (panY <= panMin) { panY = panMin; if (panV < 0) panV = 0; }
+      if (panY >= panMax) { panY = panMax; if (panV > 0) panV = 0; }
+      panTarget = panY;
+      // 视角随视图切换而移动：一排 -> 回到 y=0 且横滚有效；总览 -> 横向归中
+      if (mode === 0) { panY += (0 - panY) * (1 - Math.exp(-dt / 220)); panV = 0; }
     }
 
     // ---------- 开屏打字 ----------
@@ -393,6 +503,13 @@
       last = now;
       tickOpening(now);
       if (ready) tickScroll(dt);
+      // 两个视图之间的补间
+      if (modeFrom !== mode) {          // 原来写成 modeT !== modeFrom：点击后两者都还是 0，条件恒假，补间永不启动
+        var pr = clamp01((now - modeAt) / MODE_MS);
+        var ee = pr < 0.5 ? 4 * pr * pr * pr : 1 - Math.pow(-2 * pr + 2, 3) / 2;  // easeInOutCubic
+        modeT = modeFrom + (mode - modeFrom) * ee;
+        if (pr >= 1) { modeT = mode; modeFrom = mode; }
+      }
       draw();
     }
 
@@ -402,6 +519,7 @@
       H = cv.height = Math.floor(window.innerHeight * dpr);
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
+      if (photos.length) layout();     // W/H 变了，网格适配要重算
     }
 
     function init() {
@@ -419,7 +537,7 @@
 
       prog = program(VS, FS);
       ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll',
-       'uTex','uBlur','uMix','uAlpha','uPaper','uTint'].forEach(function (n) {
+       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       quad = gl.createBuffer();
@@ -436,6 +554,8 @@
 
       // 光标/系统指针保留（这一步不做自定义光标）
       photos = collect();
+      for (var q0 = 0; q0 < photos.length; q0++) photos[q0].num = q0 + 1;
+      buildNumberAtlas(photos.length);
       layout();
       for (var i = 0; i < photos.length; i++) loadPhoto(photos[i]);
 
@@ -452,7 +572,64 @@
       document.head.appendChild(st);
 
       buildOpening();
+      buildToggle();
       raf = requestAnimationFrame(frame);
+    }
+
+    // 数字图集：6x4 格，每格 128x64，画 01..22
+    function buildNumberAtlas(count) {
+      var cells = 6, rowsN = 4, cw = 128, ch = 64;
+      var c = document.createElement('canvas');
+      c.width = cells * cw; c.height = rowsN * ch;
+      var g = c.getContext('2d');
+      g.clearRect(0, 0, c.width, c.height);
+      g.font = '600 34px "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (var i = 1; i <= count; i++) {
+        var cu = (i - 1) % cells, cv = Math.floor((i - 1) / cells);
+        g.fillStyle = '#ffffff';
+        g.fillText((i < 10 ? '0' : '') + i, cu * cw + cw / 2, cv * ch + ch / 2);
+      }
+      numTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, numTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      numCell = [cells, rowsN];
+    }
+
+    // 底部开关（简易版；用户说后期会换样式）
+    function buildToggle() {
+      var b = document.createElement('button');
+      b.setAttribute('data-album-toggle', '');
+      b.textContent = '总览';
+      b.style.cssText =
+        'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:41;' +
+        'pointer-events:auto;cursor:pointer;padding:9px 22px;border-radius:999px;' +
+        'font:400 13px/1 "Ubuntu Mono",ui-monospace,monospace;letter-spacing:.14em;' +
+        'color:#eaf2fb;background:rgba(255,255,255,.08);' +
+        'border:1px solid rgba(255,255,255,.34);backdrop-filter:blur(6px);' +
+        'transition:background .2s,color .2s;';
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        mode = mode ? 0 : 1;
+        modeFrom = modeT; modeAt = performance.now();
+        // 用户要求：切到总览时视角也要锁过去 —— 横向归中、纵向回到顶部。
+        if (mode === 1) {
+          scroll = 0;            // 真的归零：原来只清了速度，scroll 还停在原处
+          scrollTarget = 0;
+          panY = panTarget = panMax;
+          panV = 0; scrollV = 0;
+        }
+        b.textContent = mode ? '浏览' : '总览';
+      });
+      // 别让点击落到"跳过开屏"的处理上
+      b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      host.appendChild(b);
     }
 
     function destroy() {
