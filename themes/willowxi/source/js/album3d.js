@@ -202,8 +202,12 @@
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         p.tex = t;
-        // 预模糊
+        // 预模糊：**只在真需要虚化时才做**。
+        // 用户已要求 DOF=0（不虚化），但这里仍在给 22 张图逐个跑 CPU 高斯
+        // —— 每张都要建画布 + ctx.filter，主线程会被阻塞好几秒，
+        // 表现就是"打开页面后一段时间没响应"。DOF=0 时整段跳过。
         try {
+        if (DOF > 0.001) {
           var bw = Math.max(48, Math.min(420, Math.round(im.naturalWidth / 3)));
           var bh = Math.max(48, Math.round(bw * im.naturalHeight / im.naturalWidth));
           var off = document.createElement('canvas');
@@ -218,6 +222,7 @@
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
           gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
           p.blurTex = bt;
+        }
         } catch (e) { p.blurTex = null; }
         p.ready = true;
       };
