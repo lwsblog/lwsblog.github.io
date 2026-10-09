@@ -39,6 +39,10 @@
   var JITTER = 0.62;           // 上下幅度（世界单位）
   var MATTE_BORDER = 0.085;    // 相纸白边（相对相纸短边）
   // 用户定的两项：
+  // 🔴 聚焦功能总开关。用户反馈点照片会卡死；聚焦是 5de9bf4 引入的，
+  // 那一版之前点照片什么都不做、也不卡。先关掉它把页面恢复到不卡的状态，
+  // 代码全部保留，查清原因后改成 true 即可。
+  var FOCUS_ON = true;
   var FOCUS_MS = 900;          // 聚焦/退出聚焦的补间时长
   var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
@@ -127,19 +131,19 @@
     var FS = [
       'precision highp float;',
       'uniform sampler2D uTex, uBlur;',
-      'uniform float uMix, uAlpha, uPaper, uTint;',
+      'uniform float uMix, uAlpha, uPaper, uTint, uDim;',
     'uniform vec4 uUVO;',        // xy = uv 偏移, zw = uv 缩放
     'uniform vec3 uPaperRGB;',   // 相纸/数字的颜色
       'varying vec2 vUV;',
       'varying float vFade;',
       'void main() {',
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
-      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB, uAlpha); return; }',
+      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
       '  if (uPaper > 1.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
-      '  gl_FragColor = vec4(c, uAlpha);',
+      '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
       '}'
     ].join('\n');
 
@@ -370,7 +374,12 @@
       // 聚焦时其余照片反正被压暗看不见，全部不发 draw call —— 22 张变 1 张。
       // 软件渲染下这是数量级的差别。
       var focusOnly = (focusT > 0.02 && focusIdx >= 0);
-      for (var pass = 0; pass < 3; pass++) {
+      // 只画一遍。原先是三遍绘制加一个整屏 GL 压暗四边形，
+      // 那个四边形尺寸写成 camZ*8，投影后覆盖约 26 倍屏幕面积，
+      // 在软件渲染的机器上足以把页面拖死（用户就是从那一版开始卡的）。
+      // 现在：背景压暗交给 CSS 层（在画布下面，合成器做，几乎免费），
+      // 照片压暗在它自己的着色器里乘 uDim，零额外几何。
+      for (var pass = 0; pass < 1; pass++) {
       if (pass === 1) {
         // 压暗层：一个覆盖全屏的平色四边形（用现有程序，uPaper=1 走平色分支）
         var dimA = DIM_MAX * focusT;
@@ -389,6 +398,9 @@
       }
       for (var i = 0; i < order.length; i++) {
         if (focusOnly && order[i].num !== focusId2) continue;
+        // 聚焦时屏上只剩被聚焦那一张，它自己不变暗；
+        // 其余照片根本不绘制（focusOnly 已跳过），所以不需要给它们算变暗系数。
+        var dimK = 0;
         // 聚焦时先把压暗层画一次（此时屏上只有它和被聚焦那张，非常便宜）
         if (focusOnly && !dimDrawn) {
           dimDrawn = true;
@@ -445,6 +457,7 @@
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 相纸
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
+        gl.uniform1f(loc.uDim, dimK);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
@@ -630,7 +643,8 @@
         panY += (focusPan - panY) * (1 - Math.exp(-dt / 140));
         scrollTarget = scroll; panTarget = panY;
       }
-      // 压暗由 GL 的两遍绘制负责，这里不再用 DOM 层
+      // 背景压暗：只写一个 opacity，交给合成器，不产生任何 GL 绘制
+      if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT * 0.9).toFixed(3);
 
       var switching = (modeFrom !== mode);
       if (switching) {
@@ -704,7 +718,7 @@
 
       prog = program(VS, FS);
       ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll',
-       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
+       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom','uDim'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       quad = gl.createBuffer();
@@ -734,6 +748,7 @@
         if (openState === 'typing' || openState === 'hold') { beginDelete(); return; }
         if (!ready) return;
         if (modeFrom !== mode) return;                 // 视图补间中不接受聚焦
+        if (!FOCUS_ON) return;                         // 聚焦已关闭：点照片不做任何事
         // 屏幕坐标 -> NDC
         var nx = (e.clientX * dpr / W) * 2 - 1;
         var ny = 1 - (e.clientY * dpr / H) * 2;
@@ -883,6 +898,14 @@
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
       host.appendChild(b);
+      // 背景压暗层：插到画布之前，因此渲染在画布下面，只压住主题背景，
+      // 不影响 GL 里的照片。由浏览器合成器负责，几乎不花代价。
+      // （原先是在 GL 里画一个整屏四边形，软件渲染下非常贵，是卡死的起点。）
+      dimEl = document.createElement('div');
+      dimEl.setAttribute('data-album-dim', '');
+      dimEl.style.cssText = 'position:absolute;inset:0;z-index:0;pointer-events:none;' +
+        'background:#05070b;opacity:0;';
+      host.insertBefore(dimEl, host.firstChild);
     }
 
     function destroy() {
