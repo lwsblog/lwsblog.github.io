@@ -405,10 +405,14 @@
     // ---- ② 边缘折射 + 色散 ----
     '  vec2 base = vec2(nrm.x, -nrm.y) * amt * (uG1.y / vec2(uHalfW * 2.0, uHalfH * 2.0));',
     '  float ck = uG2.x * amt;',
-    '  float cr = texture2D(uSrc, vUV - base * (1.0 + ck)).r;',
-    '  float cg = texture2D(uSrc, vUV - base).g;',
-    '  float cb = texture2D(uSrc, vUV - base * (1.0 - ck)).b;',
-    '  vec3 sharp = vec3(cr, cg, cb);',
+    // 🔴 折射也采**模糊图**（uFrostTex）。原来这里采的是清晰图，
+    // 于是"中间糊、边缘清晰"，那条清晰的折射边在磨砂底上就显成了**划痕**
+    // （用户：看起来像中间被磨出划痕的玻璃，因为边缘没有做模糊）。
+    // 现在整块玻璃里都是糊的，边缘只是额外被折了一下。
+    '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
+    '  float cg = texture2D(uFrostTex, vUV - base).g;',
+    '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
+    '  vec3 refr = vec3(cr, cg, cb);',
 
     // 混合：中心取模糊、边缘取折射（用 rim 权重，过渡在同一条带上）
     // 🔴 这里原来是 mix(bl, sharp, rim)，而 rim 只有 6px 宽 —— 等于在 6px 内把
@@ -417,7 +421,7 @@
     // 改成用**宽过渡**（uG1.z，90px）在两张图之间渐变：中心磨砂、往外逐渐变折射，
     // 没有硬边，也就没有重影。高光只额外加光，不承担换图。
     '  float t = smoothstep(0.0, uG1.z, inner);',
-    '  vec3 col = mix(sharp, bl.rgb, t);',
+    '  vec3 col = mix(refr, bl.rgb, t);',   // 两张都是模糊图，过渡不会有锐利对比
     '  float rim = 1.0 - smoothstep(0.0, uRim.x, inner);',
     '  col = mix(col, uTint.rgb, uTint.a);',
     // ---- ③ 内壁高光：贴边一圈，上下最亮 ----
