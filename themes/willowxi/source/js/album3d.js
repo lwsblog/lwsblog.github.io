@@ -46,7 +46,9 @@
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
-  var GRID_COLS = 4;           // 网格总览的列数
+  // 列数再减：4 列时 22 张只有 6 行，网格只比屏幕高 1.1 单位，竖滚几乎没内容。
+  // 3 列 -> 8 行，列表明显高于屏幕，纵向滚动才有意义。
+  var GRID_COLS = 3;           // 网格总览的列数
   var GRID_GAPX = 0.05;        // 格位横向间隙（相对卡片宽）—— 用户反馈间距太大
   var GRID_GAPY = 0.20;        // 格位纵向间隙（相对卡片高）—— 留一点给编号就够
   var MODE_MS = 1500;          // 两个视图之间的补间总时长（用户指定 1.5 秒）
@@ -143,6 +145,7 @@
   // 视图切换时视角的补间起止（与 modeT 同一条缓动，所以不会硬切）
   var viewFrom = { scroll: 0, pan: 0 }, viewTo = { scroll: 0, pan: 0 };
   var rowDur = 375, rowCount = 1;
+  var seqDur = 600, seqGap = 40;     // 逐张飞入：单张时长 / 相邻错峰
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
@@ -297,6 +300,9 @@
       // 逐行扫描：总时长 MODE_MS 分摊到 rows 行，每行自己走完 rowDur
       rowCount = rows;
       rowDur = MODE_MS / Math.max(1, rows);
+      // 逐张错峰：总时长 MODE_MS 内，每张自己走 seqDur，相邻两张错开 seqGap
+      seqDur = MODE_MS * 0.42;
+      seqGap = Math.max(0, (MODE_MS - seqDur)) / Math.max(1, n - 1);
       var vis = camZ * 0.72;
       panMin = gridBottomY + vis;
       panMax = gridTopY - vis;
@@ -341,7 +347,27 @@
 
       // 远的先画（画家算法），近的覆盖
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
+      // 用户要求：聚焦时**只有其他内容变暗**，被聚焦的那张保持原亮度。
+      // 所以先画除它以外的全部，再画压暗层，最后单独把它画在最上面。
+      var focusId2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
+      for (var pass = 0; pass < 3; pass++) {
+      if (pass === 1) {
+        // 压暗层：一个覆盖全屏的平色四边形（用现有程序，uPaper=1 走平色分支）
+        var dimA = DIM_MAX * focusT;
+        if (dimA > 0.001) {
+          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
+          gl.uniform3f(loc.uPaperRGB, 0.02, 0.03, 0.05);
+          gl.uniform3f(loc.uCenter, scroll, panY, 0);
+          gl.uniform2f(loc.uHalf, camZ * 8, camZ * 8);
+          gl.uniform1f(loc.uRot, 0);
+          gl.uniform1f(loc.uPaper, 1);
+          gl.uniform1f(loc.uAlpha, dimA);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        continue;
+      }
       for (var i = 0; i < order.length; i++) {
+        if (focusId2 >= 0 && ((order[i].num === focusId2) !== (pass === 2))) continue;
         var p = order[i];
         if (!p.ready) continue;
         // 飞入进度
@@ -432,6 +458,7 @@
           gl.uniform4f(loc.uUVO, 0, 0, 1, 1);      // 还原，免得影响下一张
         }
       }
+      }
     }
 
     // ---------- 滚动：横向 + 到端回弹 ----------
@@ -442,7 +469,9 @@
       var d = (e.deltaY || e.deltaX || 0) / 100;
       // 滚轮只给速度；之后由惯性推进（松手后还会滑一段）。
       // 用户要求：总览视图下滚轮变成**竖向**。
-      if (mode === 1) panV += d * WHEEL_IMPULSE;
+      // 🔴 纵向列表的方向与横排相反：往下滚(d 为正)应当**看到下面的内容**，
+      // 也就是 panY 减小。原来写成 += 且 panY 已在 panMax(顶部)，一直被夹住 -> 滚不动。
+      if (mode === 1) panV -= d * WHEEL_IMPULSE;
       else            scrollV += d * WHEEL_IMPULSE;
     }
     function tickScroll(dt) {
@@ -564,7 +593,7 @@
         panY += (focusPan - panY) * (1 - Math.exp(-dt / 140));
         scrollTarget = scroll; panTarget = panY;
       }
-      if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
+      // 压暗由 GL 的两遍绘制负责，这里不再用 DOM 层
 
       var switching = (modeFrom !== mode);
       if (switching) {
@@ -576,11 +605,12 @@
         panY   = viewFrom.pan    + (viewTo.pan    - viewFrom.pan)    * ee;
         scrollTarget = scroll; panTarget = panY;
         // 照片：**按行逐行扫描**。行内同时到达，逐行错开一个 rowDur。
+        // 用户要求：**一个一个飞**，一行一行从左到右。
+        // 网格里照片的下标本身就是"左到右、上到下"的顺序，所以直接按序号错峰。
         for (var q = 0; q < photos.length; q++) {
           var ph = photos[q];
-          var rowI = Math.floor((ph.num - 1) / GRID_COLS);
-          var dly = ROW_STAGGER ? rowI * rowDur : 0;
-          var ppr = clamp01((now - modeAt - dly) / rowDur);
+          var dly = ROW_STAGGER ? q * seqGap : 0;
+          var ppr = clamp01((now - modeAt - dly) / seqDur);
           var pee = ppr < 0.5 ? 4 * ppr * ppr * ppr : 1 - Math.pow(-2 * ppr + 2, 3) / 2;
           ph.mt = modeFrom + (mode - modeFrom) * pee;
         }
@@ -668,11 +698,11 @@
       buildOpening();
       buildToggle();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
-      dimEl = document.createElement('div');
-      dimEl.setAttribute('data-album-dim', '');
-      dimEl.style.cssText = 'position:fixed;inset:0;z-index:38;pointer-events:none;' +
-        'background:#05070b;opacity:0;';
-      host.appendChild(dimEl);
+      // 压暗改到 GL 里画（两遍绘制之间插一层），因为 DOM 覆盖层会连被聚焦的那张一起压暗。
+      // 🔴 这里原来把 dimEl 置 null 却仍对它 setAttribute -> 初始化抛异常 ->
+      // 后面的 requestAnimationFrame 没执行 -> 补间/拾取/滚轮全部"没反应"。
+      // 所以这一整段直接删掉，不再创建 DOM 压暗层。
+
       raf = requestAnimationFrame(frame);
     }
 
@@ -805,6 +835,8 @@
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
                         min: scrollMin, max: scrollMax, camZ: camZ, focusZ: focusZ,
+                        panY: panY, panMin: panMin, panMax: panMax, mode: mode, modeT: modeT,
+                        camZoom: camZoom, focusIdx: focusIdx, focusT: focusT,
                         loaded: photos.filter(function (p) { return p.ready; }).length };
              } };
   }
