@@ -39,10 +39,6 @@
   var JITTER = 0.62;           // 上下幅度（世界单位）
   var MATTE_BORDER = 0.085;    // 相纸白边（相对相纸短边）
   // 用户定的两项：
-  // 🔴 聚焦功能总开关。用户反馈点照片会卡死；聚焦是 5de9bf4 引入的，
-  // 那一版之前点照片什么都不做、也不卡。先关掉它把页面恢复到不卡的状态，
-  // 代码全部保留，查清原因后改成 true 即可。
-  var FOCUS_ON = true;
   var FOCUS_MS = 900;          // 聚焦/退出聚焦的补间时长
   var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
@@ -50,9 +46,7 @@
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
-  // 列数再减：4 列时 22 张只有 6 行，网格只比屏幕高 1.1 单位，竖滚几乎没内容。
-  // 3 列 -> 8 行，列表明显高于屏幕，纵向滚动才有意义。
-  var GRID_COLS = 3;           // 网格总览的列数
+  var GRID_COLS = 4;           // 网格总览的列数
   var GRID_GAPX = 0.05;        // 格位横向间隙（相对卡片宽）—— 用户反馈间距太大
   var GRID_GAPY = 0.20;        // 格位纵向间隙（相对卡片高）—— 留一点给编号就够
   var MODE_MS = 1500;          // 两个视图之间的补间总时长（用户指定 1.5 秒）
@@ -109,20 +103,10 @@
       // 剔除越过摄像机的（聚焦到后排时前排会飞过去）。
       // 注意：阈值要小，且 zc 用的是 camZ*camZoom —— 阈值太大会把正常画面整片剔掉。
       '  zc = max(zc, 0.12);',
-      // 🔴 剔除阈值必须**大于 0**：聚焦推近时 zc 会落到 0~0.35 这一段，
-      // 被下面的 max(zc,0.12) 一夹就放大上千倍 —— 几百万像素的巨幅四边形 +
-      // 极端缩小的纹理采样会把 GPU 拖死（用户：聚焦动画时浏览器卡死）。
-      // 所以只要近于 0.55 就整张不画（那张确实已经从镜头旁掠过去了）。
-      '  if (zc < 0.90) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
+      '  if (uCamZ * uCamZoom - w.z < -0.35) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
       '  float k = uFocal / zc;',
       '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
-      // 🔴 最终保险：**夹住 NDC**，让"覆盖几十倍屏幕的巨幅四边形"从数学上不可能出现。
-      // 无头浏览器是软件渲染，遇不到；真实 GPU 驱动遇到这种退化几何会直接挂住。
-      // 同时兜住 NaN（NaN 与任何数比较都为 false，所以用 x != x 检测）。
-      '  if (!(scr.x == scr.x) || !(scr.y == scr.y)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vUV = aUV; return; }',
-      '  float ndcX = clamp(scr.x / (uHalfW * 0.5), -8.0, 8.0);',
-      '  float ndcY = clamp(scr.y / (uHalfH * 0.5), -8.0, 8.0);',
-      '  gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);',
+      '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
       '  vUV = aUV;',
       '  vFade = 1.0;',
       '}'
@@ -131,19 +115,19 @@
     var FS = [
       'precision highp float;',
       'uniform sampler2D uTex, uBlur;',
-      'uniform float uMix, uAlpha, uPaper, uTint, uDim;',
+      'uniform float uMix, uAlpha, uPaper, uTint;',
     'uniform vec4 uUVO;',        // xy = uv 偏移, zw = uv 缩放
     'uniform vec3 uPaperRGB;',   // 相纸/数字的颜色
       'varying vec2 vUV;',
       'varying float vFade;',
       'void main() {',
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
-      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
+      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB, uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
       '  if (uPaper > 1.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
-      '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
+      '  gl_FragColor = vec4(c, uAlpha);',
       '}'
     ].join('\n');
 
@@ -159,8 +143,6 @@
   // 视图切换时视角的补间起止（与 modeT 同一条缓动，所以不会硬切）
   var viewFrom = { scroll: 0, pan: 0 }, viewTo = { scroll: 0, pan: 0 };
   var rowDur = 375, rowCount = 1;
-  var seqDur = 600, seqGap = 40;
-  var dirty = true;                  // 需要重绘（尺寸变化、滚轮、点击等）     // 逐张飞入：单张时长 / 相邻错峰
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
@@ -217,12 +199,8 @@
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         p.tex = t;
-        // 预模糊：**只在真需要虚化时才做**。
-        // 用户已要求 DOF=0（不虚化），但这里仍在给 22 张图逐个跑 CPU 高斯
-        // —— 每张都要建画布 + ctx.filter，主线程会被阻塞好几秒，
-        // 表现就是"打开页面后一段时间没响应"。DOF=0 时整段跳过。
+        // 预模糊
         try {
-        if (DOF > 0.001) {
           var bw = Math.max(48, Math.min(420, Math.round(im.naturalWidth / 3)));
           var bh = Math.max(48, Math.round(bw * im.naturalHeight / im.naturalWidth));
           var off = document.createElement('canvas');
@@ -237,9 +215,8 @@
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
           gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
           p.blurTex = bt;
-        }
         } catch (e) { p.blurTex = null; }
-        p.ready = true; dirty = true;
+        p.ready = true;
       };
       im.src = p.src;
     }
@@ -320,9 +297,6 @@
       // 逐行扫描：总时长 MODE_MS 分摊到 rows 行，每行自己走完 rowDur
       rowCount = rows;
       rowDur = MODE_MS / Math.max(1, rows);
-      // 逐张错峰：总时长 MODE_MS 内，每张自己走 seqDur，相邻两张错开 seqGap
-      seqDur = MODE_MS * 0.42;
-      seqGap = Math.max(0, (MODE_MS - seqDur)) / Math.max(1, n - 1);
       var vis = camZ * 0.72;
       panMin = gridBottomY + vis;
       panMax = gridTopY - vis;
@@ -367,52 +341,7 @@
 
       // 远的先画（画家算法），近的覆盖
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
-      // 用户要求：聚焦时**只有其他内容变暗**，被聚焦的那张保持原亮度。
-      // 所以先画除它以外的全部，再画压暗层，最后单独把它画在最上面。
-      var dimDrawn = false;
-      var focusId2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
-      // 聚焦时其余照片反正被压暗看不见，全部不发 draw call —— 22 张变 1 张。
-      // 软件渲染下这是数量级的差别。
-      var focusOnly = (focusT > 0.02 && focusIdx >= 0);
-      // 只画一遍。原先是三遍绘制加一个整屏 GL 压暗四边形，
-      // 那个四边形尺寸写成 camZ*8，投影后覆盖约 26 倍屏幕面积，
-      // 在软件渲染的机器上足以把页面拖死（用户就是从那一版开始卡的）。
-      // 现在：背景压暗交给 CSS 层（在画布下面，合成器做，几乎免费），
-      // 照片压暗在它自己的着色器里乘 uDim，零额外几何。
-      for (var pass = 0; pass < 1; pass++) {
-      if (pass === 1) {
-        // 压暗层：一个覆盖全屏的平色四边形（用现有程序，uPaper=1 走平色分支）
-        var dimA = DIM_MAX * focusT;
-        if (dimA > 0.001) {
-          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
-          gl.uniform3f(loc.uPaperRGB, 0.02, 0.03, 0.05);
-          gl.uniform3f(loc.uCenter, scroll, panY, 0);
-          // 只要盖住屏幕就够；原来用 camZ*8，投影后覆盖十几倍屏幕面积，白白拖慢光栅化
-          gl.uniform2f(loc.uHalf, camZ * 1.2, camZ * 1.2);
-          gl.uniform1f(loc.uRot, 0);
-          gl.uniform1f(loc.uPaper, 1);
-          gl.uniform1f(loc.uAlpha, dimA);
-          gl.drawArrays(gl.TRIANGLES, 0, 6);
-        }
-        continue;
-      }
       for (var i = 0; i < order.length; i++) {
-        if (focusOnly && order[i].num !== focusId2) continue;
-        // 聚焦时屏上只剩被聚焦那一张，它自己不变暗；
-        // 其余照片根本不绘制（focusOnly 已跳过），所以不需要给它们算变暗系数。
-        var dimK = 0;
-        // 聚焦时先把压暗层画一次（此时屏上只有它和被聚焦那张，非常便宜）
-        if (focusOnly && !dimDrawn) {
-          dimDrawn = true;
-          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
-          gl.uniform3f(loc.uPaperRGB, 0.02, 0.03, 0.05);
-          gl.uniform3f(loc.uCenter, scroll, panY, 0);
-          gl.uniform2f(loc.uHalf, camZ * 1.2, camZ * 1.2);
-          gl.uniform1f(loc.uRot, 0);
-          gl.uniform1f(loc.uPaper, 1);
-          gl.uniform1f(loc.uAlpha, DIM_MAX * focusT);
-          gl.drawArrays(gl.TRIANGLES, 0, 6);
-        }
         var p = order[i];
         if (!p.ready) continue;
         // 飞入进度
@@ -457,7 +386,6 @@
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 相纸
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
-        gl.uniform1f(loc.uDim, dimK);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
@@ -504,7 +432,6 @@
           gl.uniform4f(loc.uUVO, 0, 0, 1, 1);      // 还原，免得影响下一张
         }
       }
-      }
     }
 
     // ---------- 滚动：横向 + 到端回弹 ----------
@@ -513,11 +440,10 @@
       if (!ready) return;
       e.preventDefault();
       var d = (e.deltaY || e.deltaX || 0) / 100;
-      dirty = true;
       // 滚轮只给速度；之后由惯性推进（松手后还会滑一段）。
       // 用户要求：总览视图下滚轮变成**竖向**。
-      // 🔴 纵向列表的方向与横排相反：往下滚(d 为正)应当**看到下面的内容**，
-      // 也就是 panY 减小。原来写成 += 且 panY 已在 panMax(顶部)，一直被夹住 -> 滚不动。
+      // 纵向列表的方向：往下滚应当看到下面的内容，也就是 panY 减小。
+      // 原来写成 += 且 panY 已在 panMax（顶部），一直被夹住 -> 滚不动。
       if (mode === 1) panV -= d * WHEEL_IMPULSE;
       else            scrollV += d * WHEEL_IMPULSE;
     }
@@ -633,9 +559,6 @@
       var focusZoomGoal = focusCamZ / CAM_DIST;
       var wantZoom = 1 + (focusZoomGoal - 1) * focusT;
       camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
-      // 硬夹：任何情况下都不允许 camZoom 退化（NaN / 0 / 负值都会让投影爆掉）
-      if (!isFinite(camZoom)) camZoom = 1;
-      camZoom = Math.max(0.44, Math.min(1, camZoom));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
       if (focusT > 0.001) {
@@ -643,8 +566,7 @@
         panY += (focusPan - panY) * (1 - Math.exp(-dt / 140));
         scrollTarget = scroll; panTarget = panY;
       }
-      // 背景压暗：只写一个 opacity，交给合成器，不产生任何 GL 绘制
-      if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT * 0.9).toFixed(3);
+      if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
 
       var switching = (modeFrom !== mode);
       if (switching) {
@@ -656,12 +578,11 @@
         panY   = viewFrom.pan    + (viewTo.pan    - viewFrom.pan)    * ee;
         scrollTarget = scroll; panTarget = panY;
         // 照片：**按行逐行扫描**。行内同时到达，逐行错开一个 rowDur。
-        // 用户要求：**一个一个飞**，一行一行从左到右。
-        // 网格里照片的下标本身就是"左到右、上到下"的顺序，所以直接按序号错峰。
         for (var q = 0; q < photos.length; q++) {
           var ph = photos[q];
-          var dly = ROW_STAGGER ? q * seqGap : 0;
-          var ppr = clamp01((now - modeAt - dly) / seqDur);
+          var rowI = Math.floor((ph.num - 1) / GRID_COLS);
+          var dly = ROW_STAGGER ? rowI * rowDur : 0;
+          var ppr = clamp01((now - modeAt - dly) / rowDur);
           var pee = ppr < 0.5 ? 4 * ppr * ppr * ppr : 1 - Math.pow(-2 * ppr + 2, 3) / 2;
           ph.mt = modeFrom + (mode - modeFrom) * pee;
         }
@@ -674,33 +595,16 @@
       } else {
         for (var q3 = 0; q3 < photos.length; q3++) photos[q3].mt = modeT;
       }
-      // 🔴 只在"还在动"时才绘制。
-      // 这一页是 22 张带纹理的大四边形；在**软件渲染（SwiftShader）**的机器上
-      // （用户这台就是），每帧都画会把 GPU 进程吃到 130%，一点击聚焦
-      // （多出整屏混合的压暗层 + 两遍绘制）就超出帧预算 -> 表现为"点一下就卡死"。
-      // 静止时完全不画，把余量让给动画。
-      var busy = (openState !== 'done') || (modeFrom !== mode) || (focusT !== focusTo) ||
-                 Math.abs(scrollV) > 0.0005 || Math.abs(panV) > 0.0005 ||
-                 Math.abs(camZoom - wantZoom) > 0.0008 || dirty;
-      if (!busy && ready && startedAt) {
-        for (var bq = 0; bq < photos.length; bq++) {
-          var bp = photos[bq];
-          if (!bp.ready) { continue; }
-          if (clamp01((now - startedAt - bp.startAt) / bp.dur) < 1) { busy = true; break; }
-        }
-      }
-      if (busy || !ready) { draw(); dirty = false; }
+      draw();
     }
 
     function resize() {
-      dpr = 1   // 内部分辨率固定 1.0：这台机器 WebGL 走软件渲染，像素数直接等于 CPU 开销，
-    // 125% 缩放的屏上原来是 1594x1102（170 万像素/帧），降到 1280x800 省约 36%;
+      dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       W = cv.width = Math.floor(window.innerWidth * dpr);
       H = cv.height = Math.floor(window.innerHeight * dpr);
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
       if (photos.length) layout();     // W/H 变了，网格适配要重算
-      dirty = true;
     }
 
     function init() {
@@ -718,7 +622,7 @@
 
       prog = program(VS, FS);
       ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll',
-       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom','uDim'].forEach(function (n) {
+       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       quad = gl.createBuffer();
@@ -748,7 +652,6 @@
         if (openState === 'typing' || openState === 'hold') { beginDelete(); return; }
         if (!ready) return;
         if (modeFrom !== mode) return;                 // 视图补间中不接受聚焦
-        if (!FOCUS_ON) return;                         // 聚焦已关闭：点照片不做任何事
         // 屏幕坐标 -> NDC
         var nx = (e.clientX * dpr / W) * 2 - 1;
         var ny = 1 - (e.clientY * dpr / H) * 2;
@@ -767,11 +670,11 @@
       buildOpening();
       buildToggle();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
-      // 压暗改到 GL 里画（两遍绘制之间插一层），因为 DOM 覆盖层会连被聚焦的那张一起压暗。
-      // 🔴 这里原来把 dimEl 置 null 却仍对它 setAttribute -> 初始化抛异常 ->
-      // 后面的 requestAnimationFrame 没执行 -> 补间/拾取/滚轮全部"没反应"。
-      // 所以这一整段直接删掉，不再创建 DOM 压暗层。
-
+      dimEl = document.createElement('div');
+      dimEl.setAttribute('data-album-dim', '');
+      dimEl.style.cssText = 'position:fixed;inset:0;z-index:38;pointer-events:none;' +
+        'background:#05070b;opacity:0;';
+      host.appendChild(dimEl);
       raf = requestAnimationFrame(frame);
     }
 
@@ -804,8 +707,8 @@
         var y = ph.y * (1 - mt) + ph.gy * mt;
         var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var sz = worldSize(ph, mt);
-        // 🔴 命中框要用**相纸**的尺寸，不是照片的 —— 画面上看到的是相纸（比照片大一圈），
-        // 点在白边上却什么都不发生，感受就是"定位不准确"。
+        // 命中框用相纸尺寸（画面上看到的是相纸，比照片大一圈；
+        // 用照片尺寸会导致点白边完全没反应）
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         var r = projRect(x, y, z, sz.hw / pb, sz.hh / pb);
         if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
@@ -817,7 +720,6 @@
 
     // 聚焦到第 i 张（-1 = 退出）。相机推近 + 整屏压暗，全部走补间。
     function setFocus(i) {
-      dirty = true;
       focusIdx = i;
       focusFrom = focusT;
       focusTo = (i < 0) ? 0 : 1;
@@ -831,11 +733,7 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        // 🔴 必须夹住：z0 为负（远处那张）时 z0 + hh/FILL 可能 <= 0，
-        // 会让 camZoom 趋近 0 甚至为负 -> zc 退化 -> 巨幅四边形 -> GPU 卡死。
         focusCamZ = z0 + hh0 / FOCUS_FILL;
-        if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
-        focusCamZ = Math.max(CAM_DIST * 0.46, Math.min(CAM_DIST, focusCamZ));
       }
     }
 
@@ -880,7 +778,7 @@
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         mode = mode ? 0 : 1;
-        modeFrom = modeT; modeAt = performance.now(); dirty = true;
+        modeFrom = modeT; modeAt = performance.now();
         // 用户要求：切到总览时视角要锁定过去，**而且要有动画、不要硬切**。
         // 所以这里只记下起点与终点，实际位移交给下面那条与 modeT 同步的补间。
         viewFrom.scroll = scroll;
@@ -898,14 +796,6 @@
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
       host.appendChild(b);
-      // 背景压暗层：插到画布之前，因此渲染在画布下面，只压住主题背景，
-      // 不影响 GL 里的照片。由浏览器合成器负责，几乎不花代价。
-      // （原先是在 GL 里画一个整屏四边形，软件渲染下非常贵，是卡死的起点。）
-      dimEl = document.createElement('div');
-      dimEl.setAttribute('data-album-dim', '');
-      dimEl.style.cssText = 'position:absolute;inset:0;z-index:0;pointer-events:none;' +
-        'background:#05070b;opacity:0;';
-      host.insertBefore(dimEl, host.firstChild);
     }
 
     function destroy() {
@@ -920,8 +810,6 @@
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
                         min: scrollMin, max: scrollMax, camZ: camZ, focusZ: focusZ,
-                        panY: panY, panMin: panMin, panMax: panMax, mode: mode, modeT: modeT,
-                        camZoom: camZoom, focusIdx: focusIdx, focusT: focusT,
                         loaded: photos.filter(function (p) { return p.ready; }).length };
              } };
   }
