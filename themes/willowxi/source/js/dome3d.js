@@ -396,12 +396,18 @@
     '  vec3 sharp = vec3(cr, cg, cb);',
 
     // 混合：中心取模糊、边缘取折射（用 rim 权重，过渡在同一条带上）
+    // 🔴 这里原来是 mix(bl, sharp, rim)，而 rim 只有 6px 宽 —— 等于在 6px 内把
+    // "没折射的图"和"折射了 depth 像素的图"硬切在一起，看起来就是**几张照片叠着重影**
+    // （用户："模糊总是看起来像几张照片叠加重影"）。
+    // 改成用**宽过渡**（uG1.z，90px）在两张图之间渐变：中心磨砂、往外逐渐变折射，
+    // 没有硬边，也就没有重影。高光只额外加光，不承担换图。
+    '  float t = smoothstep(0.0, uG1.z, inner);',
+    '  vec3 col = mix(sharp, bl.rgb, t);',
     '  float rim = 1.0 - smoothstep(0.0, uRim.x, inner);',
-    '  vec3 col = mix(bl.rgb, sharp, rim);',
     '  col = mix(col, uTint.rgb, uTint.a);',
     // ---- ③ 内壁高光：贴边一圈，上下最亮 ----
     '  float nUp = abs(nrm.y);',
-    '  col += vec3(rim * (0.35 + 0.65 * nUp) * uRim.y);',
+    '  col += vec3(rim * (0.55 + 0.45 * nUp) * uRim.y);',
     // 折射带本身再提亮一点，像厚玻璃内壁
     '  col += vec3(amt * 0.05);',
     // 方向性高光（左上打光）
@@ -514,7 +520,7 @@
     var LENS_TINT = [0.70, 0.84, 0.96, 0.055];   // 近乎透明，只留一丝青蓝
     // iOS 那块玻璃内部几乎**干净透光**，磨砂一重就变成亚克力（用户对比后指出）。
     var LENS_FROST = 0.0018;  // 中间只留一点点柔化
-    var LENS_RIM_W = 6.0;     // 边要细才像玻璃；宽了就是塑料
+    var LENS_RIM_W = 2.6;     // 再收细：拐角处 6px 会糊成一片宽的
     var LENS_RIM_GAIN = 0.95; // 细而亮
     var photoBuf = null, photoRanges = [];
     // 开屏那张照片的 id。它也要用全尺寸贴图，但那时还不是 focusId —— 之前只换了
