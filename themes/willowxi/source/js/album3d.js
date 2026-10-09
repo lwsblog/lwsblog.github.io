@@ -365,7 +365,11 @@
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
       // 用户要求：聚焦时**只有其他内容变暗**，被聚焦的那张保持原亮度。
       // 所以先画除它以外的全部，再画压暗层，最后单独把它画在最上面。
+      var dimDrawn = false;
       var focusId2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
+      // 聚焦时其余照片反正被压暗看不见，全部不发 draw call —— 22 张变 1 张。
+      // 软件渲染下这是数量级的差别。
+      var focusOnly = (focusT > 0.02 && focusIdx >= 0);
       for (var pass = 0; pass < 3; pass++) {
       if (pass === 1) {
         // 压暗层：一个覆盖全屏的平色四边形（用现有程序，uPaper=1 走平色分支）
@@ -384,7 +388,19 @@
         continue;
       }
       for (var i = 0; i < order.length; i++) {
-        if (focusId2 >= 0 && ((order[i].num === focusId2) !== (pass === 2))) continue;
+        if (focusOnly && order[i].num !== focusId2) continue;
+        // 聚焦时先把压暗层画一次（此时屏上只有它和被聚焦那张，非常便宜）
+        if (focusOnly && !dimDrawn) {
+          dimDrawn = true;
+          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
+          gl.uniform3f(loc.uPaperRGB, 0.02, 0.03, 0.05);
+          gl.uniform3f(loc.uCenter, scroll, panY, 0);
+          gl.uniform2f(loc.uHalf, camZ * 1.2, camZ * 1.2);
+          gl.uniform1f(loc.uRot, 0);
+          gl.uniform1f(loc.uPaper, 1);
+          gl.uniform1f(loc.uAlpha, DIM_MAX * focusT);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
         var p = order[i];
         if (!p.ready) continue;
         // 飞入进度
@@ -663,7 +679,8 @@
     }
 
     function resize() {
-      dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      dpr = 1   // 内部分辨率固定 1.0：这台机器 WebGL 走软件渲染，像素数直接等于 CPU 开销，
+    // 125% 缩放的屏上原来是 1594x1102（170 万像素/帧），降到 1280x800 省约 36%;
       W = cv.width = Math.floor(window.innerWidth * dpr);
       H = cv.height = Math.floor(window.innerHeight * dpr);
       cv.style.width = window.innerWidth + 'px';
