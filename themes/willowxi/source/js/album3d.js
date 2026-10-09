@@ -155,7 +155,8 @@
   // 视图切换时视角的补间起止（与 modeT 同一条缓动，所以不会硬切）
   var viewFrom = { scroll: 0, pan: 0 }, viewTo = { scroll: 0, pan: 0 };
   var rowDur = 375, rowCount = 1;
-  var seqDur = 600, seqGap = 40;     // 逐张飞入：单张时长 / 相邻错峰
+  var seqDur = 600, seqGap = 40;
+  var dirty = true;                  // 需要重绘（尺寸变化、滚轮、点击等）     // 逐张飞入：单张时长 / 相邻错峰
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
@@ -234,7 +235,7 @@
           p.blurTex = bt;
         }
         } catch (e) { p.blurTex = null; }
-        p.ready = true;
+        p.ready = true; dirty = true;
       };
       im.src = p.src;
     }
@@ -483,6 +484,7 @@
       if (!ready) return;
       e.preventDefault();
       var d = (e.deltaY || e.deltaX || 0) / 100;
+      dirty = true;
       // 滚轮只给速度；之后由惯性推进（松手后还会滑一段）。
       // 用户要求：总览视图下滚轮变成**竖向**。
       // 🔴 纵向列表的方向与横排相反：往下滚(d 为正)应当**看到下面的内容**，
@@ -642,7 +644,22 @@
       } else {
         for (var q3 = 0; q3 < photos.length; q3++) photos[q3].mt = modeT;
       }
-      draw();
+      // 🔴 只在"还在动"时才绘制。
+      // 这一页是 22 张带纹理的大四边形；在**软件渲染（SwiftShader）**的机器上
+      // （用户这台就是），每帧都画会把 GPU 进程吃到 130%，一点击聚焦
+      // （多出整屏混合的压暗层 + 两遍绘制）就超出帧预算 -> 表现为"点一下就卡死"。
+      // 静止时完全不画，把余量让给动画。
+      var busy = (openState !== 'done') || (modeFrom !== mode) || (focusT !== focusTo) ||
+                 Math.abs(scrollV) > 0.0005 || Math.abs(panV) > 0.0005 ||
+                 Math.abs(camZoom - wantZoom) > 0.0008 || dirty;
+      if (!busy && ready && startedAt) {
+        for (var bq = 0; bq < photos.length; bq++) {
+          var bp = photos[bq];
+          if (!bp.ready) { continue; }
+          if (clamp01((now - startedAt - bp.startAt) / bp.dur) < 1) { busy = true; break; }
+        }
+      }
+      if (busy || !ready) { draw(); dirty = false; }
     }
 
     function resize() {
@@ -652,6 +669,7 @@
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
       if (photos.length) layout();     // W/H 变了，网格适配要重算
+      dirty = true;
     }
 
     function init() {
@@ -767,6 +785,7 @@
 
     // 聚焦到第 i 张（-1 = 退出）。相机推近 + 整屏压暗，全部走补间。
     function setFocus(i) {
+      dirty = true;
       focusIdx = i;
       focusFrom = focusT;
       focusTo = (i < 0) ? 0 : 1;
@@ -829,7 +848,7 @@
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         mode = mode ? 0 : 1;
-        modeFrom = modeT; modeAt = performance.now();
+        modeFrom = modeT; modeAt = performance.now(); dirty = true;
         // 用户要求：切到总览时视角要锁定过去，**而且要有动画、不要硬切**。
         // 所以这里只记下起点与终点，实际位移交给下面那条与 modeT 同步的补间。
         viewFrom.scroll = scroll;
