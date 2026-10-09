@@ -182,3 +182,22 @@
     })();
   </script>
 </div>
+
+<%
+/* 3D 相册（第一步：骨架 + 运动）。与 ?dome=1 并列的另一条实验门控，
+   互不干扰：不带参数就是原来的相册页。 */
+%>
+<script>
+(function () {
+  if (!/[?&]album=1/.test(location.search)) return;
+  document.documentElement.classList.add('is-album');
+  var sc = document.createElement('script');
+  sc.src = '/js/album3d.js';
+  sc.async = true;
+  sc.onload = function () {
+    window.__albumInstance = window.WillowXIAlbum.create(document);
+    window.__albumInstance.init();
+  };
+  document.body.appendChild(sc);
+})();
+</script>

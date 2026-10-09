@@ -5680,3 +5680,15 @@ html.is-dome .photo-lightbox {
   -webkit-mask-image: radial-gradient(circle at 50% 50%,
       rgba(0,0,0,0) 0%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 96%, rgba(0,0,0,1) 100%);
 }
+
+/* ===== 3D 相册（?album=1）=====
+   照片全部画在 GL 里，所以旧相册那套 DOM 层要藏掉；背景保持站上那层 DOM 场景可见。 */
+html.is-album, html.is-album body { overflow: hidden !important; height: 100%; }
+html.is-album body::-webkit-scrollbar { width: 0; height: 0; }
+html.is-album .photo-screen,
+html.is-album .photo-masthead,
+html.is-album .photo-main,
+html.is-album .gallery-board,
+html.is-album .photo-acrylic,
+html.is-album .photo-lightbox { display: none !important; }
+[data-album] { position: fixed; inset: 0; z-index: 35; pointer-events: none; }
