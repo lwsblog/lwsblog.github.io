@@ -105,7 +105,11 @@
       // 剔除越过摄像机的（聚焦到后排时前排会飞过去）。
       // 注意：阈值要小，且 zc 用的是 camZ*camZoom —— 阈值太大会把正常画面整片剔掉。
       '  zc = max(zc, 0.12);',
-      '  if (uCamZ * uCamZoom - w.z < -0.35) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
+      // 🔴 剔除阈值必须**大于 0**：聚焦推近时 zc 会落到 0~0.35 这一段，
+      // 被下面的 max(zc,0.12) 一夹就放大上千倍 —— 几百万像素的巨幅四边形 +
+      // 极端缩小的纹理采样会把 GPU 拖死（用户：聚焦动画时浏览器卡死）。
+      // 所以只要近于 0.55 就整张不画（那张确实已经从镜头旁掠过去了）。
+      '  if (zc < 0.55) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
       '  float k = uFocal / zc;',
       '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
       '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
