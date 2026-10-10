@@ -60,8 +60,10 @@
   var TILT = 0.0;              // 每张照片的随机倾角（0 = 全部端正）。原来 0.045。
   var DOF = 0.0;               // 景深虚化强度（0 = 完全不模糊）。原来是 1.15。
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
-  var FLY_MS = 1900;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
-  var FLY_STAGGER = 165;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
+  // 开屏总时长 = 字符数*(打字+删除) + 停留 ≈ 16*(110+70)+3000 ≈ 5880ms。
+  // 飞入必须在这个时长内完成：最后一张的 startAt+dur ≈ 21*112*1.4 + 1700*1.4 ≈ 5670ms。
+  var FLY_MS = 1700;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
+  var FLY_STAGGER = 112;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -743,6 +745,8 @@
 
       host.setAttribute('data-album-build', BUILD);
       console.log('[album3d] build ' + BUILD);
+      startFly();     // 用户要求：不跳过时，开屏自动消失之后照片已经飞好 ——
+                      // 所以飞入必须和开屏同时开始，并在开屏结束时刚好到位。
       buildOpening();
       buildToggle();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
@@ -948,6 +952,8 @@
              // 临时测试钩子：强制设定 panY（用来验证 uPanY 真的到了 GPU）
              __setPan: function (y) { panY = y; dirty = true; },
              __mtOf: function (i) { var p = photos[i]; return (p && p.mt !== undefined) ? p.mt : modeT; },
+             // 飞入进度 t（0=还没进来，1=已到位）
+             __flyOf: function (i) { var p = photos[i]; if (!p) return null; return ready ? Math.min(1, Math.max(0, (performance.now() - startedAt - p.startAt) / p.dur)) : 0; },
              state: function () {
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
