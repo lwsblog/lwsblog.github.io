@@ -476,7 +476,13 @@
       if (panY >= panMax) { panY = panMax; if (panV > 0) panV = 0; }
       panTarget = panY;
       // 视角随视图切换而移动：一排 -> 回到 y=0 且横滚有效；总览 -> 横向归中
-      if (mode === 0) { panY += (0 - panY) * (1 - Math.exp(-dt / 220)); panV = 0; }
+      // 🔴 这条只在**没有聚焦**时执行。
+      // 它是为'从网格退回一排时纵向回中'加的，但在一排视图里每帧把 panY 拉回 0，
+      // 结果把聚焦刚刚写进去的纵向位移立刻抹掉 ——
+      // 用户的原话就是'完全没有上下位移的痕迹'。
+      if (mode === 0 && focusTo === 0 && focusT <= 0.001) {
+        panY += (0 - panY) * (1 - Math.exp(-dt / 220)); panV = 0;
+      }
     }
 
     // ---------- 开屏打字 ----------
@@ -761,11 +767,17 @@
         // z0 必须在这里先算出来：原来我在 var z0 之前用了它，
         // 得到 camZ - undefined = NaN，panY 整条变成 NaN（画面直接乱掉）。
         var z0n = ph.z * (1 - mt) + (ph.gz || 0) * mt;
-        focusPan = ph.y * (1 - mt) + ph.gy * mt - dyNdc * (camZ - z0n) / FOCAL;
+        var py0 = ph.y * (1 - mt) + ph.gy * mt;      // 该照片的世界 y
+        // focusPan 留到 focusCamZ 算出之后再定（见下面）——
+        // 补偿量必须用**推近之后**的深度，否则会差 camZ*zc 那个倍数。
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
         focusCamZ = z0 + hh0 / FOCUS_FILL;
+        // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
+        // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
+        // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
+        focusPan = py0 - dyNdc * (focusCamZ - z0n) / FOCAL;
       }
     }
 
@@ -846,6 +858,17 @@
                         panY: panY, focusPan: focusPan, focusScroll: focusScroll,
                         focusIdx: focusIdx, focusT: focusT, focusTo: focusTo,
                         camZoom: camZoom, mode: mode, modeT: modeT,
+                        // 聚焦那张当前在屏幕上的实际纵向位置（NDC，0 = 正中，正 = 偏上）
+                        focusNdcY: (focusIdx >= 0) ? (function () {
+                          var fp = photos[focusIdx];
+                          if (!fp) return null;
+                          var fmt = (fp.mt === undefined) ? modeT : fp.mt;
+                          var fy = fp.y * (1 - fmt) + fp.gy * fmt;
+                          var fz = fp.z * (1 - fmt) + (fp.gz || 0) * fmt;
+                          var fzc = Math.max(0.12, camZ * camZoom - fz);
+                          var fk = (FOCAL * H * 0.5) / fzc;
+                          return +(((fy - panY) * fk / (H * 0.5))).toFixed(4);
+                        })() : null,
                         loaded: photos.filter(function (p) { return p.ready; }).length };
              } };
   }
