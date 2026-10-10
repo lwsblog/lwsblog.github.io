@@ -1342,8 +1342,8 @@
       secG.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
       panel.appendChild(secG);
       [['折射位移 px(scale)','GLASS_DEPTH',0,120,1],
-       ['边缘羽化 feather','GLASS_FEATHER',0.05,0.95,0.01],
-       ['曲线 curve','GLASS_CURVE',0.4,5,0.1],
+       ['折射带宽 feather','GLASS_FEATHER',0.05,1.00,0.01],
+       ['带宽集中度 curve(小=带更宽)','GLASS_CURVE',0.20,5.0,0.05],
        ['色散 chroma','GLASS_CHROMA',0,10,0.2],
        ['磨砂 blur px','GLASS_FROST',0,24,0.5],
        ['聚光 saturate %','GLASS_SAT',100,300,5]
