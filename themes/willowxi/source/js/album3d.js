@@ -771,6 +771,7 @@
       gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
 
       // 光标/系统指针保留（这一步不做自定义光标）
+      loadTune();     // 先把上次调好的值读回来，再 collect / layout
       photos = collect();
       for (var q0 = 0; q0 < photos.length; q0++) photos[q0].num = q0 + 1;
       buildNumberAtlas(photos.length);
@@ -1000,6 +1001,45 @@
     }
 
 
+    // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
+    var TUNE_KEY = 'album3d-tune-v1';
+    var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
+                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT'];
+    function getVar(k) {
+      return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
+        FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
+        CARD_H: CARD_H, CAM_DIST: CAM_DIST, FOCUS_FILL: FOCUS_FILL, DIM_MAX: DIM_MAX,
+        FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE, INERTIA_TAU: INERTIA_TAU,
+        NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP, NAV_SIZE: NAV_SIZE,
+        TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT })[k];
+    }
+    function setVar(k, v) {
+      if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
+      else if (k === 'DEL_MS') DEL_MS = v; else if (k === 'FLY_MS') FLY_MS = v;
+      else if (k === 'FLY_STAGGER') FLY_STAGGER = v; else if (k === 'GAP') GAP = v;
+      else if (k === 'JITTER') JITTER = v; else if (k === 'Z_SPREAD') Z_SPREAD = v;
+      else if (k === 'CARD_H') CARD_H = v; else if (k === 'CAM_DIST') CAM_DIST = v;
+      else if (k === 'FOCUS_FILL') FOCUS_FILL = v; else if (k === 'DIM_MAX') DIM_MAX = v;
+      else if (k === 'FOCUS_MS') FOCUS_MS = v; else if (k === 'WHEEL_IMPULSE') WHEEL_IMPULSE = v;
+      else if (k === 'INERTIA_TAU') INERTIA_TAU = v; else if (k === 'NAV_INSET') NAV_INSET = v;
+      else if (k === 'NAV_TOP') NAV_TOP = v; else if (k === 'NAV_SIZE') NAV_SIZE = v;
+      else if (k === 'TOGGLE_BOTTOM') TOGGLE_BOTTOM = v; else if (k === 'TOGGLE_LEFT') TOGGLE_LEFT = v;
+    }
+    function saveTune() {
+      try {
+        var o = {}; TUNE_KEYS.forEach(function (k) { o[k] = getVar(k); });
+        localStorage.setItem(TUNE_KEY, JSON.stringify(o));
+      } catch (e) {}
+    }
+    function loadTune() {
+      try {
+        var j = JSON.parse(localStorage.getItem(TUNE_KEY) || '{}');
+        TUNE_KEYS.forEach(function (k) { if (typeof j[k] === 'number') setVar(k, j[k]); });
+      } catch (e) {}
+    }
+    function clearTune() { try { localStorage.removeItem(TUNE_KEY); } catch (e) {} }
+
     // ---------- 调参面板（?album=1&tune=1 才出现）----------
     // 把可调参数做成滑块，用户自己拖；拖完把面板底部那行 JSON 发我即可。
     // 这里的量都是模块级 var，所以面板能直接改到正在跑的代码上。
@@ -1062,30 +1102,13 @@
           if (key === 'GAP' || key === 'JITTER' || key === 'Z_SPREAD' ||
               key === 'CARD_H' || key === 'CAM_DIST') layout();
           applyPositions();
+          saveTune();          // 存起来，刷新不丢
           out.textContent = dump();
         });
         wrap.appendChild(lab); wrap.appendChild(r);
         panel.appendChild(wrap);
         state[key] = r;
         return r;
-      }
-      function getVar(k) { return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS,
-        FLY_MS: FLY_MS, FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER,
-        Z_SPREAD: Z_SPREAD, CARD_H: CARD_H, CAM_DIST: CAM_DIST, FOCUS_FILL: FOCUS_FILL,
-        DIM_MAX: DIM_MAX, FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE,
-        INERTIA_TAU: INERTIA_TAU, NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP,
-        NAV_SIZE: NAV_SIZE, TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT })[k]; }
-      function setVar(k, v) {
-        if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
-        else if (k === 'DEL_MS') DEL_MS = v; else if (k === 'FLY_MS') FLY_MS = v;
-        else if (k === 'FLY_STAGGER') FLY_STAGGER = v; else if (k === 'GAP') GAP = v;
-        else if (k === 'JITTER') JITTER = v; else if (k === 'Z_SPREAD') Z_SPREAD = v;
-        else if (k === 'CARD_H') CARD_H = v; else if (k === 'CAM_DIST') CAM_DIST = v;
-        else if (k === 'FOCUS_FILL') FOCUS_FILL = v; else if (k === 'DIM_MAX') DIM_MAX = v;
-        else if (k === 'FOCUS_MS') FOCUS_MS = v; else if (k === 'WHEEL_IMPULSE') WHEEL_IMPULSE = v;
-        else if (k === 'INERTIA_TAU') INERTIA_TAU = v; else if (k === 'NAV_INSET') NAV_INSET = v;
-        else if (k === 'NAV_TOP') NAV_TOP = v; else if (k === 'NAV_SIZE') NAV_SIZE = v;
-        else if (k === 'TOGGLE_BOTTOM') TOGGLE_BOTTOM = v; else if (k === 'TOGGLE_LEFT') TOGGLE_LEFT = v;
       }
       // 按钮位置（也做成滑块）
       var sec2 = document.createElement('div');
@@ -1112,11 +1135,19 @@
       }
       out.textContent = dump();
 
+      // 重放开屏：不用刷新就能再看一遍（调开屏时序用）
+      var replay = document.createElement('button');
+      replay.textContent = '重放开屏';
+      replay.style.cssText = 'margin-top:8px;margin-right:6px;padding:5px 12px;border-radius:8px;border:0;' +
+        'cursor:pointer;background:rgba(140,200,255,.22);color:#e8f0fa;font:inherit';
+      replay.addEventListener('click', function () { replayOpening(); });
+      panel.appendChild(replay);
+
       var reset = document.createElement('button');
-      reset.textContent = '复位';
+      reset.textContent = '恢复默认';
       reset.style.cssText = 'margin-top:8px;padding:5px 12px;border-radius:8px;border:0;cursor:pointer;' +
         'background:rgba(255,255,255,.14);color:#e8f0fa;font:inherit';
-      reset.addEventListener('click', function () { location.reload(); });
+      reset.addEventListener('click', function () { clearTune(); location.reload(); });
       panel.appendChild(reset);
 
       host.appendChild(panel);
@@ -1137,6 +1168,19 @@
         toggleEl.style.bottom = TOGGLE_BOTTOM + 'px';
         toggleEl.style.left = TOGGLE_LEFT + '%';
       }
+    }
+
+    // 重放开屏：把开屏状态复位并重建遮罩，照片也回到未飞入状态。
+    // 这样调开屏时序时不用反复刷新。
+    function replayOpening() {
+      if (openState === 'typing' || openState === 'hold') return;
+      setFocus(-1);
+      ready = false;
+      startedAt = 0;
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      for (var i = 0; i < photos.length; i++) { photos[i].mt = 0; }
+      buildOpening();
+      dirty = true;
     }
 
     function destroy() {
