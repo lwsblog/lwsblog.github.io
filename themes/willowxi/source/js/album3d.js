@@ -720,7 +720,9 @@
           var dly = ROW_STAGGER ? q * seqGap : 0;
           var ppr = clamp01((now - modeAt - dly) / seqDur);
           var pee = ppr < 0.5 ? 4 * ppr * ppr * ppr : 1 - Math.pow(-2 * ppr + 2, 3) / 2;
-          ph.mt = modeFrom + (mode - modeFrom) * pee;
+          // 从该张自己的起点反向（打断时不会跳）
+          var m0 = (ph.mtFrom === undefined) ? modeFrom : ph.mtFrom;
+          ph.mt = m0 + (mode - m0) * pee;
         }
         if (pr >= 1) {
           modeT = mode; modeFrom = mode;
@@ -963,6 +965,12 @@
       // 样式交给 CSS 类 .album-glass / .album-btn-toggle（液态玻璃）
       b.addEventListener('click', function (e) {
         e.stopPropagation();
+        // 打断支持：每张照片记住自己当前的位置 mtFrom，
+        // 再次点击时从**当前位置**反向走，而不是被拉回统一起点重来。
+        for (var qi = 0; qi < photos.length; qi++) {
+          var pq = photos[qi];
+          pq.mtFrom = (pq.mt === undefined) ? modeT : pq.mt;
+        }
         mode = mode ? 0 : 1;
         modeFrom = modeT; modeAt = performance.now();
         // 用户要求：切到总览时视角要锁定过去，**而且要有动画、不要硬切**。
