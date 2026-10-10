@@ -55,7 +55,7 @@
   var toggleEl = null, dimEl2 = null;
   var navPrev = null, navNext = null;   // 灯箱左右切换按钮
   // 按钮位置（可在 tune=1 面板里用滑块调）
-  var NAV_INSET = 28, NAV_TOP = 50, NAV_SIZE = 56;
+  var NAV_INSET = 76, NAV_TOP = 50, NAV_SIZE = 56;
   var TOGGLE_BOTTOM = 26, TOGGLE_LEFT = 50;
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
@@ -80,8 +80,8 @@
   // 所以这里用原来调好的速度，不必为了赶开屏而压缩。
   // 单张 550ms，错峰 85ms（一张接一张很清楚）。
   // 整批 = 21*85*1.4 + 550*1.4 = 3270ms。
-  var FLY_MS = 550;
-  var FLY_STAGGER = 85;        // 错峰基准（ms/张）—— 用户要求错峰更明显
+  var FLY_MS = 900;
+  var FLY_STAGGER = 140;        // 错峰基准（ms/张）—— 用户要求错峰更明显
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -1647,7 +1647,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v5';
+    var TUNE_KEY = 'album3d-tune-v9';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
