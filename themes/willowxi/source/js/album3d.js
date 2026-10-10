@@ -927,7 +927,16 @@
       // 纵向恢复到自然位置（0）。
       // 用户要求：聚焦灯箱时加载高清图
       if (i >= 0 && photos[i]) loadHiRes(photos[i]);
-      if (i < 0) { focusScroll = scroll; focusPan = 0; }
+      if (i < 0) {
+        if (mode === 1) {
+          // 列表视图（总览）：取消聚焦后**不要停留在那张图上**，
+          // 镜头回到列表中间（网格以 0 为中心）。
+          focusScroll = 0; focusPan = 0;
+        } else {
+          // 一排视图：保持之前的要求 —— 就地拉远、纵向恢复，不飞回原位。
+          focusScroll = scroll; focusPan = 0;
+        }
+      }
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
         preScroll = scroll; prePan = panY;             // 先记住原位
