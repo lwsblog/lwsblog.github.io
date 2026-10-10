@@ -55,7 +55,7 @@
   var toggleEl = null, dimEl2 = null;
   var navPrev = null, navNext = null;   // 灯箱左右切换按钮
   // 按钮位置（可在 tune=1 面板里用滑块调）
-  var NAV_INSET = 76, NAV_TOP = 50, NAV_SIZE = 56;
+  var NAV_INSET = 28, NAV_TOP = 50, NAV_SIZE = 56;
   var TOGGLE_BOTTOM = 26, TOGGLE_LEFT = 50;
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
@@ -80,8 +80,8 @@
   // 所以这里用原来调好的速度，不必为了赶开屏而压缩。
   // 单张 550ms，错峰 85ms（一张接一张很清楚）。
   // 整批 = 21*85*1.4 + 550*1.4 = 3270ms。
-  var FLY_MS = 900;
-  var FLY_STAGGER = 140;        // 错峰基准（ms/张）—— 用户要求错峰更明显
+  var FLY_MS = 550;
+  var FLY_STAGGER = 85;        // 错峰基准（ms/张）—— 用户要求错峰更明显
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -426,60 +426,52 @@
       'void main() { vUV = aUV; gl_Position = vec4(aXY, 0.0, 1.0); }'
     ].join('\n');
 
-    // VERBATIM from glass-cursor.html (the lab page). Only three wiring changes:
-    //   uSrc/uFrost -> my composed texture / its blurred version
-    //   uShape      -> (cx, cy top-down px, halfW, halfH) of the ball or a button
-    //   uMode/uMixF -> 1 / 1
-    // Plus one early-out so pixels outside the shape keep my own scene (my canvas is transparent).
     var FS_POST = [
       'precision highp float;',
-      'uniform sampler2D uSrc, uFrost;',
-      'uniform float uHalfW, uHalfH, uMode, uMixF;',
-      'uniform vec4 uShape, uG1, uG2, uTint;',
-      'uniform float uAlpha;',
+      'uniform sampler2D uScene;',
+      'uniform sampler2D uFrostTex;',
+      'uniform sampler2D uComp;',
+      'uniform vec2 uRes;',
+      // 形状：一个圆角矩形（uSh=(cx,cy,半宽,半高) 设备像素 y 自下而上；uShR=圆角半径）
+      // 圆 = 半宽=半高=半径 的圆角矩形，所以球和按钮共用同一套代码
+      'uniform vec4 uSh;',
+      'uniform float uShR;',
+      'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
+      'uniform vec2 uRim;',       // x=环宽 px, y=环强度
+      'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
+      'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
+      '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
+      'vec2 nrmSDF(vec2 p, vec2 b, float r) { float e = 0.75;',
+      '  float dx = sd(p + vec2(e, 0.), b, r) - sd(p - vec2(e, 0.), b, r);',
+      '  float dy = sd(p + vec2(0., e), b, r) - sd(p - vec2(0., e), b, r);',
+      '  vec2 g = vec2(dx, dy); return (dot(g, g) < 1e-9) ? vec2(0.) : normalize(g); }',
       'varying vec2 vUV;',
-      'float sd(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r);',
-      '  return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r; }',
-      'vec2 nrmSDF(vec2 p, vec2 b, float r){ float e=0.75;',
-      '  float dx=sd(p+vec2(e,0.),b,r)-sd(p-vec2(e,0.),b,r);',
-      '  float dy=sd(p+vec2(0.,e),b,r)-sd(p-vec2(0.,e),b,r);',
-      '  vec2 g=vec2(dx,dy); return (dot(g,g)<1e-9)?vec2(0.):normalize(g); }',
-      'void main(){',
-      '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
-      '  vec2 fc = vec2(gl_FragCoord.x, uHalfH*2.0 - gl_FragCoord.y);',
-      '  vec2 b = vec2(uShape.z, uShape.w);',
-      '  vec2 p = fc - vec2(uShape.x, uShape.y);',
-      '  float r = uG1.x;',
-      '  float d = sd(p, b, r);',
-      '  if (d > 1.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
-      '  float feather = max(1.0, uG1.z);',
-      '  float edge = clamp((d + feather)/feather, 0.0, 1.0);',
-      '  float amt = pow(edge, uG1.w);',
-      '  vec2 nrm = nrmSDF(p, b, r);',
-      '  float inner = -d;',
-      // depth 钳制在短边一半以内：否则胶囊两端(法线水平)会把采样推到形状外很远，
-      // 拉进外面的内容 -> 出现一块硬边（用户说的空白块）
-      '  float dpx = min(uG1.y, 0.25 * min(b.x, b.y));',
-      '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(dpx/vec2(uHalfW*2.0,uHalfH*2.0));',
-      '  float ck = uG2.x*amt;',
-      '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
-      '  float cg = texture2D(uFrost, vUV-base).g;',
-      '  float cb = texture2D(uFrost, vUV-base*(1.0-ck)).b;',
-      '  float t = smoothstep(0.0, feather, inner);',
-      '  vec3 col = mix(vec3(cr,cg,cb), mix(texture2D(uSrc,vUV).rgb, texture2D(uFrost,vUV).rgb, uMixF), t);',
-      '  col = mix(col, uTint.rgb, uTint.a);',
-      '  float rimBand = max(2.5, uG2.z * 2.5);',
-      '  float rim = 1.0 - smoothstep(0.0, rimBand, inner);',
-      '  vec2 Lmain = normalize(vec2(-0.60, -0.80));',
-      '  float dMain = dot(nrm, Lmain);',
-      '  col += vec3(smoothstep(0.10, 0.92, dMain) * rim * uG2.w * 1.15);',
-      '  vec2 Lfill = normalize(vec2(0.60, 0.80));',
-      '  float dFill = dot(nrm, Lfill);',
-      '  col += vec3(smoothstep(0.30, 1.00, dFill) * rim * uG2.w * 0.42);',
-      '  col += vec3(0.030 * (0.5 - p.y / max(1.0, b.y)));',
-      '  col += vec3(amt*0.05);',
-      '  float a = max(texture2D(uSrc, vUV).a, 0.997) * uAlpha;',
-      '  gl_FragColor = vec4(col, a);',
+      'void main() {',
+      '  vec2 fc = vUV * uRes;',
+      '  vec2 p = fc - uSh.xy;',
+      '  vec2 bsh = vec2(uSh.z, uSh.w);',
+      '  float dist = sd(p, bsh, uShR);',
+      '  vec4 src = texture2D(uScene, vUV);',
+      '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
+      '  vec2 nrm = nrmSDF(p, bsh, uShR);',
+      '  float inner = -dist;',
+      '  float feather = max(uG.x, 0.001);',
+      '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
+      '  float amt = pow(edge, uG.z);',
+      '  vec2 base = nrm * amt * uG.y / uRes;',
+      '  float ck = uG.w * amt;',
+      // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
+      '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
+      '  float cg = texture2D(uFrostTex, vUV - base).g;',
+      '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
+      '  float ca = 1.0;',   // 球内是合成图（背景+照片），完全不透明
+      '  vec3 sharp = texture2D(uComp, vUV).rgb;',   // 球内的清晰底图 = 合成图（含动态背景）
+      '  vec3 col = vec3(cr, cg, cb);',
+      '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
+      '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
+      '  col += vec3(rim * uRim.y) * 0.55;',
+      '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
+      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
       '}'
     ].join('\n');
 
@@ -499,7 +491,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uSrc','uFrost','uHalfW','uHalfH','uMode','uMixF','uShape','uG1','uG2','uTint','uAlpha'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -730,20 +722,6 @@
       blurPass(blurTexA, wallBlurFbo, 0, 1, r * 1.5);
       wallBlurDone = true;
     }
-    var fallbackTex = null;
-    function ensureFallbackTex() {
-      if (fallbackTex) return fallbackTex;
-      fallbackTex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, fallbackTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-                    new Uint8Array([0, 0, 0, 255]));
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      return fallbackTex;
-    }
-
     function composePass() {
       var wallOn = ensureWallTex();
       if (wallOn) { bakeWallBlur(); if (wallBlurTex) wallOn = 2; }
@@ -774,88 +752,68 @@
 
     function drawPost() {
       if (!postProg) return;
-      var rpx = GLASS_BALL_R * dpr;                 // 光标球半径（设备像素）
-
-      // 1) 动态背景上传 + 合成：玻璃因此能折射背景，而不只是照片
+      // 1) 动态背景上传 + 合成（玻璃因此能折射背景，而不只是照片）
       var compOk = false;
-      if (compProg && compFbo) {
-        uploadBg();                 // 成功就用动态背景，失败也不影响合成（走兜底纹理）
-        composePass();
-        compOk = true;              // 合成图处处不透明，折射/磨砂采样它就不会出现空白
-      }
-      var srcTex = compOk ? compTex : fboTex;
-
-      // 2) 四趟可分离高斯 -> blurTexB（磨砂纹理；实验页也是折射采它）
+      if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
       if (blurProg && blurFboA && blurFboB && blurTexB) {
         var rad = Math.max(1, GLASS_FROST * dpr);
-        blurPass(srcTex, blurFboA, 1, 0, rad);
+        blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
         blurPass(blurTexA, blurFboB, 0, 1, rad);
         blurPass(blurTexB, blurFboA, 1, 0, rad * 2);
         blurPass(blurTexA, blurFboB, 0, 1, rad * 2);
       }
-      var frostTex = (blurProg && blurTexB) ? blurTexB : srcTex;
-
-      // 3) 形状列表：光标球（鼠标在页内时）+ 三个可见按钮
-      //    每个形状 [cx, cy 自上而下, 半宽, 半高]，单位设备像素
-      var shapes = [];
-      if (mouseIn) shapes.push([mouseX * dpr, mouseY * dpr, rpx, rpx, 1]);
-      [toggleEl, navPrev, navNext].forEach(function (el) {
-        if (!el) return;
-        var op = parseFloat(getComputedStyle(el).opacity) || 0;
-        if (op < 0.004) return;                        // 完全不可见才跳过
-        var rct = el.getBoundingClientRect();
-        if (rct.width < 2 || rct.height < 2) return;
-        shapes.push([(rct.left + rct.width * 0.5) * dpr,
-                     (rct.top + rct.height * 0.5) * dpr,
-                     rct.width * dpr * 0.5,
-                     rct.height * dpr * 0.5,
-                     Math.min(1, op)]);                // 第 5 项：不透明度
-      });
-
-
-      // 4) 画到屏幕
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
-      if (!shapes.length) { drawScene(); return; }   // 没有形状就原样画一遍
+      gl.disable(gl.BLEND);
       gl.useProgram(postProg);
       gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
       var axy = gl.getAttribLocation(postProg, 'aXY'), auv = gl.getAttribLocation(postProg, 'aUV');
       gl.enableVertexAttribArray(axy); gl.vertexAttribPointer(axy, 2, gl.FLOAT, false, 16, 0);
       gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, srcTex);
-      gl.uniform1i(postLoc.uSrc, 0);
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.uniform1i(postLoc.uScene, 0);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, frostTex);
-      gl.uniform1i(postLoc.uFrost, 1);
-      gl.uniform1f(postLoc.uHalfW, W * 0.5);
-      gl.uniform1f(postLoc.uHalfH, H * 0.5);
-      gl.uniform1f(postLoc.uMode, 1.0);
-      gl.uniform1f(postLoc.uMixF, 1.0);
+      gl.bindTexture(gl.TEXTURE_2D, (blurTexB || fboTex));
+      gl.uniform1i(postLoc.uFrostTex, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, compOk ? compTex : fboTex);
+      gl.uniform1i(postLoc.uComp, 2);
+      gl.uniform2f(postLoc.uRes, W, H);
+      var rpx = GLASS_BALL_R * dpr;
+      // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
+      var bx = mouseX * dpr, by = H - mouseY * dpr;
+      // 形状列表：光标球 + 三个按钮（都用圆角矩形表达）
+      var shapes = [];
+      if (mouseIn) shapes.push([bx, by, rpx, rpx, rpx]);
+      [toggleEl, navPrev, navNext].forEach(function (el3) {
+        if (!el3) return;
+        if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
+        var r3 = el3.getBoundingClientRect();
+        if (r3.width < 2 || r3.height < 2) return;
+        var hw3 = r3.width * dpr * 0.5, hh3 = r3.height * dpr * 0.5;
+        shapes.push([(r3.left + r3.width * 0.5) * dpr,
+                     H - (r3.top + r3.height * 0.5) * dpr,
+                     hw3, hh3, Math.min(hw3, hh3)]);
+      });
+      gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
+                   GLASS_CURVE, GLASS_CHROMA);
+      gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
+      gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+      // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       for (var si = 0; si < shapes.length; si++) {
-        var sp = shapes[si];
-        var hw = sp[2], hh = sp[3], rad3 = Math.min(hw, hh);
-        // 实验页约定：uShape = (cx, cy 自上而下, 半宽, 半高)
-        // 注意：着色器内部已经把 gl_FragCoord.y 翻转成自上而下，所以这里直接传 sp[1]
-        gl.uniform4f(postLoc.uShape, sp[0], sp[1], hw, hh);
-        // uG1 = (R 带宽, depth px, feather px, curve)：按形状自身尺寸换算，
-        // 这样球和按钮的观感一致（否则小按钮上的位移会过大）
-        gl.uniform4f(postLoc.uG1, rad3, GLASS_DEPTH_PCT * 2 * rad3,
-                     GLASS_FEATHER * rad3, GLASS_CURVE);
-        // uG2 = (chroma, 保留, rimW, glint)
-        gl.uniform4f(postLoc.uG2, GLASS_CHROMA, 0.0, GLASS_RIM_W, GLASS_GLINT);
-        gl.uniform4f(postLoc.uTint, 0.70, 0.84, 0.96, GLASS_TINT);
-        gl.uniform1f(postLoc.uAlpha, (sp[4] === undefined) ? 1 : sp[4]);
+        gl.uniform4f(postLoc.uSh, shapes[si][0], shapes[si][1], shapes[si][2], shapes[si][3]);
+        gl.uniform1f(postLoc.uShR, shapes[si][4]);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
 
-    // 外层 draw：有玻璃时先渲进 FBO 再后处理（按钮不依赖鼠标，球才依赖）
+    // 外层 draw：有玻璃时先渲进 FBO 再后处理，否则直接画
     function draw() {
       if (!gl) return;
-      if (!glassOn || !postProg || !fbo) { drawScene(); return; }
+      if (!glassOn || !mouseIn || !postProg || !fbo) { drawScene(); return; }
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, W, H);
       gl.clearColor(0, 0, 0, 0);
@@ -1534,17 +1492,17 @@
     // 参考页 glass-cursor.html 的"玻璃（参考的那组）"换算成比例：
     // 球直径 94、feather 12（=0.13）、depth 45（=0.48）、curve 1.2、chroma 0.12、glint 0.64
     // 关键：**窄带 + 大位移** —— 只有边缘一圈把影像吸进去，这才是玻璃边。
-    var GLASS_DEPTH_PCT = 0.45;  // 折射位移 = 短边 * 此值
-    var GLASS_FEATHER = 0.29;    // 折射带宽度：只有边缘 13% 的一圈
+    var GLASS_DEPTH_PCT = 0.48;  // 折射位移 = 短边 * 此值
+    var GLASS_FEATHER = 0.34;    // 折射带宽度：只有边缘 13% 的一圈
     var GLASS_CURVE = 1.25;       // 参考值
     var GLASS_CHROMA = 0.2;     // 参考值
-    var GLASS_FROST = 0;         // 磨砂模糊 px（越小边缘弯折越清楚）
+    var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
-    var GLASS_RIM_W = 9;        // 环高光宽度 px
-    var GLASS_RIM_A = 0.2;      // 环高光强度
-    var GLASS_GLINT = 0.06;      // 参考值
+    var GLASS_RIM_W = 5;        // 环高光宽度 px
+    var GLASS_RIM_A = 0.24;      // 环高光强度
+    var GLASS_GLINT = 0;      // 参考值
     var GLASS_TINT = 0;       // 玻璃底色浓度
     var glassFilterSeq = 0;
 
@@ -1689,7 +1647,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v8';
+    var TUNE_KEY = 'album3d-tune-v5';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
