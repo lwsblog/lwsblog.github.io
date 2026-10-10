@@ -60,14 +60,10 @@
   var TILT = 0.0;              // 每张照片的随机倾角（0 = 全部端正）。原来 0.045。
   var DOF = 0.0;               // 景深虚化强度（0 = 完全不模糊）。原来是 1.15。
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
-  // 开屏总时长 = 字符数*(打字+删除) + 停留 ≈ 16*(110+70)+3000 ≈ 5880ms。
-  // 飞入必须在这个时长内完成：最后一张的 startAt+dur ≈ 21*112*1.4 + 1700*1.4 ≈ 5670ms。
-  // 删除阶段约等于 openText.length * DEL_MS = 16*70 = 1120ms。
-  // 飞入必须在这段内铺完：最后一张约 21*20*1.4 + 380*1.4 = 1120ms，正好收尾。
-  // 飞入窗口 = HOLD_MS*0.5 + 字符数*DEL_MS = 1500 + 1120 = 2620ms。
-  // 最后一张约 21*46*1.4 + 900*1.4 = 2612ms，正好在文字消失时收尾。
-  var FLY_MS = 900;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
-  var FLY_STAGGER = 46;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
+  // 开屏那条不再和飞入耦合：飞入的起飞点只有一个 = finishOpening（文字消失）。
+  // 所以这里用原来调好的速度，不必为了赶开屏而压缩。
+  var FLY_MS = 1900;          // 飞入基准时长（用户早先要求放慢：1100 -> 1900）
+  var FLY_STAGGER = 165;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -550,7 +546,8 @@
       h1.appendChild(c);
     }
     function beginDelete() {
-      startFly();                 // 跳过了打字的话，这里补上
+      // 不在这里起飞。起飞点是 finishOpening（文字消失）——
+      // 用户：把文字消失结束作为一个标志，然后再开始做飞入动画。
       if (openState === 'deleting' || openState === 'done') return;
       openState = 'deleting';
       openAt = performance.now();
@@ -561,9 +558,6 @@
         setTitle(openText.slice(0, n));
         if (n >= openText.length) { openState = 'hold'; openAt = now; }   // 不在这里起飞：停留阶段不能有照片在飞
       } else if (openState === 'hold') {
-        // 停留过半就起飞。打字阶段仍然不飞；这样飞入有 1.5s（停留后半）
-        // 加 1.12s（删除）= 2.6s 可用，不必再压成 0.8 秒那种一闪而过。
-        if (now - openAt >= HOLD_MS * 0.5) startFly();
         if (now - openAt >= HOLD_MS) beginDelete();
       } else if (openState === 'deleting') {
         var k = openText.length - Math.min(openText.length, Math.floor((now - openAt) / DEL_MS));
