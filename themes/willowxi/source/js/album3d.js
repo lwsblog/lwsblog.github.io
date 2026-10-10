@@ -1206,7 +1206,8 @@
     }
 
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
-    var TUNE_KEY = 'album3d-tune-v1';
+    // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
+    var TUNE_KEY = 'album3d-tune-v2';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
