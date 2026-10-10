@@ -362,7 +362,11 @@
         var p = order[i];
         if (!p.ready) continue;
         // 飞入进度
-        var t = ready ? clamp01((now - startedAt - p.startAt) / p.dur) : 0;
+        // 不能用 ready 当闸门！ready 只在开屏结束才为 true，
+        // 于是开屏期间 t 恒为 0、结束时全部瞬间跳到 1，
+        // 用户看到的就是文字消失之后照片全部一起蹦出来。
+        // 飞入只由 startedAt 决定，而它在开屏一开始就已经设好。
+        var t = startedAt ? clamp01((now - startedAt - p.startAt) / p.dur) : 0;
         if (t <= 0) continue;
         var e = p.overshoot ? easeOutBack(t, 1.9) : easeOutBack(t, 1.22);
 
@@ -953,7 +957,7 @@
              __setPan: function (y) { panY = y; dirty = true; },
              __mtOf: function (i) { var p = photos[i]; return (p && p.mt !== undefined) ? p.mt : modeT; },
              // 飞入进度 t（0=还没进来，1=已到位）
-             __flyOf: function (i) { var p = photos[i]; if (!p) return null; return ready ? Math.min(1, Math.max(0, (performance.now() - startedAt - p.startAt) / p.dur)) : 0; },
+             __flyOf: function (i) { var p = photos[i]; if (!p) return null; return startedAt ? Math.min(1, Math.max(0, (performance.now() - startedAt - p.startAt) / p.dur)) : 0; },
              state: function () {
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
