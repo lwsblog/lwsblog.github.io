@@ -715,6 +715,7 @@
         panY = focusFromPan + (focusPan - focusFromPan) * fe2;
         scrollTarget = scroll; panTarget = panY;
       }
+      tickGlassCursor(dt);
       if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
       // 灯箱左右圆形按钮：聚焦时淡入，退出时淡出
       if (navPrev && navNext) {
@@ -861,6 +862,7 @@
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
+      buildGlassCursor();   // 跟随光标的玻璃球（从 glass-cursor.html 取过来）
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
@@ -1078,17 +1080,20 @@
     // 实测：Edge/Chromium 支持 backdrop-filter: url(#svgFilter)，位移真实生效。
     // 位移量用**短边的百分比**：绝对 px 在大按钮上几乎看不见、在小按钮上又会
     // 把整块内容推糊（用户：只有位移，看不出边缘折射）。
-    var GLASS_DEPTH_PCT = 0.20;  // 折射位移 = 短边 * 此值
-    var GLASS_FEATHER = 0.55;    // 折射带宽度：中心 45% 平坦、外圈 55% 弯折（镜片感）
-    var GLASS_CURVE = 1.0;       // 越大越集中在最外缘（1.0 = 线性过渡）
-    var GLASS_CHROMA = 1.5;      // 色散强度（0 = 关）
+    // 参考页 glass-cursor.html 的"玻璃（参考的那组）"换算成比例：
+    // 球直径 94、feather 12（=0.13）、depth 45（=0.48）、curve 1.2、chroma 0.12、glint 0.64
+    // 关键：**窄带 + 大位移** —— 只有边缘一圈把影像吸进去，这才是玻璃边。
+    var GLASS_DEPTH_PCT = 0.48;  // 折射位移 = 短边 * 此值
+    var GLASS_FEATHER = 0.13;    // 折射带宽度：只有边缘 13% 的一圈
+    var GLASS_CURVE = 1.2;       // 参考值
+    var GLASS_CHROMA = 0.12;     // 参考值
     var GLASS_FROST = 2;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 180;         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 26;        // 环高光宽度 px
     var GLASS_RIM_A = 0.85;      // 环高光强度
-    var GLASS_GLINT = 0.35;      // 内部冷光（glint）
+    var GLASS_GLINT = 0.64;      // 参考值
     var GLASS_TINT = 0.05;       // 玻璃底色浓度
     var glassFilterSeq = 0;
 
@@ -1226,6 +1231,40 @@
       applyGlassRefract(toggleEl, 999);
       applyGlassRefract(navPrev, Math.round(NAV_SIZE / 2));
       applyGlassRefract(navNext, Math.round(NAV_SIZE / 2));
+      if (glassCursor) applyGlassRefract(glassCursor, 47);
+    }
+
+
+    // ---------- 跟随光标的液态玻璃球（从 glass-cursor.html 那套取过来，放进相册页）----------
+    var glassCursor = null, gcx = 0, gcy = 0, gtx = 0, gty = 0;
+    function buildGlassCursor() {
+      glassCursor = document.createElement('div');
+      glassCursor.setAttribute('data-album-glasscursor', '');
+      glassCursor.style.cssText =
+        'position:fixed;left:0;top:0;width:94px;height:94px;border-radius:50%;' +
+        'pointer-events:none;z-index:50;will-change:left,top;' +
+        'transform:translate(-50%,-50%);opacity:0;transition:opacity .3s ease;';
+      host.appendChild(glassCursor);
+      gcx = gtx = window.innerWidth / 2;
+      gcy = gty = window.innerHeight / 2;
+      window.addEventListener('mousemove', function (e) { gtx = e.clientX; gty = e.clientY; });
+      window.addEventListener('mouseleave', function () { if (glassCursor) glassCursor.style.opacity = '0'; });
+      window.addEventListener('mouseenter', function () { if (glassCursor) glassCursor.style.opacity = '1'; });
+      // 首次移动后出现
+      var shown = false;
+      window.addEventListener('mousemove', function () {
+        if (!shown && glassCursor) { shown = true; glassCursor.style.opacity = '1'; }
+      });
+      applyGlassRefract(glassCursor, 47);
+    }
+    function tickGlassCursor(dt) {
+      if (!glassCursor) return;
+      // 跟随缓动（参考页 GLASS 的"跟随缓动"0.18）
+      var k = 1 - Math.exp(-dt / 90);
+      gcx += (gtx - gcx) * k;
+      gcy += (gty - gcy) * k;
+      glassCursor.style.left = gcx.toFixed(1) + 'px';
+      glassCursor.style.top = gcy.toFixed(1) + 'px';
     }
 
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
