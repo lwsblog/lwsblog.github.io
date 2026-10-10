@@ -53,6 +53,7 @@
   // ReferenceError，整个初始化挂掉（我刚踩过）。
   var BUILD = 'focusY-4fbefdf+';
   var toggleEl = null, dimEl2 = null;
+  var navPrev = null, navNext = null;   // 灯箱左右切换按钮
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
@@ -182,11 +183,17 @@
         var id = f.getAttribute('data-id');
         var ratio = parseFloat(f.style.getPropertyValue('--ratio')) || 1.5;
         var img = f.querySelector('img');
-        var src = f.getAttribute('data-screen-src') ||
+        // 🔴 data-screen-src / data-light-src 挂在 **<img>** 上，不在 <figure> 上！
+        // 原来只读 figure，拿到 null，于是回退到 img.src —— 那是 **thumb 档（640px）**，
+        // 所以相册一直用的是缩略图；lightSrc 也恒为空，高清图加载被直接 return。
+        // 三档实测分辨率：thumb 640 / screen 900 / light 1600。
+        var src = (img && (img.getAttribute('data-screen-src') || img.getAttribute('data-light-src'))) ||
+                  f.getAttribute('data-screen-src') ||
                   (img && (img.getAttribute('data-src') || img.getAttribute('src'))) || '';
+        var hiSrc = (img && img.getAttribute('data-light-src')) ||
+                    f.getAttribute('data-light-src') || '';
         if (!id || !src) continue;
-        list.push({ id: id, ratio: ratio, src: src,
-                    light: f.getAttribute('data-light-src') || '' });
+        list.push({ id: id, ratio: ratio, src: src, lightSrc: hiSrc });
       }
       return list;
     }
@@ -204,6 +211,34 @@
     }
 
     // 预模糊版：CPU 一次真高斯（这台机器上唯一稳的连续模糊），片元里按景深插值
+    // 聚焦时把这张换成高清贴图。
+    // 实测三档分辨率：thumb 640 / light 1600 / screen 900。
+    // album3d 平时加载的是 screen(900)，所以高清其实是 light(1600)。
+    // 只在聚焦那一张上加载，浏览时不加载 22 张 1600px（那会很重）。
+    function loadHiRes(p) {
+      if (!p || p.hiTried || !p.lightSrc) return;
+      p.hiTried = true;
+      var im = new Image();
+      im.crossOrigin = 'anonymous';
+      im.onload = function () {
+        var t = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        if (p.tex) gl.deleteTexture(p.tex);
+        p.tex = t;                     // 就地换掉，正在聚焦时画面会变清晰
+        dirty = true;
+        console.log('[album3d] 高清图就绪 ' + p.id + ' ' + im.naturalWidth + 'x' + im.naturalHeight);
+      };
+      im.onerror = function () { p.hiTried = false; };
+      im.src = p.lightSrc;
+    }
+
     function loadPhoto(p) {
       var im = new Image();
       im.crossOrigin = 'anonymous';
@@ -644,6 +679,13 @@
         scrollTarget = scroll; panTarget = panY;
       }
       if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
+      // 灯箱左右圆形按钮：聚焦时淡入，退出时淡出
+      if (navPrev && navNext) {
+        var navOp = clamp01((focusT - 0.35) / 0.4);
+        navPrev.style.opacity = navOp; navNext.style.opacity = navOp;
+        navPrev.style.pointerEvents = navOp > 0.5 ? 'auto' : 'none';
+        navNext.style.pointerEvents = navOp > 0.5 ? 'auto' : 'none';
+      }
       // 调试读数：聚焦时把关键量显示在底部按钮上，用户截图即可定位问题
       if (toggleEl) {
         if (focusTo === 1 || focusT > 0.001) {
@@ -827,6 +869,8 @@
       // 退出聚焦（用户要求）：**不要飞回原来的位置**。
       // 镜头就停在当前这张照片上（横向保持不动），只把 zoom 拉到最远（=1），
       // 纵向恢复到自然位置（0）。
+      // 用户要求：聚焦灯箱时加载高清图
+      if (i >= 0 && photos[i]) loadHiRes(photos[i]);
       if (i < 0) { focusScroll = scroll; focusPan = 0; }
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
@@ -903,13 +947,7 @@
       var b = document.createElement('button');
       b.setAttribute('data-album-toggle', '');
       b.textContent = '总览 · ' + BUILD;
-      b.style.cssText =
-        'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:41;' +
-        'pointer-events:auto;cursor:pointer;padding:9px 22px;border-radius:999px;' +
-        'font:400 13px/1 "Ubuntu Mono",ui-monospace,monospace;letter-spacing:.14em;' +
-        'color:#eaf2fb;background:rgba(255,255,255,.08);' +
-        'border:1px solid rgba(255,255,255,.34);backdrop-filter:blur(6px);' +
-        'transition:background .2s,color .2s;';
+      // 样式交给 CSS 类 .album-glass / .album-btn-toggle（液态玻璃）
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         mode = mode ? 0 : 1;
@@ -931,6 +969,29 @@
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
       host.appendChild(b);
+      // 液态玻璃：给底部按钮套上玻璃类
+      b.className = 'album-glass album-btn-toggle';
+
+      // 灯箱左右两侧的圆形上一张 / 下一张（固定位置，聚焦时才出现）
+      function makeNavBtn(dir) {
+        var nb = document.createElement('button');
+        nb.className = 'album-glass album-nav-btn album-nav-btn--' + (dir < 0 ? 'prev' : 'next');
+        nb.setAttribute('data-album-nav', dir < 0 ? 'prev' : 'next');
+        nb.setAttribute('aria-label', dir < 0 ? '上一张' : '下一张');
+        nb.textContent = dir < 0 ? '\u2039' : '\u203a';
+        nb.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+        nb.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var n = photos.length;
+          if (!n) return;
+          var cur = (focusIdx >= 0) ? focusIdx : 0;
+          setFocus(((cur + dir) % n + n) % n);
+        });
+        host.appendChild(nb);
+        return nb;
+      }
+      navPrev = makeNavBtn(-1);
+      navNext = makeNavBtn(1);
     }
 
     function destroy() {

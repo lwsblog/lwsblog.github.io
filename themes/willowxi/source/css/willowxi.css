@@ -5692,3 +5692,56 @@ html.is-album .gallery-board,
 html.is-album .photo-acrylic,
 html.is-album .photo-lightbox { display: none !important; }
 [data-album] { position: fixed; inset: 0; z-index: 35; pointer-events: none; }
+
+/* ===== 液态玻璃按钮（沿用之前定下来的四条做法，见 js/glass-cursor.js 顶部说明）=====
+   1 backdrop-filter: blur + saturate      真磨砂 + 像玻璃那样聚光
+   2 一圈内高光（上边最亮、下边次之）+ 外阴影   玻璃边的主要来源
+   3 内侧竖向明暗（上亮下暗）                厚度感
+   4 边缘一层极淡的冷色                      色散的一点点暗示
+   注意：宿主 [data-album] 是 pointer-events:none，所以这里必须自己开 auto。 */
+[data-album] .album-glass {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 0;
+  background: rgba(255, 255, 255, .07);
+  color: #eaf2fb;
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .55),
+    inset 0 -1px 0 rgba(255, 255, 255, .18),
+    inset 0 12px 20px -12px rgba(255, 255, 255, .30),
+    inset 0 -14px 22px -14px rgba(0, 10, 30, .55),
+    0 6px 22px rgba(0, 0, 0, .35),
+    0 0 0 1px rgba(160, 200, 255, .16);
+  transition: background .2s ease, box-shadow .2s ease, transform .18s ease;
+}
+[data-album] .album-glass:hover { background: rgba(255, 255, 255, .13); }
+
+/* 底部总览切换 */
+[data-album] .album-btn-toggle {
+  position: fixed; left: 50%; bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 41;
+  padding: 10px 24px;
+  border-radius: 999px;
+  font: 400 13px/1 "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: .14em;
+}
+[data-album] .album-btn-toggle:active { transform: translateX(-50%) scale(.96); }
+
+/* 灯箱左右两侧的圆形上一张 / 下一张（固定位置） */
+[data-album] .album-nav-btn {
+  position: fixed; top: 50%;
+  transform: translateY(-50%);
+  z-index: 42;
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font: 300 30px/1 "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace;
+  opacity: 0;
+  pointer-events: none;
+}
+[data-album] .album-nav-btn--prev { left: 28px; }
+[data-album] .album-nav-btn--next { right: 28px; }
+[data-album] .album-nav-btn:active { transform: translateY(-50%) scale(.94); }
