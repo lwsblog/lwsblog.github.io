@@ -408,7 +408,155 @@
     focusZ = 0;
 
     // ---------- 渲染 ----------
+
+    // ---------- 玻璃光标：GL 全屏后处理（照 glass-cursor.html 那条路）----------
+    // 场景先渲进 FBO，再用一个全屏 pass 采样它：
+    //   在光标球范围内按 SDF 求外法线，edge = 1 - inner/feather，amt = pow(edge, curve)，
+    //   位移 = 法线 * amt * depth，三通道用不同位移做色散，再叠磨砂 / 环高光 / glint / 底色。
+    // 这才是和 lab 页一致的做法（DOM + backdrop-filter 是另一条路，永远不像）。
+    var GLASS_BALL_R = 47;          // 球半径（CSS px）
+    var glassOn = true;
+    var mouseX = -9999, mouseY = -9999, mouseIn = false;
+    var fbo = null, fboTex = null, postProg = null, postLoc = {}, postQuad = null;
+
+    var VS_POST = [
+      'attribute vec2 aXY;',
+      'attribute vec2 aUV;',
+      'varying vec2 vUV;',
+      'void main() { vUV = aUV; gl_Position = vec4(aXY, 0.0, 1.0); }'
+    ].join('\n');
+
+    var FS_POST = [
+      'precision highp float;',
+      'uniform sampler2D uScene;',
+      'uniform vec2 uRes;',
+      'uniform vec2 uBall;',      // 光标球心（设备像素，y 自下而上）
+      'uniform float uR;',        // 球半径（设备像素）
+      'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
+      'uniform vec2 uRim;',       // x=环宽 px, y=环强度
+      'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
+      'varying vec2 vUV;',
+      'void main() {',
+      '  vec2 fc = vUV * uRes;',
+      '  vec2 p = fc - uBall;',
+      '  float dist = length(p) - uR;',
+      '  vec4 src = texture2D(uScene, vUV);',
+      '  if (dist > 1.5) { gl_FragColor = src; return; }',
+      '  vec2 nrm = length(p) > 0.001 ? normalize(p) : vec2(0.0);',
+      '  float inner = -dist;',
+      '  float feather = max(uG.x, 0.001);',
+      '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
+      '  float amt = pow(edge, uG.z);',
+      '  vec2 base = nrm * amt * uG.y / uRes;',
+      '  float ck = uG.w * amt;',
+      '  float cr = texture2D(uScene, vUV - base * (1.0 + ck)).r;',
+      '  float cg = texture2D(uScene, vUV - base).g;',
+      '  float cb = texture2D(uScene, vUV - base * (1.0 - ck)).b;',
+      '  float ca = texture2D(uScene, vUV - base).a;',
+      '  vec3 col = vec3(cr, cg, cb);',
+      '  if (uExtra.z > 0.5) {',                       // 磨砂：四点平均
+      '    vec2 o = vec2(uExtra.z) / uRes;',
+      '    vec3 bl = (texture2D(uScene, vUV + vec2(o.x, 0.0)).rgb +',
+      '               texture2D(uScene, vUV - vec2(o.x, 0.0)).rgb +',
+      '               texture2D(uScene, vUV + vec2(0.0, o.y)).rgb +',
+      '               texture2D(uScene, vUV - vec2(0.0, o.y)).rgb) * 0.25;',
+      '    col = mix(col, bl, 0.4 * edge);',
+      '  }',
+      '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
+      '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
+      '  col += vec3(rim * uRim.y) * 0.55;',
+      '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
+      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
+      '}'
+    ].join('\n');
+
+    function makePost() {
+      function sh(t, src) {
+        var o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) {
+          console.error('[album3d] post shader: ' + gl.getShaderInfoLog(o)); return null;
+        }
+        return o;
+      }
+      var v = sh(gl.VERTEX_SHADER, VS_POST), f2 = sh(gl.FRAGMENT_SHADER, FS_POST);
+      if (!v || !f2) return false;
+      postProg = gl.createProgram();
+      gl.attachShader(postProg, v); gl.attachShader(postProg, f2);
+      gl.linkProgram(postProg);
+      if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
+        console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
+      }
+      ['uScene','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
+        postLoc[n] = gl.getUniformLocation(postProg, n);
+      });
+      // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
+      postQuad = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1,-1, 0,0,   1,-1, 1,0,   1,1, 1,1,
+        -1,-1, 0,0,   1,1, 1,1,   -1,1, 0,1
+      ]), gl.STATIC_DRAW);
+      return true;
+    }
+
+    function makeFbo() {
+      if (fbo) { gl.deleteFramebuffer(fbo); fbo = null; }
+      if (fboTex) { gl.deleteTexture(fboTex); fboTex = null; }
+      fboTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      dirty = true;
+    }
+
+    function drawPost() {
+      if (!postProg) return;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, W, H);
+      gl.disable(gl.BLEND);
+      gl.useProgram(postProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
+      var axy = gl.getAttribLocation(postProg, 'aXY'), auv = gl.getAttribLocation(postProg, 'aUV');
+      gl.enableVertexAttribArray(axy); gl.vertexAttribPointer(axy, 2, gl.FLOAT, false, 16, 0);
+      gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.uniform1i(postLoc.uScene, 0);
+      gl.uniform2f(postLoc.uRes, W, H);
+      var rpx = GLASS_BALL_R * dpr;
+      // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
+      var bx = mouseX * dpr, by = H - mouseY * dpr;
+      gl.uniform2f(postLoc.uBall, bx, by);
+      gl.uniform1f(postLoc.uR, rpx);
+      gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
+                   GLASS_CURVE, GLASS_CHROMA);
+      gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
+      gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
+    // 外层 draw：有玻璃时先渲进 FBO 再后处理，否则直接画
     function draw() {
+      if (!gl) return;
+      if (!glassOn || !mouseIn || !postProg || !fbo) { drawScene(); return; }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.viewport(0, 0, W, H);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      drawScene();
+      drawPost();
+    }
+
+    function drawScene() {
       if (!gl) return;
       gl.viewport(0, 0, W, H);
       gl.clearColor(0, 0, 0, 0);
@@ -774,6 +922,7 @@
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
       if (photos.length) layout();     // W/H 变了，网格适配要重算
+      if (postProg && fbo) makeFbo();  // 尺寸变了，FBO 要重建
     }
 
     function init() {
@@ -861,6 +1010,14 @@
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
+      // 玻璃光标（GL 后处理）：建程序与 FBO，并跟踪鼠标
+      if (makePost()) makeFbo(); else glassOn = false;
+      window.addEventListener('mousemove', function (e) {
+        mouseX = e.clientX; mouseY = e.clientY;
+        if (!mouseIn) { mouseIn = true; dirty = true; }
+        dirty = true;   // 光标移动就要重绘（静止时不重绘）
+      });
+      window.addEventListener('mouseleave', function () { mouseIn = false; dirty = true; });
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
