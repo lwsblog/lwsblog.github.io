@@ -431,6 +431,7 @@
       'uniform sampler2D uScene;',
       'uniform sampler2D uFrostTex;',
       'uniform sampler2D uComp;',
+      'uniform float uMode;',
       'uniform vec2 uRes;',
       // 形状：一个圆角矩形（uSh=(cx,cy,半宽,半高) 设备像素 y 自下而上；uShR=圆角半径）
       // 圆 = 半宽=半高=半径 的圆角矩形，所以球和按钮共用同一套代码
@@ -451,8 +452,12 @@
       '  vec2 p = fc - uSh.xy;',
       '  vec2 bsh = vec2(uSh.z, uSh.w);',
       '  float dist = sd(p, bsh, uShR);',
+      '  if (uMode < 0.5) { gl_FragColor = texture2D(uScene, vUV); return; }',
       '  vec4 src = texture2D(uScene, vUV);',
-      '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
+      // 形状外什么都不写：alpha=0，混合时 dst 保持不变。
+      // 原来这里输出的是清晰场景 -> 后面每个形状的整屏 pass 都会把
+      // 先画好的玻璃（例如光标球）重新盖回去（球被照片挡住的原因）。
+      '  if (dist > 1.5) { gl_FragColor = vec4(0.0); return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
       '  vec2 nrm = nrmSDF(p, bsh, uShR);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
@@ -491,7 +496,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -801,8 +806,14 @@
       gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
       gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
       // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
+      // ★ 先把场景【整屏铺一遍】（uMode=0 原样输出，不混合）
+      gl.disable(gl.BLEND);
+      gl.uniform1f(postLoc.uMode, 0.0);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      // 再逐个形状叠玻璃（形状外不写像素，所以不会互相覆盖）
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniform1f(postLoc.uMode, 1.0);
       for (var si = 0; si < shapes.length; si++) {
         gl.uniform4f(postLoc.uSh, shapes[si][0], shapes[si][1], shapes[si][2], shapes[si][3]);
         gl.uniform1f(postLoc.uShR, shapes[si][4]);
