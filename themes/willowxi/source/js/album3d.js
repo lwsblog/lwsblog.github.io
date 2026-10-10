@@ -18,7 +18,9 @@
   // 用户反馈等太久。开屏原来 = 16*110 + 3000 + 16*70 = 5880ms，
   // 其中停留 3000ms 是纯等待，砍到 1200；删除 70 -> 50（=800ms）。
   // 现在开屏 = 1760 + 1200 + 800 = 3760ms。
-  var TYPE_MS = 110, HOLD_MS = 1200, DEL_MS = 50;
+  // 再压开屏：打字 80（=1280ms）、停留 700、删除 40（=640ms）。
+  // 开屏合计 = 1280 + 700 + 640 = 2620ms。
+  var TYPE_MS = 80, HOLD_MS = 700, DEL_MS = 40;
   var Z_COUNT = 4;             // 深度层数
   // 用户说的景深不是虚化，而是后排移动更慢：投影为 focal/(camZ - z)，
   // z 越大（越近）横向位移越快。所以要拉大 z 的跨度。
@@ -65,10 +67,10 @@
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
   // 开屏那条不再和飞入耦合：飞入的起飞点只有一个 = finishOpening（文字消失）。
   // 所以这里用原来调好的速度，不必为了赶开屏而压缩。
-  // 飞入整批从约 7.5 秒收到约 4 秒；单张仍 1100ms，错峰 85ms。
-  // 最后一张约 21*85*1.4 + 1100*1.4 = 4040ms。
-  var FLY_MS = 1100;
-  var FLY_STAGGER = 85;        // 错峰基准（ms/张）
+  // 单张 550ms，错峰 85ms（一张接一张很清楚）。
+  // 整批 = 21*85*1.4 + 550*1.4 = 3270ms。
+  var FLY_MS = 550;
+  var FLY_STAGGER = 85;        // 错峰基准（ms/张）—— 用户要求错峰更明显
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -254,8 +256,7 @@
         p.scale = 0.78 + rnd() * 0.58;      // 大小不一（0.78~1.36），参考图就是这样
         p.startAt = i * FLY_STAGGER * (0.6 + rnd() * 0.8);
         p.dur = FLY_MS * (0.6 + rnd() * 0.8);           // 时长 ±40%
-        p.overshoot = rnd() < 0.25;                     // 约 1/4 带旋转过冲
-        if (p.overshoot) p.dur *= 1.35;
+        p.overshoot = false;                          // 用户要求删掉回弹，不再有过冲那一档
         // 用户要求：**全部从右边屏幕外飞进来**。
         // 可见半宽 = (W/2)*camZ/focal = camZ*(W/H) = 3.2*1.6 ≈ 5.12 世界单位，
         // 所以起点至少要 +5.12+hw 才在屏外 —— 取 7.5 起步。
@@ -373,7 +374,9 @@
         // 飞入只由 startedAt 决定，而它在开屏一开始就已经设好。
         var t = startedAt ? clamp01((now - startedAt - p.startAt) / p.dur) : 0;
         if (t <= 0) continue;
-        var e = p.overshoot ? easeOutBack(t, 1.9) : easeOutBack(t, 1.22);
+        // 用户要求：删掉回弹动画，一步到位。
+        // 原来近处用 easeOutBack(1.9)、其余 easeOutBack(1.22)，都会有回弹过冲。
+        var e = easeOutCubic(t);
 
         // 一排的坐标（含飞入位移）
         var rx = p.x + (p.fromX * (1 - e));
@@ -386,7 +389,7 @@
         var y = ry * (1 - mt) + p.gy * mt;
         var z = rz * (1 - mt) + (p.gz || 0) * mt;
         var alpha = easeOutCubic(clamp01(t * 1.6));
-        var rot = (p.rot + (p.overshoot ? p.rot * 2.6 * (1 - e) : p.rot * 0.9 * (1 - e))) * (1 - mt);
+        var rot = (p.rot * 0.9 * (1 - e)) * (1 - mt);
 
         // 卡片世界尺寸：短边固定，长边按比例
         var shortSide = CARD_H * (rsc * (1 - mt) + (p.gs || 1) * mt);
