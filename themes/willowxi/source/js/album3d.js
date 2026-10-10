@@ -429,7 +429,6 @@
     var FS_POST = [
       'precision highp float;',
       'uniform sampler2D uScene;',
-      'uniform sampler2D uFrostTex;',
       'uniform vec2 uRes;',
       'uniform vec2 uBall;',      // 光标球心（设备像素，y 自下而上）
       'uniform float uR;',        // 球半径（设备像素）
@@ -450,12 +449,19 @@
       '  float amt = pow(edge, uG.z);',
       '  vec2 base = nrm * amt * uG.y / uRes;',
       '  float ck = uG.w * amt;',
-      // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
-      '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
-      '  float cg = texture2D(uFrostTex, vUV - base).g;',
-      '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
-      '  float ca = texture2D(uScene, vUV).a;',
+      '  float cr = texture2D(uScene, vUV - base * (1.0 + ck)).r;',
+      '  float cg = texture2D(uScene, vUV - base).g;',
+      '  float cb = texture2D(uScene, vUV - base * (1.0 - ck)).b;',
+      '  float ca = texture2D(uScene, vUV - base).a;',
       '  vec3 col = vec3(cr, cg, cb);',
+      '  if (uExtra.z > 0.5) {',                       // 磨砂：四点平均
+      '    vec2 o = vec2(uExtra.z) / uRes;',
+      '    vec3 bl = (texture2D(uScene, vUV + vec2(o.x, 0.0)).rgb +',
+      '               texture2D(uScene, vUV - vec2(o.x, 0.0)).rgb +',
+      '               texture2D(uScene, vUV + vec2(0.0, o.y)).rgb +',
+      '               texture2D(uScene, vUV - vec2(0.0, o.y)).rgb) * 0.25;',
+      '    col = mix(col, bl, 0.4 * edge);',
+      '  }',
       '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
@@ -480,7 +486,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uScene','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -510,92 +516,8 @@
       dirty = true;
     }
 
-    var VS_BLUR = [
-      'attribute vec2 aXY;',
-      'attribute vec2 aUV;',
-      'varying vec2 vUV;',
-      'void main() { vUV = aUV; gl_Position = vec4(aXY, 0.0, 1.0); }'
-    ].join('\n');
-    var FS_BLUR = [
-      'precision highp float;',
-      'uniform sampler2D uT;',
-      'uniform vec2 uDir;',
-      'uniform vec2 uRes;',
-      'varying vec2 vUV;',
-      'void main() {',
-      '  vec2 o = uDir / uRes;',
-      '  vec4 c = texture2D(uT, vUV) * 0.2270270270;',
-      '  c += (texture2D(uT, vUV + o) + texture2D(uT, vUV - o)) * 0.3162162162;',
-      '  c += (texture2D(uT, vUV + o * 2.0) + texture2D(uT, vUV - o * 2.0)) * 0.0702702703;',
-      '  gl_FragColor = c;',
-      '}'
-    ].join('\n');
-    var blurProg = null, blurLoc = {}, blurFboA = null, blurTexA = null,
-        blurFboB = null, blurTexB = null;
-    function makeBlur() {
-      function sh(t, src) {
-        var o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
-        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) {
-          console.error('[album3d] blur: ' + gl.getShaderInfoLog(o)); return null;
-        }
-        return o;
-      }
-      var v = sh(gl.VERTEX_SHADER, VS_BLUR), f2 = sh(gl.FRAGMENT_SHADER, FS_BLUR);
-      if (!v || !f2) return false;
-      blurProg = gl.createProgram();
-      gl.attachShader(blurProg, v); gl.attachShader(blurProg, f2); gl.linkProgram(blurProg);
-      if (!gl.getProgramParameter(blurProg, gl.LINK_STATUS)) {
-        console.error('[album3d] blur link: ' + gl.getProgramInfoLog(blurProg)); return false;
-      }
-      ['uT','uDir','uRes'].forEach(function (n) { blurLoc[n] = gl.getUniformLocation(blurProg, n); });
-      return true;
-    }
-    function mkBlurRt(tex, fbo2) {
-      if (fbo2) gl.deleteFramebuffer(fbo2);
-      if (tex) gl.deleteTexture(tex);
-      var t = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Math.max(2, W), Math.max(2, H), 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      var f3 = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, f3);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      return { t: t, f: f3 };
-    }
-    function makeBlurRt() {
-      var a = mkBlurRt(blurTexA, blurFboA); blurTexA = a.t; blurFboA = a.f;
-      var b = mkBlurRt(blurTexB, blurFboB); blurTexB = b.t; blurFboB = b.f;
-    }
-    function blurPass(srcTex, dstFbo, dx, dy, radius) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-      gl.viewport(0, 0, W, H);
-      gl.disable(gl.BLEND);
-      gl.useProgram(blurProg);
-      gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
-      var axy = gl.getAttribLocation(blurProg, 'aXY'), auv = gl.getAttribLocation(blurProg, 'aUV');
-      gl.enableVertexAttribArray(axy); gl.vertexAttribPointer(axy, 2, gl.FLOAT, false, 16, 0);
-      gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, srcTex);
-      gl.uniform1i(blurLoc.uT, 0);
-      gl.uniform2f(blurLoc.uDir, dx * radius, dy * radius);
-      gl.uniform2f(blurLoc.uRes, W, H);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
-
     function drawPost() {
       if (!postProg) return;
-      if (blurProg && blurFboA && blurFboB && blurTexB) {
-        var rad = Math.max(1, GLASS_FROST * dpr);
-        blurPass(fboTex, blurFboA, 1, 0, rad);
-        blurPass(blurTexA, blurFboB, 0, 1, rad);
-        blurPass(blurTexB, blurFboA, 1, 0, rad * 2);
-        blurPass(blurTexA, blurFboB, 0, 1, rad * 2);
-      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
       gl.disable(gl.BLEND);
@@ -607,9 +529,6 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, fboTex);
       gl.uniform1i(postLoc.uScene, 0);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, (blurTexB || fboTex));
-      gl.uniform1i(postLoc.uFrostTex, 1);
       gl.uniform2f(postLoc.uRes, W, H);
       var rpx = GLASS_BALL_R * dpr;
       // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
@@ -1003,7 +922,7 @@
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
       if (photos.length) layout();     // W/H 变了，网格适配要重算
-      if (postProg && fbo) { makeFbo(); if (blurProg) makeBlurRt(); }  // 尺寸变了，FBO 要重建
+      if (postProg && fbo) makeFbo();  // 尺寸变了，FBO 要重建
     }
 
     function init() {
@@ -1092,7 +1011,7 @@
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
       // 玻璃光标（GL 后处理）：建程序与 FBO，并跟踪鼠标
-      if (makePost()) { makeFbo(); if (makeBlur()) makeBlurRt(); } else glassOn = false;
+      if (makePost()) makeFbo(); else glassOn = false;
       window.addEventListener('mousemove', function (e) {
         mouseX = e.clientX; mouseY = e.clientY;
         if (!mouseIn) { mouseIn = true; dirty = true; }
@@ -1473,8 +1392,7 @@
 
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
-    // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v3';
+    var TUNE_KEY = 'album3d-tune-v2';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
