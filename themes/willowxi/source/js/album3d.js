@@ -475,12 +475,20 @@
       if (scroll >= scrollMax) { scroll = scrollMax; if (scrollV > 0) scrollV = 0; }
       scrollTarget = scroll;
       // 纵向（总览视图）
-      panY += panV * (dt / 16);
-      panV *= Math.exp(-dt / INERTIA_TAU);
-      if (Math.abs(panV) < 1e-5) panV = 0;
-      if (panY <= panMin) { panY = panMin; if (panV < 0) panV = 0; }
-      if (panY >= panMax) { panY = panMax; if (panV > 0) panV = 0; }
-      panTarget = panY;
+      // 🔴 聚焦期间纵向由聚焦补间独占，这里必须让路。
+      // 否则下面的 panMin/panMax 夹取会把聚焦目标夹住：
+      // 网格最下面几行的 focusPan ≈ -4.75，而 panMin = -4.7189，
+      // 于是 panY 永远到不了 focusPan（实测 pan=-0.269 而 tgt=-0.584，
+      // 接着后续点击的 rectOf 算偏、连锁失败）。
+      var focusing = (focusTo === 1 || focusT > 0.001);
+      if (!focusing) {
+        panY += panV * (dt / 16);
+        panV *= Math.exp(-dt / INERTIA_TAU);
+        if (Math.abs(panV) < 1e-5) panV = 0;
+        if (panY <= panMin) { panY = panMin; if (panV < 0) panV = 0; }
+        if (panY >= panMax) { panY = panMax; if (panV > 0) panV = 0; }
+        panTarget = panY;
+      }
       // 视角随视图切换而移动：一排 -> 回到 y=0 且横滚有效；总览 -> 横向归中
       // 🔴 这条只在**没有聚焦**时执行。
       // 它是为'从网格退回一排时纵向回中'加的，但在一排视图里每帧把 panY 拉回 0，
