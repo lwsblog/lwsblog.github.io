@@ -430,6 +430,7 @@
       'precision highp float;',
       'uniform sampler2D uScene;',
       'uniform sampler2D uFrostTex;',
+      'uniform sampler2D uComp;',
       'uniform vec2 uRes;',
       'uniform vec2 uBall;',      // 光标球心（设备像素，y 自下而上）
       'uniform float uR;',        // 球半径（设备像素）
@@ -442,7 +443,7 @@
       '  vec2 p = fc - uBall;',
       '  float dist = length(p) - uR;',
       '  vec4 src = texture2D(uScene, vUV);',
-      '  if (dist > 1.5) { gl_FragColor = src; return; }',
+      '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
       '  vec2 nrm = length(p) > 0.001 ? normalize(p) : vec2(0.0);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
@@ -454,7 +455,8 @@
       '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
       '  float cg = texture2D(uFrostTex, vUV - base).g;',
       '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
-      '  float ca = texture2D(uScene, vUV).a;',
+      '  float ca = 1.0;',   // 球内是合成图（背景+照片），完全不透明
+      '  vec3 sharp = texture2D(uComp, vUV).rgb;',   // 球内的清晰底图 = 合成图（含动态背景）
       '  vec3 col = vec3(cr, cg, cb);',
       '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
@@ -480,7 +482,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -587,11 +589,86 @@
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
+    // ---- 合成 pass：我的场景 over 动态背景 canvas ----
+    var FS_COMPOSE = [
+      'precision highp float;',
+      'uniform sampler2D uScene;',
+      'uniform sampler2D uBg;',
+      'varying vec2 vUV;',
+      'void main() {',
+      '  vec4 s4 = texture2D(uScene, vUV);',
+      '  vec3 bg = texture2D(uBg, vUV).rgb;',
+      '  float a = s4.a;',
+      '  gl_FragColor = vec4(s4.rgb * a + bg * (1.0 - a), 1.0);',
+      '}'
+    ].join('\n');
+    var compProg = null, compLoc = {}, compFbo = null, compTex = null, bgTex = null;
+    var bgCanvas = null, bgReady = false;
+    function makeCompose() {
+      function sh(t, src) {
+        var o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) {
+          console.error('[album3d] compose: ' + gl.getShaderInfoLog(o)); return null;
+        }
+        return o;
+      }
+      var v = sh(gl.VERTEX_SHADER, VS_BLUR), f2 = sh(gl.FRAGMENT_SHADER, FS_COMPOSE);
+      if (!v || !f2) return false;
+      compProg = gl.createProgram();
+      gl.attachShader(compProg, v); gl.attachShader(compProg, f2); gl.linkProgram(compProg);
+      if (!gl.getProgramParameter(compProg, gl.LINK_STATUS)) {
+        console.error('[album3d] compose link: ' + gl.getProgramInfoLog(compProg)); return false;
+      }
+      ['uScene','uBg'].forEach(function (n) { compLoc[n] = gl.getUniformLocation(compProg, n); });
+      bgCanvas = document.querySelector('[data-scene-canvas]');
+      if (bgCanvas) {
+        bgTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, bgTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+      var r = mkBlurRt(compTex, compFbo); compTex = r.t; compFbo = r.f;
+      return true;
+    }
+    // 把动态背景 canvas 上传成纹理（同源 canvas 可以直接 texImage2D）
+    function uploadBg() {
+      if (!bgCanvas || !bgTex || !bgCanvas.width || !bgCanvas.height) return false;
+      gl.bindTexture(gl.TEXTURE_2D, bgTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);   // canvas 是自上而下，纹理要翻转
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bgCanvas);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      bgReady = true;
+      return true;
+    }
+    function composePass() {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, compFbo);
+      gl.viewport(0, 0, W, H);
+      gl.disable(gl.BLEND);
+      gl.useProgram(compProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
+      var axy = gl.getAttribLocation(compProg, 'aXY'), auv = gl.getAttribLocation(compProg, 'aUV');
+      gl.enableVertexAttribArray(axy); gl.vertexAttribPointer(axy, 2, gl.FLOAT, false, 16, 0);
+      gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.uniform1i(compLoc.uScene, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, bgTex);
+      gl.uniform1i(compLoc.uBg, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
     function drawPost() {
       if (!postProg) return;
+      // 1) 动态背景上传 + 合成（玻璃因此能折射背景，而不只是照片）
+      var compOk = false;
+      if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
       if (blurProg && blurFboA && blurFboB && blurTexB) {
         var rad = Math.max(1, GLASS_FROST * dpr);
-        blurPass(fboTex, blurFboA, 1, 0, rad);
+        blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
         blurPass(blurTexA, blurFboB, 0, 1, rad);
         blurPass(blurTexB, blurFboA, 1, 0, rad * 2);
         blurPass(blurTexA, blurFboB, 0, 1, rad * 2);
@@ -610,6 +687,9 @@
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, (blurTexB || fboTex));
       gl.uniform1i(postLoc.uFrostTex, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, compOk ? compTex : fboTex);
+      gl.uniform1i(postLoc.uComp, 2);
       gl.uniform2f(postLoc.uRes, W, H);
       var rpx = GLASS_BALL_R * dpr;
       // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
@@ -1003,7 +1083,7 @@
       cv.style.width = window.innerWidth + 'px';
       cv.style.height = window.innerHeight + 'px';
       if (photos.length) layout();     // W/H 变了，网格适配要重算
-      if (postProg && fbo) { makeFbo(); if (blurProg) makeBlurRt(); }  // 尺寸变了，FBO 要重建
+      if (postProg && fbo) { makeFbo(); if (blurProg) makeBlurRt(); if (compProg) makeCompose(); }  // 尺寸变了，FBO 要重建
     }
 
     function init() {
