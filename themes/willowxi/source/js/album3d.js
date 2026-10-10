@@ -579,6 +579,9 @@
       var focusZoomGoal = focusCamZ / CAM_DIST;
       var wantZoom = 1 + (focusZoomGoal - 1) * focusT;
       camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
+      // 硬夹：任何情况下 camZoom 都不能为 0 / 负数 / NaN（都会让投影爆掉）
+      if (!isFinite(camZoom)) camZoom = 1;
+      camZoom = Math.max(0.45, Math.min(1, camZoom));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
       // 用聚焦补间自己的缓动进度来插值镜头位置 —— 精确落位。
@@ -794,6 +797,13 @@
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
         focusCamZ = z0 + hh0 / FOCUS_FILL;
+        // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
+        //    focusCamZ = z0 + hh0/0.72 可能 <= 0，摄像机直接跑到照片后面，
+        //    于是 camZoom 为负 -> zc = camZ*camZoom - z 为负 -> 投影彻底退化：
+        //    照片被推到画面外（实测 camZoom = -0.162、panY = -0.498、照片低了 420px），
+        //    严重时就是之前那个 GPU 卡死。这里保证摄像机始终在照片前面。
+        if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
+        focusCamZ = Math.max(CAM_DIST * 0.5, Math.min(CAM_DIST, focusCamZ));
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
