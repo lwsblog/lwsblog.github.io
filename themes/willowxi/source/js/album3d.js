@@ -456,7 +456,10 @@
       '  float amt = pow(edge, uG1.w);',
       '  vec2 nrm = nrmSDF(p, b, r);',
       '  float inner = -d;',
-      '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(uG1.y/vec2(uHalfW*2.0,uHalfH*2.0));',
+      // depth 钳制在短边一半以内：否则胶囊两端(法线水平)会把采样推到形状外很远，
+      // 拉进外面的内容 -> 出现一块硬边（用户说的空白块）
+      '  float dpx = min(uG1.y, 0.5 * min(b.x, b.y));',
+      '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(dpx/vec2(uHalfW*2.0,uHalfH*2.0));',
       '  float ck = uG2.x*amt;',
       '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
       '  float cg = texture2D(uFrost, vUV-base).g;',
@@ -726,6 +729,20 @@
       blurPass(blurTexA, wallBlurFbo, 0, 1, r * 1.5);
       wallBlurDone = true;
     }
+    var fallbackTex = null;
+    function ensureFallbackTex() {
+      if (fallbackTex) return fallbackTex;
+      fallbackTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, fallbackTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                    new Uint8Array([0, 0, 0, 255]));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return fallbackTex;
+    }
+
     function composePass() {
       var wallOn = ensureWallTex();
       if (wallOn) { bakeWallBlur(); if (wallBlurTex) wallOn = 2; }
@@ -760,7 +777,11 @@
 
       // 1) 动态背景上传 + 合成：玻璃因此能折射背景，而不只是照片
       var compOk = false;
-      if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
+      if (compProg && compFbo) {
+        uploadBg();                 // 成功就用动态背景，失败也不影响合成（走兜底纹理）
+        composePass();
+        compOk = true;              // 合成图处处不透明，折射/磨砂采样它就不会出现空白
+      }
       var srcTex = compOk ? compTex : fboTex;
 
       // 2) 四趟可分离高斯 -> blurTexB（磨砂纹理；实验页也是折射采它）
