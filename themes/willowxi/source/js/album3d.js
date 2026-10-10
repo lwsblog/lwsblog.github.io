@@ -61,8 +61,15 @@
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
   var GRID_COLS = 4;           // 网格总览的列数
-  var GRID_GAPX = 0.05;        // 格位横向间隙（相对卡片宽）—— 用户反馈间距太大
-  var GRID_GAPY = 0.20;        // 格位纵向间隙（相对卡片高）—— 留一点给编号就够
+  // 用户要求：列表视图每张做大一点，可以挤着排。
+  // 网格是按**宽度**适配的，所以卡片在格位里占多满由这两个间隙决定：
+  // 间隙为负就是相邻重叠（挤着排）。
+  // 用户要求：不重叠；太宽的图**占两格**（跨列）来换取更大的显示面积。
+  var GRID_GAPX = 0.03;        // 横向间隙（正值 = 不重叠）
+  var GRID_GAPY = 0.06;        // 纵向间隙
+  var GRID_WIDE = 1.90;        // 宽高比 >= 这个值的照片占 2 格
+  // 1.95：可见宽度 = camZ*(W/H)*2，取 1.95 基本铺满但不溢出（相纸也不会被裁）。
+  var GRID_FIT = 1.95;         // 适配系数：越大整块网格越大
   var MODE_MS = 1500;          // 两个视图之间的补间总时长（用户指定 1.5 秒）
   // 进列表时按**行**逐行扫描：每行错开 MODE_MS/rows，行内同时到达。
   var ROW_STAGGER = true;
@@ -309,7 +316,18 @@
       // 改为：格距按**卡片中位数**算；网格里所有卡片**统一大小**；
       // 再按可视范围自动算 gScale，让整块网格刚好落进屏幕（这才是总览）。
       var cols = GRID_COLS;
-      var rows = Math.ceil(n / cols);
+      // 先按跨度流式排布：宽图 span=2，占满一行就换行
+      var flowRow = 0, flowCol = 0;
+      for (var fs = 0; fs < n; fs++) {
+        var sp = (photos[fs].ratio >= GRID_WIDE) ? 2 : 1;
+        if (sp > cols) sp = cols;
+        if (flowCol + sp > cols) { flowRow++; flowCol = 0; }
+        photos[fs].gspan = sp;
+        photos[fs].gcol = flowCol;
+        photos[fs].grow = flowRow;
+        flowCol += sp;
+      }
+      var rows = flowRow + 1;
       // 中位数短边（各张的 CARD_H*scale 的中位数）
       var shorts = [];
       for (var z0 = 0; z0 < n; z0++) shorts.push(CARD_H * (photos[z0].scale || 1));
@@ -332,19 +350,29 @@
       var gw = cols * cellW, gh = rows * cellH;
       // 🔴 用户要求列表**纵向**：所以只按宽度适配，让高度溢出，纵向才滚得动。
       // （之前同时限制高度 -> 整块网格挤进一屏 -> 竖滚没有内容可滚。）
-      var gScale = Math.min(1, (halfW * 1.86) / gw);
+      var gScale = Math.min(1, (halfW * GRID_FIT) / gw);
       // 🔴 格距也必须乘 gScale —— 上一版只缩了卡片没缩格子，
       // 结果是小卡片配大间隔，一屏只看得见两列。
       cellW *= gScale;
       cellH *= gScale;
+      var gp = 1 + GRID_GAPX, gpH = 1 + GRID_GAPY;
       for (var m = 0; m < n; m++) {
-        var r0 = Math.floor(m / cols), c0 = m % cols;
-        var inRow = Math.min(cols, n - r0 * cols);
-        photos[m].gx = (c0 - (inRow - 1) / 2) * cellW;
-        photos[m].gy = ((rows - 1) / 2 - r0) * cellH;
-        photos[m].gz = 0;
-        // 统一大小：抵消各张自己的 scale，让网格里所有卡片一样大
-        photos[m].gs = gScale / (photos[m].scale || 1);
+        var phm = photos[m];
+        var spm = phm.gspan || 1;
+        // 格位中心（跨列时居中于所占的格子）
+        var boxCx = (phm.gcol + spm / 2 - cols / 2) * cellW;
+        phm.gx = boxCx;
+        phm.gy = ((rows - 1) / 2 - phm.grow) * cellH;
+        phm.gz = 0;
+        // 该张在网格里的实际半尺寸：在**自己的格位框**内按比例放到最大（不越界 = 不重叠）
+        var boxW = spm * cellW / gp, boxH = cellH / gpH;
+        // 乘 pb：屏幕上看到的是**相纸**（比照片大 1/(1+2*MATTE_BORDER)），
+        // 只按照片尺寸算的话相纸会溢出格子 -> 视觉上就是重叠。
+        var pbG = 1 / (1 + 2 * MATTE_BORDER);
+        var hwG = Math.min(boxW * 0.5, boxH * 0.5 * phm.ratio) * pbG;
+        var hhG = hwG / phm.ratio;
+        phm.ghw = hwG; phm.ghh = hhG;
+        phm.gs = 1;                       // 尺寸改用 ghw/ghh，不再用统一缩放
       }
       gridTopY = ((rows - 1) / 2) * cellH;
       gridBottomY = -((rows - 1) / 2) * cellH;
@@ -429,11 +457,14 @@
         var alpha = easeOutCubic(clamp01(t * 1.6));
         var rot = (p.rot * 0.9 * (1 - e)) * (1 - mt);
 
-        // 卡片世界尺寸：短边固定，长边按比例
-        var shortSide = CARD_H * (rsc * (1 - mt) + (p.gs || 1) * mt);
-        var hw, hh;
-        if (p.ratio >= 1) { hh = shortSide * 0.5; hw = hh * p.ratio; }
-        else { hw = shortSide * 0.5; hh = hw / p.ratio; }
+        // 卡片世界尺寸：行视图用"短边固定 + 按比例"，网格里用该张自己的格位框尺寸
+        var shortSide = CARD_H * rsc;
+        var rowHW, rowHH;
+        if (p.ratio >= 1) { rowHH = shortSide * 0.5; rowHW = rowHH * p.ratio; }
+        else { rowHW = shortSide * 0.5; rowHH = rowHW / p.ratio; }
+        var gHW = p.ghw || rowHW, gHH = p.ghh || rowHH;
+        var hw = rowHW * (1 - mt) + gHW * mt;
+        var hh = rowHH * (1 - mt) + gHH * mt;
 
         // 景深：离对焦面越远越糊
         var blur = Math.min(1, Math.abs(z - focusZ) * DOF);
@@ -855,11 +886,12 @@
     }
     // 每张照片当前的世界尺寸（与绘制里的算法一致）
     function worldSize(p, mt) {
-      var shortSide = CARD_H * ((p.scale || 1) * (1 - mt) + (p.gs || 1) * mt);
-      var hw, hh;
-      if (p.ratio >= 1) { hh = shortSide * 0.5; hw = hh * p.ratio; }
-      else { hw = shortSide * 0.5; hh = hw / p.ratio; }
-      return { hw: hw, hh: hh };
+      var shortSide = CARD_H * (p.scale || 1);
+      var rowHW, rowHH;
+      if (p.ratio >= 1) { rowHH = shortSide * 0.5; rowHW = rowHH * p.ratio; }
+      else { rowHW = shortSide * 0.5; rowHH = rowHW / p.ratio; }
+      var gHW = p.ghw || rowHW, gHH = p.ghh || rowHH;
+      return { hw: rowHW * (1 - mt) + gHW * mt, hh: rowHH * (1 - mt) + gHH * mt };
     }
     // 拾取：命中则返回最近的（z 最大）那张的下标
     function pickPhoto(nx, ny) {
@@ -1168,7 +1200,7 @@
     var TUNE_KEY = 'album3d-tune-v1';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
@@ -1177,7 +1209,8 @@
         NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP, NAV_SIZE: NAV_SIZE,
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
         GLASS_DEPTH: GLASS_DEPTH, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
-        GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT })[k];
+        GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
+        GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
     }
     function setVar(k, v) {
       if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
@@ -1193,6 +1226,8 @@
       else if (k === 'GLASS_DEPTH') GLASS_DEPTH = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
       else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
+      else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
+      else if (k === 'GRID_GAPY') GRID_GAPY = v; else if (k === 'GRID_FIT') GRID_FIT = v;
     }
     function saveTune() {
       try {
@@ -1277,8 +1312,9 @@
           setVar(key, parseFloat(r.value));
           val.textContent = String(getVar(key));
           dirty = true;
-          if (key === 'GAP' || key === 'JITTER' || key === 'Z_SPREAD' ||
-              key === 'CARD_H' || key === 'CAM_DIST') layout();
+          if (key === 'GAP' || key === 'JITTER' || key === 'Z_SPREAD' || key === 'CARD_H' ||
+              key === 'CAM_DIST' || key === 'GRID_COLS' || key === 'GRID_GAPX' ||
+              key === 'GRID_GAPY' || key === 'GRID_FIT') layout();
           applyPositions();
           refreshGlass();
           saveTune();          // 存起来，刷新不丢
@@ -1305,6 +1341,19 @@
         row.addEventListener('input', function () { refreshGlass(); });
       });
 
+      var secL = document.createElement('div');
+      secL.textContent = '列表视图';
+      secL.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
+      panel.appendChild(secL);
+      [['列数 GRID_COLS','GRID_COLS',2,8,1],
+       ['横向间隙(负=重叠)','GRID_GAPX',-0.5,0.6,0.01],
+       ['纵向间隙','GRID_GAPY',-0.2,0.8,0.01],
+       ['适配系数 GRID_FIT','GRID_FIT',1.0,3.5,0.02]
+      ].forEach(function (r) {
+        var row = addRow(r[0], r[1], r[2], r[3], r[4]);
+        row.addEventListener('input', function () { layout(); });
+      });
+
       var sec2 = document.createElement('div');
       sec2.textContent = '按钮位置';
       sec2.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
@@ -1324,7 +1373,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
