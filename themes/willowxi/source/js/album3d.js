@@ -788,13 +788,6 @@
                      rct.height * dpr * 0.5]);
       });
 
-      if (!window.__shLog) {
-        window.__shLog = 1;
-        console.log('[album3d] SHAPES n=' + shapes.length + ' mouseIn=' + mouseIn +
-          ' glassOn=' + glassOn + ' postProg=' + !!postProg + ' fbo=' + !!fbo +
-          ' compOk=' + compOk + ' first=' + JSON.stringify(shapes[0] ? shapes[0].map(Math.round) : null) +
-          ' W=' + W + ' H=' + H + ' dpr=' + dpr);
-      }
 
       // 4) 画到屏幕
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
