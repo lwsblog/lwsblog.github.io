@@ -1154,18 +1154,6 @@
         navPrev.style.pointerEvents = navOp > 0.5 ? 'auto' : 'none';
         navNext.style.pointerEvents = navOp > 0.5 ? 'auto' : 'none';
       }
-      // 调试读数：聚焦时把关键量显示在底部按钮上，用户截图即可定位问题
-      if (toggleEl) {
-        if (focusTo === 1 || focusT > 0.001) {
-          var _fp = photos[focusIdx];
-          toggleEl.textContent = 'pan ' + panY.toFixed(2) + ' / tgt ' + focusPan.toFixed(2) +
-            ' / nav ' + (navHLast | 0) + ' / h ' + window.innerHeight +
-            ' / z ' + camZoom.toFixed(2) + ' / y ' + (_fp ? _fp.y.toFixed(2) : '-');
-        } else {
-          toggleEl.textContent = (mode ? '浏览' : '总览') + ' · ' + BUILD;
-        }
-      }
-
       var switching = (modeFrom !== mode);
       if (switching) {
         var pr = clamp01((now - modeAt) / MODE_MS);
@@ -1452,7 +1440,7 @@
     function buildToggle() {
       var b = document.createElement('button');
       b.setAttribute('data-album-toggle', '');
-      b.textContent = '总览 · ' + BUILD;
+      b.textContent = '总览';
       // 样式交给 CSS 类 .album-glass / .album-btn-toggle（液态玻璃）
       b.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -1476,7 +1464,7 @@
           viewTo.pan = 0;                 // 纵向回中
         }
         scrollV = 0; panV = 0;
-        b.textContent = (mode ? '浏览' : '总览') + ' · ' + BUILD;
+        b.textContent = mode ? '浏览' : '总览';
       });
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
