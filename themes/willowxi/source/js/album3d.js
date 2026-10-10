@@ -715,6 +715,12 @@
     }
     function composePass() {
       var wallOn = ensureWallTex();
+      if (!window.__wallLogged) {
+        window.__wallLogged = 1;
+        console.log('[album3d] WALL src=' + (wallTriedSrc || '(none)') + ' img=' + !!wallImg +
+          ' tex=' + !!wallTex + ' blurTex=' + !!wallBlurTex + ' done=' + wallBlurDone + ' on=' + wallOn +
+          ' amt=' + GLASS_FROST);
+      }
       if (wallOn) { bakeWallBlur(); if (wallBlurTex) wallOn = 2; }
       gl.bindFramebuffer(gl.FRAMEBUFFER, compFbo);
       gl.viewport(0, 0, W, H);
@@ -1252,7 +1258,7 @@
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
       // 玻璃光标（GL 后处理）：建程序与 FBO，并跟踪鼠标
-      if (makePost()) { makeFbo(); if (makeBlur()) makeBlurRt(); } else glassOn = false;
+      if (makePost()) { makeFbo(); if (makeBlur()) makeBlurRt(); makeCompose(); } else glassOn = false;
       window.addEventListener('mousemove', function (e) {
         mouseX = e.clientX; mouseY = e.clientY;
         if (!mouseIn) { mouseIn = true; dirty = true; }
