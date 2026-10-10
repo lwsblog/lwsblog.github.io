@@ -715,7 +715,6 @@
         panY = focusFromPan + (focusPan - focusFromPan) * fe2;
         scrollTarget = scroll; panTarget = panY;
       }
-      tickGlassCursor(dt);
       if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
       // 灯箱左右圆形按钮：聚焦时淡入，退出时淡出
       if (navPrev && navNext) {
@@ -862,7 +861,6 @@
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
-      buildGlassCursor();   // 跟随光标的玻璃球（从 glass-cursor.html 取过来）
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
@@ -1231,41 +1229,9 @@
       applyGlassRefract(toggleEl, 999);
       applyGlassRefract(navPrev, Math.round(NAV_SIZE / 2));
       applyGlassRefract(navNext, Math.round(NAV_SIZE / 2));
-      if (glassCursor) applyGlassRefract(glassCursor, 47);
     }
 
 
-    // ---------- 跟随光标的液态玻璃球（从 glass-cursor.html 那套取过来，放进相册页）----------
-    var glassCursor = null, gcx = 0, gcy = 0, gtx = 0, gty = 0;
-    function buildGlassCursor() {
-      glassCursor = document.createElement('div');
-      glassCursor.setAttribute('data-album-glasscursor', '');
-      glassCursor.style.cssText =
-        'position:fixed;left:0;top:0;width:94px;height:94px;border-radius:50%;' +
-        'pointer-events:none;z-index:50;will-change:left,top;' +
-        'transform:translate(-50%,-50%);opacity:0;transition:opacity .3s ease;';
-      host.appendChild(glassCursor);
-      gcx = gtx = window.innerWidth / 2;
-      gcy = gty = window.innerHeight / 2;
-      window.addEventListener('mousemove', function (e) { gtx = e.clientX; gty = e.clientY; });
-      window.addEventListener('mouseleave', function () { if (glassCursor) glassCursor.style.opacity = '0'; });
-      window.addEventListener('mouseenter', function () { if (glassCursor) glassCursor.style.opacity = '1'; });
-      // 首次移动后出现
-      var shown = false;
-      window.addEventListener('mousemove', function () {
-        if (!shown && glassCursor) { shown = true; glassCursor.style.opacity = '1'; }
-      });
-      applyGlassRefract(glassCursor, 47);
-    }
-    function tickGlassCursor(dt) {
-      if (!glassCursor) return;
-      // 跟随缓动（参考页 GLASS 的"跟随缓动"0.18）
-      var k = 1 - Math.exp(-dt / 90);
-      gcx += (gtx - gcx) * k;
-      gcy += (gty - gcy) * k;
-      glassCursor.style.left = gcx.toFixed(1) + 'px';
-      glassCursor.style.top = gcy.toFixed(1) + 'px';
-    }
 
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
