@@ -1480,17 +1480,17 @@
     // 球直径 94、feather 12（=0.13）、depth 45（=0.48）、curve 1.2、chroma 0.12、glint 0.64
     // 关键：**窄带 + 大位移** —— 只有边缘一圈把影像吸进去，这才是玻璃边。
     var GLASS_DEPTH_PCT = 0.48;  // 折射位移 = 短边 * 此值
-    var GLASS_FEATHER = 0.13;    // 折射带宽度：只有边缘 13% 的一圈
-    var GLASS_CURVE = 1.2;       // 参考值
-    var GLASS_CHROMA = 0.12;     // 参考值
-    var GLASS_FROST = 2;         // 磨砂模糊 px（越小边缘弯折越清楚）
-    var GLASS_SAT = 180;         // 聚光 saturate%
+    var GLASS_FEATHER = 0.24;    // 折射带宽度：只有边缘 13% 的一圈
+    var GLASS_CURVE = 1.65;       // 参考值
+    var GLASS_CHROMA = 0;     // 参考值
+    var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
+    var GLASS_SAT = 120;         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
-    var GLASS_RIM_W = 26;        // 环高光宽度 px
-    var GLASS_RIM_A = 0.85;      // 环高光强度
-    var GLASS_GLINT = 0.64;      // 参考值
-    var GLASS_TINT = 0.05;       // 玻璃底色浓度
+    var GLASS_RIM_W = 5;        // 环高光宽度 px
+    var GLASS_RIM_A = 0.24;      // 环高光强度
+    var GLASS_GLINT = 0.18;      // 参考值
+    var GLASS_TINT = 0;       // 玻璃底色浓度
     var glassFilterSeq = 0;
 
     // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
@@ -1634,7 +1634,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v3';
+    var TUNE_KEY = 'album3d-tune-v4';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
