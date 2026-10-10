@@ -64,8 +64,10 @@
   // 飞入必须在这个时长内完成：最后一张的 startAt+dur ≈ 21*112*1.4 + 1700*1.4 ≈ 5670ms。
   // 删除阶段约等于 openText.length * DEL_MS = 16*70 = 1120ms。
   // 飞入必须在这段内铺完：最后一张约 21*20*1.4 + 380*1.4 = 1120ms，正好收尾。
-  var FLY_MS = 380;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
-  var FLY_STAGGER = 20;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
+  // 飞入窗口 = HOLD_MS*0.5 + 字符数*DEL_MS = 1500 + 1120 = 2620ms。
+  // 最后一张约 21*46*1.4 + 900*1.4 = 2612ms，正好在文字消失时收尾。
+  var FLY_MS = 900;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
+  var FLY_STAGGER = 46;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -559,6 +561,9 @@
         setTitle(openText.slice(0, n));
         if (n >= openText.length) { openState = 'hold'; openAt = now; }   // 不在这里起飞：停留阶段不能有照片在飞
       } else if (openState === 'hold') {
+        // 停留过半就起飞。打字阶段仍然不飞；这样飞入有 1.5s（停留后半）
+        // 加 1.12s（删除）= 2.6s 可用，不必再压成 0.8 秒那种一闪而过。
+        if (now - openAt >= HOLD_MS * 0.5) startFly();
         if (now - openAt >= HOLD_MS) beginDelete();
       } else if (openState === 'deleting') {
         var k = openText.length - Math.min(openText.length, Math.floor((now - openAt) / DEL_MS));
