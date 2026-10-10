@@ -146,6 +146,7 @@
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
+  var focusFromScroll = 0, focusFromPan = 0;   // 聚焦补间的起始镜头位置
   var preScroll = 0, prePan = 0;      // 进入聚焦前的镜头位置，退出时回到它
   var INERTIA_TAU = 480;           // 惯性衰减时间常数(ms)
   var WHEEL_IMPULSE = 0.13;        // 每格滚轮给多少速度（0.55 时 6 格就冲到底，太大）
@@ -568,9 +569,15 @@
       camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
-      if (focusT > 0.001) {
-        scroll += (focusScroll - scroll) * (1 - Math.exp(-dt / 140));
-        panY += (focusPan - panY) * (1 - Math.exp(-dt / 140));
+      // 用聚焦补间自己的缓动进度来插值镜头位置 —— 精确落位。
+      // 原来是指数追（scroll += (目标-当前)*k），永远差一点点，
+      // 实测 panY 总比 focusPan 差 0.09~0.14，看着就是没对准。
+      // 退出时（focusTo=0）用同一条式子从原位走回去。
+      if (focusT > 0.001 || focusT !== focusTo) {
+        var fpr2 = clamp01((now - focusAt) / FOCUS_MS);
+        var fe2 = fpr2 < 0.5 ? 4 * fpr2 * fpr2 * fpr2 : 1 - Math.pow(-2 * fpr2 + 2, 3) / 2;
+        scroll = focusFromScroll + (focusScroll - focusFromScroll) * fe2;
+        panY = focusFromPan + (focusPan - focusFromPan) * fe2;
         scrollTarget = scroll; panTarget = panY;
       }
       if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
@@ -735,12 +742,22 @@
       focusFrom = focusT;
       focusTo = (i < 0) ? 0 : 1;
       focusAt = performance.now();
+      focusFromScroll = scroll;      // 记录起点，供补间按进度精确插值
+      focusFromPan = panY;
       if (i < 0) { focusScroll = preScroll; focusPan = prePan; }   // 退出：目标回到原位
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
         preScroll = scroll; prePan = panY;             // 先记住原位
         focusScroll = ph.x * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
-        focusPan = ph.y * (1 - mt) + ph.gy * mt;
+        // 上下定位：画布铺满整个视口，但页面上方有一条导航栏，
+        // 所以要把照片对到**导航栏以下的可见区域**正中，而不是画布正中。
+        var navEl = document.querySelector('.site-nav, .navbar, .top-nav, header, nav');
+        var navH = navEl ? navEl.getBoundingClientRect().height : 0;
+        var dyNdc = -(navH / Math.max(1, window.innerHeight));   // 负 = 画面中心偏下
+        // z0 必须在这里先算出来：原来我在 var z0 之前用了它，
+        // 得到 camZ - undefined = NaN，panY 整条变成 NaN（画面直接乱掉）。
+        var z0n = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+        focusPan = ph.y * (1 - mt) + ph.gy * mt - dyNdc * (camZ - z0n) / FOCAL;
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
@@ -821,6 +838,10 @@
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
                         min: scrollMin, max: scrollMax, camZ: camZ, focusZ: focusZ,
+                        // 聚焦相关的量：用于核对上下定位（panY 是否落到照片的 y 上）
+                        panY: panY, focusPan: focusPan, focusScroll: focusScroll,
+                        focusIdx: focusIdx, focusT: focusT, focusTo: focusTo,
+                        camZoom: camZoom, mode: mode, modeT: modeT,
                         loaded: photos.filter(function (p) { return p.ready; }).length };
              } };
   }
