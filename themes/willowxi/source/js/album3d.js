@@ -1076,12 +1076,14 @@
     // DOM 上的做法：把上面算出的 (法线*强度) 编码成一张位移图（R/G 通道，128 为 0），
     // 用 SVG feImage + feDisplacementMap 挂到 backdrop-filter 上。
     // 实测：Edge/Chromium 支持 backdrop-filter: url(#svgFilter)，位移真实生效。
-    var GLASS_DEPTH = 26;      // 折射位移（feDisplacementMap 的 scale）
-    var GLASS_FEATHER = 0.34;  // 边缘羽化：只有靠边这一圈做折射
-    var GLASS_CURVE = 1.6;     // 曲线指数：越大越集中在最外缘
-    var GLASS_CHROMA = 0.0;    // 色散强度（0 = 关，需要三通道合成，开销更高）
-    var GLASS_FROST = 6;       // 磨砂模糊 px
-    var GLASS_SAT = 180;       // 聚光 saturate%
+    // 位移量用**短边的百分比**：绝对 px 在大按钮上几乎看不见、在小按钮上又会
+    // 把整块内容推糊（用户：只有位移，看不出边缘折射）。
+    var GLASS_DEPTH_PCT = 0.20;  // 折射位移 = 短边 * 此值
+    var GLASS_FEATHER = 0.55;    // 折射带宽度：中心 45% 平坦、外圈 55% 弯折（镜片感）
+    var GLASS_CURVE = 1.0;       // 越大越集中在最外缘（1.0 = 线性过渡）
+    var GLASS_CHROMA = 1.5;      // 色散强度（0 = 关）
+    var GLASS_FROST = 2;         // 磨砂模糊 px（越小边缘弯折越清楚）
+    var GLASS_SAT = 180;         // 聚光 saturate%
     var glassFilterSeq = 0;
 
     // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
@@ -1159,7 +1161,8 @@
       f.appendChild(im);
       if (GLASS_CHROMA > 0.01) {
         // 色散：三通道用不同 scale 位移再合成（开销更高，默认关）
-        var scales = [GLASS_DEPTH * (1 + GLASS_CHROMA * 0.06), GLASS_DEPTH, GLASS_DEPTH * (1 - GLASS_CHROMA * 0.06)];
+        var dpx = GLASS_DEPTH_PCT * Math.min(w, h);
+        var scales = [dpx * (1 + GLASS_CHROMA * 0.06), dpx, dpx * (1 - GLASS_CHROMA * 0.06)];
         var chans = ['R', 'G', 'B'];
         var mats = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
                     '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
@@ -1187,7 +1190,7 @@
       } else {
         var dm = document.createElementNS(ns, 'feDisplacementMap');
         dm.setAttribute('in', 'SourceGraphic'); dm.setAttribute('in2', 'disp');
-        dm.setAttribute('scale', GLASS_DEPTH);
+        dm.setAttribute('scale', (GLASS_DEPTH_PCT * Math.min(w, h)).toFixed(1));
         dm.setAttribute('xChannelSelector', 'R');
         dm.setAttribute('yChannelSelector', 'G');
         dm.setAttribute('result', 'd0');
@@ -1211,7 +1214,7 @@
     var TUNE_KEY = 'album3d-tune-v2';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
@@ -1219,7 +1222,7 @@
         FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE, INERTIA_TAU: INERTIA_TAU,
         NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP, NAV_SIZE: NAV_SIZE,
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
-        GLASS_DEPTH: GLASS_DEPTH, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
+        GLASS_DEPTH_PCT: GLASS_DEPTH_PCT, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
         GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
         GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
     }
@@ -1234,7 +1237,7 @@
       else if (k === 'INERTIA_TAU') INERTIA_TAU = v; else if (k === 'NAV_INSET') NAV_INSET = v;
       else if (k === 'NAV_TOP') NAV_TOP = v; else if (k === 'NAV_SIZE') NAV_SIZE = v;
       else if (k === 'TOGGLE_BOTTOM') TOGGLE_BOTTOM = v; else if (k === 'TOGGLE_LEFT') TOGGLE_LEFT = v;
-      else if (k === 'GLASS_DEPTH') GLASS_DEPTH = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
+      else if (k === 'GLASS_DEPTH_PCT') GLASS_DEPTH_PCT = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
       else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
@@ -1341,7 +1344,7 @@
       secG.textContent = '玻璃折射';
       secG.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
       panel.appendChild(secG);
-      [['折射位移 px(scale)','GLASS_DEPTH',0,120,1],
+      [['折射位移 %(短边)','GLASS_DEPTH_PCT',0,0.60,0.01],
        ['折射带宽 feather','GLASS_FEATHER',0.05,1.00,0.01],
        ['带宽集中度 curve(小=带更宽)','GLASS_CURVE',0.20,5.0,0.05],
        ['色散 chroma','GLASS_CHROMA',0,10,0.2],
@@ -1384,7 +1387,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
