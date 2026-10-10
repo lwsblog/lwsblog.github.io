@@ -655,6 +655,11 @@
     }
     // 把动态背景 canvas 上传成纹理（同源 canvas 可以直接 texImage2D）
     function uploadBg() {
+      if (!window.__ubgLogged) {
+        window.__ubgLogged = 1;
+        console.log('[album3d] UBG canvas=' + !!bgCanvas + ' w=' + (bgCanvas ? bgCanvas.width : -1) +
+          ' h=' + (bgCanvas ? bgCanvas.height : -1) + ' tex=' + !!bgTex);
+      }
       if (!bgCanvas || !bgTex || !bgCanvas.width || !bgCanvas.height) return false;
       gl.bindTexture(gl.TEXTURE_2D, bgTex);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);   // canvas 是自上而下，纹理要翻转
