@@ -752,7 +752,11 @@
         // 上下定位：画布铺满整个视口，但页面上方有一条导航栏，
         // 所以要把照片对到**导航栏以下的可见区域**正中，而不是画布正中。
         var navEl = document.querySelector('.site-nav, .navbar, .top-nav, header, nav');
+        // 🔴 必须夹住：querySelector 有可能匹配到一个几乎满屏高的 header/nav 容器
+        // （实测 navH 取到 ~966，等于整个视口），补偿量就变成 400px，
+        // 照片被推到画面下方、底部被裁掉。顶部栏再高也不会超过视口的一小部分。
         var navH = navEl ? navEl.getBoundingClientRect().height : 0;
+        navH = Math.max(0, Math.min(navH, window.innerHeight * 0.14));
         var dyNdc = -(navH / Math.max(1, window.innerHeight));   // 负 = 画面中心偏下
         // z0 必须在这里先算出来：原来我在 var z0 之前用了它，
         // 得到 camZ - undefined = NaN，panY 整条变成 NaN（画面直接乱掉）。
