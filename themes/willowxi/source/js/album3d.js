@@ -512,6 +512,9 @@
 
     // ---------- 滚动：横向 + 到端回弹 ----------
     function onWheel(e) {
+      // 在调参面板里滚轮时，是滚面板自己的列表，不要拿去滚相册，
+      // 更不要当成跳过开屏（用户说老是点到下面的东西）。
+      if (e.target && e.target.closest && e.target.closest('[data-album-tuner]')) return;
       if (!ready && (openState === 'typing' || openState === 'hold')) { beginDelete(); return; }
       if (!ready) return;
       e.preventDefault();
@@ -782,7 +785,11 @@
       window.addEventListener('resize', resize);
       window.addEventListener('wheel', onWheel, { passive: false });
       document.addEventListener('mousedown', function (e) {
-        if (e.target && e.target.closest && e.target.closest('[data-album-toggle]')) return;
+        // 任何 UI 内部的点击都不要往下传。
+        // 原来只挡了底部按钮，于是拖调参面板的滑块会同时触发
+        // 跳过开屏 / 拾取聚焦 —— 用户说就是点到了下面的东西。
+        if (e.target && e.target.closest &&
+            e.target.closest('[data-album-tuner], [data-album-toggle], [data-album-nav]')) return;
         if (openState === 'typing' || openState === 'hold') { beginDelete(); return; }
         if (!ready) return;
         if (modeFrom !== mode) return;                 // 视图补间中不接受聚焦
