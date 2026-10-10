@@ -810,6 +810,7 @@
       buildOpening();
       buildToggle();
       if (/[?&]tune=1/.test(location.search)) buildTuner();
+      refreshGlass();   // 初始装上折射
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
@@ -1001,18 +1002,158 @@
     }
 
 
+
+    // ---------- 液态玻璃：DOM 版真实折射 ----------
+    // 老 GL 版（dome3d.js 的 FS_POST）的折射算法照搬过来：
+    //   在圆角矩形上求 SDF，取外法线，edge = clamp((d-(1-feather))/feather)，
+    //   位移量 = pow(edge, curve) * 强度，方向 = 外法线。
+    // DOM 上的做法：把上面算出的 (法线*强度) 编码成一张位移图（R/G 通道，128 为 0），
+    // 用 SVG feImage + feDisplacementMap 挂到 backdrop-filter 上。
+    // 实测：Edge/Chromium 支持 backdrop-filter: url(#svgFilter)，位移真实生效。
+    var GLASS_DEPTH = 26;      // 折射位移（feDisplacementMap 的 scale）
+    var GLASS_FEATHER = 0.34;  // 边缘羽化：只有靠边这一圈做折射
+    var GLASS_CURVE = 1.6;     // 曲线指数：越大越集中在最外缘
+    var GLASS_CHROMA = 0.0;    // 色散强度（0 = 关，需要三通道合成，开销更高）
+    var GLASS_FROST = 6;       // 磨砂模糊 px
+    var GLASS_SAT = 180;       // 聚光 saturate%
+    var glassFilterSeq = 0;
+
+    // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
+    function makeDispMap(w, h, radius, feather, curve) {
+      var N = 128;
+      var cv = document.createElement('canvas');
+      cv.width = N; cv.height = N;
+      var g = cv.getContext('2d');
+      var img = g.createImageData(N, N);
+      var hw = w / 2, hh = h / 2;
+      var r = Math.min(radius, Math.min(hw, hh));
+      for (var y = 0; y < N; y++) {
+        for (var x = 0; x < N; x++) {
+          // 像素坐标 -> 元素坐标（单位：像素），再归一化到 [-1,1]
+          var px = (x + 0.5) / N * w - hw;
+          var py = (y + 0.5) / N * h - hh;
+          // 圆角矩形 SDF（与老着色器一致）
+          var qx = Math.abs(px) - hw + r, qy = Math.abs(py) - hh + r;
+          var outside = Math.sqrt(Math.max(qx, 0) * Math.max(qx, 0) + Math.max(qy, 0) * Math.max(qy, 0));
+          var d = Math.min(Math.max(qx, qy), 0) + outside - r;   // <=0 在内部
+          var i = (y * N + x) * 4;
+          var amt = 0, nx = 0, ny = 0;
+          if (d <= 0) {
+            var inner = -d;
+            var band = feather * Math.min(hw, hh);
+            var edge = Math.max(0, 1 - inner / Math.max(1e-3, band));
+            amt = Math.pow(edge, curve);
+            // SDF 梯度 = 外法线
+            var e = 1.0;
+            var dx = (sdfAt(px + e, py, hw, hh, r) - sdfAt(px - e, py, hw, hh, r));
+            var dy = (sdfAt(px, py + e, hw, hh, r) - sdfAt(px, py - e, hw, hh, r));
+            var L = Math.sqrt(dx * dx + dy * dy);
+            if (L > 1e-6) { nx = dx / L; ny = dy / L; }
+          }
+          img.data[i] = Math.round(128 + nx * amt * 127);
+          img.data[i + 1] = Math.round(128 + ny * amt * 127);
+          img.data[i + 2] = 128; img.data[i + 3] = 255;
+        }
+      }
+      g.putImageData(img, 0, 0);
+      return cv.toDataURL('image/png');
+    }
+    function sdfAt(px, py, hw, hh, r) {
+      var qx = Math.abs(px) - hw + r, qy = Math.abs(py) - hh + r;
+      var out = Math.sqrt(Math.max(qx, 0) * Math.max(qx, 0) + Math.max(qy, 0) * Math.max(qy, 0));
+      return Math.min(Math.max(qx, qy), 0) + out - r;
+    }
+
+    var glassSvg = null;
+    // 给一个元素装上折射：按它的实际尺寸与圆角生成位移图
+    function applyGlassRefract(el, radius) {
+      if (!el) return;
+      var w = Math.max(8, Math.round(el.offsetWidth || 56));
+      var h = Math.max(8, Math.round(el.offsetHeight || 56));
+      if (!glassSvg) {
+        glassSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        glassSvg.setAttribute('data-album-glass', '');
+        glassSvg.style.cssText = 'position:absolute;width:0;height:0;pointer-events:none';
+        host.appendChild(glassSvg);
+      }
+      var id = 'albumGlassF' + (++glassFilterSeq);
+      var url = makeDispMap(w, h, radius, GLASS_FEATHER, GLASS_CURVE);
+      var ns = 'http://www.w3.org/2000/svg';
+      var f = document.createElementNS(ns, 'filter');
+      f.setAttribute('id', id);
+      f.setAttribute('x', '0%'); f.setAttribute('y', '0%');
+      f.setAttribute('width', '100%'); f.setAttribute('height', '100%');
+      f.setAttribute('color-interpolation-filters', 'sRGB');
+      var im = document.createElementNS(ns, 'feImage');
+      im.setAttribute('href', url);
+      im.setAttribute('x', '0'); im.setAttribute('y', '0');
+      im.setAttribute('width', '100%'); im.setAttribute('height', '100%');
+      im.setAttribute('preserveAspectRatio', 'none');
+      im.setAttribute('result', 'disp');
+      f.appendChild(im);
+      if (GLASS_CHROMA > 0.01) {
+        // 色散：三通道用不同 scale 位移再合成（开销更高，默认关）
+        var scales = [GLASS_DEPTH * (1 + GLASS_CHROMA * 0.06), GLASS_DEPTH, GLASS_DEPTH * (1 - GLASS_CHROMA * 0.06)];
+        var chans = ['R', 'G', 'B'];
+        var mats = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
+                    '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
+                    '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
+        var prev = null;
+        for (var ci = 0; ci < 3; ci++) {
+          var d = document.createElementNS(ns, 'feDisplacementMap');
+          d.setAttribute('in', 'SourceGraphic'); d.setAttribute('in2', 'disp');
+          d.setAttribute('scale', scales[ci]);
+          d.setAttribute('xChannelSelector', 'R'); d.setAttribute('yChannelSelector', 'G');
+          d.setAttribute('result', 'd' + ci);
+          f.appendChild(d);
+          var m = document.createElementNS(ns, 'feColorMatrix');
+          m.setAttribute('in', 'd' + ci); m.setAttribute('type', 'matrix');
+          m.setAttribute('values', mats[ci]); m.setAttribute('result', 'c' + ci);
+          f.appendChild(m);
+          if (prev === null) { prev = 'c' + ci; }
+          else {
+            var bl = document.createElementNS(ns, 'feBlend');
+            bl.setAttribute('in', prev); bl.setAttribute('in2', 'c' + ci);
+            bl.setAttribute('mode', 'screen'); bl.setAttribute('result', 'b' + ci);
+            f.appendChild(bl); prev = 'b' + ci;
+          }
+        }
+      } else {
+        var dm = document.createElementNS(ns, 'feDisplacementMap');
+        dm.setAttribute('in', 'SourceGraphic'); dm.setAttribute('in2', 'disp');
+        dm.setAttribute('scale', GLASS_DEPTH);
+        dm.setAttribute('xChannelSelector', 'R');
+        dm.setAttribute('yChannelSelector', 'G');
+        dm.setAttribute('result', 'd0');
+        f.appendChild(dm);
+      }
+      glassSvg.appendChild(f);
+      var bf = 'url(#' + id + ') blur(' + GLASS_FROST + 'px) saturate(' + GLASS_SAT + '%)';
+      el.style.backdropFilter = bf;
+      el.style.webkitBackdropFilter = bf;
+      return id;
+    }
+    // 参数变了就重装（位移图是按尺寸生成的，必须重算）
+    function refreshGlass() {
+      applyGlassRefract(toggleEl, 999);
+      applyGlassRefract(navPrev, Math.round(NAV_SIZE / 2));
+      applyGlassRefract(navNext, Math.round(NAV_SIZE / 2));
+    }
+
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     var TUNE_KEY = 'album3d-tune-v1';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
         CARD_H: CARD_H, CAM_DIST: CAM_DIST, FOCUS_FILL: FOCUS_FILL, DIM_MAX: DIM_MAX,
         FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE, INERTIA_TAU: INERTIA_TAU,
         NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP, NAV_SIZE: NAV_SIZE,
-        TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT })[k];
+        TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
+        GLASS_DEPTH: GLASS_DEPTH, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
+        GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT })[k];
     }
     function setVar(k, v) {
       if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
@@ -1025,6 +1166,9 @@
       else if (k === 'INERTIA_TAU') INERTIA_TAU = v; else if (k === 'NAV_INSET') NAV_INSET = v;
       else if (k === 'NAV_TOP') NAV_TOP = v; else if (k === 'NAV_SIZE') NAV_SIZE = v;
       else if (k === 'TOGGLE_BOTTOM') TOGGLE_BOTTOM = v; else if (k === 'TOGGLE_LEFT') TOGGLE_LEFT = v;
+      else if (k === 'GLASS_DEPTH') GLASS_DEPTH = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
+      else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
+      else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
     }
     function saveTune() {
       try {
@@ -1102,6 +1246,7 @@
           if (key === 'GAP' || key === 'JITTER' || key === 'Z_SPREAD' ||
               key === 'CARD_H' || key === 'CAM_DIST') layout();
           applyPositions();
+          refreshGlass();
           saveTune();          // 存起来，刷新不丢
           out.textContent = dump();
         });
@@ -1111,6 +1256,21 @@
         return r;
       }
       // 按钮位置（也做成滑块）
+      var secG = document.createElement('div');
+      secG.textContent = '玻璃折射';
+      secG.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
+      panel.appendChild(secG);
+      [['折射位移 px(scale)','GLASS_DEPTH',0,120,1],
+       ['边缘羽化 feather','GLASS_FEATHER',0.05,0.95,0.01],
+       ['曲线 curve','GLASS_CURVE',0.4,5,0.1],
+       ['色散 chroma','GLASS_CHROMA',0,10,0.2],
+       ['磨砂 blur px','GLASS_FROST',0,24,0.5],
+       ['聚光 saturate %','GLASS_SAT',100,300,5]
+      ].forEach(function (r) {
+        var row = addRow(r[0], r[1], r[2], r[3], r[4]);
+        row.addEventListener('input', function () { refreshGlass(); });
+      });
+
       var sec2 = document.createElement('div');
       sec2.textContent = '按钮位置';
       sec2.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
@@ -1130,7 +1290,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
