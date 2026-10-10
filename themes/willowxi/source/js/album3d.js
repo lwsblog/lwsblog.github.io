@@ -151,7 +151,7 @@
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
-  var focusFromScroll = 0, focusFromPan = 0;
+  var focusFromScroll = 0, focusFromPan = 0, focusFromZoom = 1;
   var navHLast = 0;   // 聚焦补间的起始镜头位置
   var preScroll = 0, prePan = 0;      // 进入聚焦前的镜头位置，退出时回到它
   var INERTIA_TAU = 480;           // 惯性衰减时间常数(ms)
@@ -394,6 +394,11 @@
 
         gl.uniform1f(loc.uScroll, scroll);
         gl.uniform1f(loc.uCamZoom, camZoom);
+        // 🔴🔴 uPanY 必须在这里上传！
+        // 原来它只出现在下面那个 if (SHOW_NUM && ...) 编号块里，
+        // 而 SHOW_NUM=false -> 那一行从不执行 -> 着色器里 uPanY 恒为 0
+        // -> **摄像机在 GPU 上从来没有上下动过**（JS 里 panY 变化是真的，但传不到显卡）。
+        gl.uniform1f(loc.uPanY, panY);
         // 相纸
         // 变暗系数：被聚焦那张为 0（保持原亮度），其余按聚焦进度变暗。
         // 只是在片元着色器里乘一下，不增加任何几何。
@@ -593,13 +598,18 @@
       if (focusT > 0.001 || focusT !== focusTo) {
         var zpr = clamp01((now - focusAt) / FOCUS_MS);
         var ze = zpr < 0.5 ? 4 * zpr * zpr * zpr : 1 - Math.pow(-2 * zpr + 2, 3) / 2;
-        camZoom = 1 + (wantZoom - 1) * ze;
+        // 🔴 起点必须是 focusFromZoom，不能写死 1。
+        // 原来写 1 + (wantZoom-1)*ze：退出时 wantZoom=1 -> camZoom 恒等于 1，
+        // **摄像机拉远的动画直接没了**（一帧跳回）。
+        camZoom = focusFromZoom + (wantZoom - focusFromZoom) * ze;
       } else {
         camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
       }
       // 硬夹：任何情况下 camZoom 都不能为 0 / 负数 / NaN（都会让投影爆掉）
       if (!isFinite(camZoom)) camZoom = 1;
-      camZoom = Math.max(0.45, Math.min(1, camZoom));
+      // 允许小值甚至负值：远处照片要求摄像机越过原点，只要目标照片的 zc>0 就合法。
+      // （屏幕上会消失的是 zc<0.9 的那些近处照片 —— 那是它们从镜头旁掠过，符合预期。）
+      camZoom = Math.max(-2, Math.min(1, camZoom));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
       // 用聚焦补间自己的缓动进度来插值镜头位置 —— 精确落位。
@@ -790,6 +800,7 @@
       focusAt = performance.now();
       focusFromScroll = scroll;      // 记录起点，供补间按进度精确插值
       focusFromPan = panY;
+      focusFromZoom = camZoom;       // 退出时要从这里插值回 1，否则拉远动画会消失
       if (i < 0) { focusScroll = preScroll; focusPan = prePan; }   // 退出：目标回到原位
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
@@ -821,7 +832,13 @@
         //    照片被推到画面外（实测 camZoom = -0.162、panY = -0.498、照片低了 420px），
         //    严重时就是之前那个 GPU 卡死。这里保证摄像机始终在照片前面。
         if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
-        focusCamZ = Math.max(CAM_DIST * 0.5, Math.min(CAM_DIST, focusCamZ));
+        // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
+        // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
+        // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
+        // 表现就是**放大幅度被砍**（用户：不会写上下位移就不位移只减小放大幅度了）。
+        // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
+        // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
+        focusCamZ = Math.max(z0n + 0.35, focusCamZ);
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
@@ -920,6 +937,8 @@
     }
 
     return { init: init, destroy: destroy, rectOf: rectOfCss,
+             // 临时测试钩子：强制设定 panY（用来验证 uPanY 真的到了 GPU）
+             __setPan: function (y) { panY = y; dirty = true; },
              state: function () {
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
