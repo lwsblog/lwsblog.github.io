@@ -640,13 +640,7 @@
         compLoc[n] = gl.getUniformLocation(compProg, n);
       });
       bgCanvas = document.querySelector('[data-scene-canvas]');
-      // 壁纸图（可见背景的主体）当纹理加载
-      var wImg = document.querySelector('[data-scene-wallpaper]');
-      if (wImg && wImg.src) {
-        var im = new Image();
-        im.onload = function () { wallImg = im; dirty = true; };
-        im.src = wImg.src;
-      }
+      // 壁纸的加载改到 ensureWallTex 里做（那时 src 常常还没被主题设上）
       if (bgCanvas) {
         bgTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, bgTex);
@@ -669,8 +663,32 @@
       bgReady = true;
       return true;
     }
+    var wallTriedSrc = '';
+    function wallSrcNow() {
+      var el = document.querySelector('[data-scene-wallpaper]');
+      if (!el) return '';
+      var u = el.currentSrc || el.src || el.getAttribute('src') || '';
+      if (!u) {
+        // 主题也可能把它挂在 CSS background-image 上
+        var bi = getComputedStyle(el).backgroundImage || '';
+        var mm = bi.match(/url\(["']?([^"')]+)/);
+        if (mm) u = mm[1];
+      }
+      return u || '';
+    }
     function ensureWallTex() {
-      if (!wallImg) return false;
+      if (!wallImg) {
+        // 每帧重试：主题是在脚本里稍后才把 src 设上的，初始化时取到的是空
+        var u = wallSrcNow();
+        if (u && u !== wallTriedSrc) {
+          wallTriedSrc = u;
+          var im = new Image();
+          im.onload = function () { wallImg = im; wallBlurDone = false; dirty = true; };
+          im.onerror = function () { wallTriedSrc = ''; };   // 失败则允许重试
+          im.src = u;
+        }
+        return false;
+      }
       if (!wallTex) {
         wallTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, wallTex);
