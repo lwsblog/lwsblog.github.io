@@ -1509,7 +1509,7 @@
     // 参考页 glass-cursor.html 的"玻璃（参考的那组）"换算成比例：
     // 球直径 94、feather 12（=0.13）、depth 45（=0.48）、curve 1.2、chroma 0.12、glint 0.64
     // 关键：**窄带 + 大位移** —— 只有边缘一圈把影像吸进去，这才是玻璃边。
-    var GLASS_DEPTH_PCT = 0.14;  // 折射位移 = 短边 * 此值
+    var GLASS_DEPTH_PCT = 0.45;  // 折射位移 = 短边 * 此值
     var GLASS_FEATHER = 0.29;    // 折射带宽度：只有边缘 13% 的一圈
     var GLASS_CURVE = 1.25;       // 参考值
     var GLASS_CHROMA = 0.2;     // 参考值
@@ -1664,7 +1664,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v7';
+    var TUNE_KEY = 'album3d-tune-v8';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
