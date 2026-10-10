@@ -62,8 +62,10 @@
   // 说明：DOF=0 时只是不做虚化，**3D 感仍在** —— 近大远小与前后遮挡照旧。
   // 开屏总时长 = 字符数*(打字+删除) + 停留 ≈ 16*(110+70)+3000 ≈ 5880ms。
   // 飞入必须在这个时长内完成：最后一张的 startAt+dur ≈ 21*112*1.4 + 1700*1.4 ≈ 5670ms。
-  var FLY_MS = 1700;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
-  var FLY_STAGGER = 112;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
+  // 删除阶段约等于 openText.length * DEL_MS = 16*70 = 1120ms。
+  // 飞入必须在这段内铺完：最后一张约 21*20*1.4 + 380*1.4 = 1120ms，正好收尾。
+  var FLY_MS = 380;           // 飞入基准时长（原来 1100 偏快，用户反馈飞的有点快）
+  var FLY_STAGGER = 20;       // 错峰基准（ms/张）：22 张铺开约 3.6 秒，一眼能看出次序
   var BOUNCE = 0.34;           // 到端回弹强度
 
   function create(root) {
@@ -555,7 +557,7 @@
       if (openState === 'typing') {
         var n = Math.min(openText.length, Math.floor((now - openAt) / TYPE_MS));
         setTitle(openText.slice(0, n));
-        if (n >= openText.length) { openState = 'hold'; openAt = now; startFly(); }
+        if (n >= openText.length) { openState = 'hold'; openAt = now; }   // 不在这里起飞：停留阶段不能有照片在飞
       } else if (openState === 'hold') {
         if (now - openAt >= HOLD_MS) beginDelete();
       } else if (openState === 'deleting') {
@@ -749,8 +751,9 @@
 
       host.setAttribute('data-album-build', BUILD);
       console.log('[album3d] build ' + BUILD);
-      startFly();     // 用户要求：不跳过时，开屏自动消失之后照片已经飞好 ——
-                      // 所以飞入必须和开屏同时开始，并在开屏结束时刚好到位。
+      // 飞入在【删除阶段】开始（beginDelete 里调用 startFly），不是开屏一开始。
+      // 用户反馈：动画还没播完就开始飞了 —— 打字与停留阶段不能有照片在飞；
+      // 而文字消失时它们要已经就位，所以飞入正好占满删除那一段。
       buildOpening();
       buildToggle();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
