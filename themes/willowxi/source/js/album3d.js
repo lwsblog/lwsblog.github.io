@@ -436,6 +436,7 @@
       'uniform sampler2D uSrc, uFrost;',
       'uniform float uHalfW, uHalfH, uMode, uMixF;',
       'uniform vec4 uShape, uG1, uG2, uTint;',
+      'uniform float uAlpha;',
       'varying vec2 vUV;',
       'float sd(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r);',
       '  return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r; }',
@@ -458,7 +459,7 @@
       '  float inner = -d;',
       // depth 钳制在短边一半以内：否则胶囊两端(法线水平)会把采样推到形状外很远，
       // 拉进外面的内容 -> 出现一块硬边（用户说的空白块）
-      '  float dpx = min(uG1.y, 0.5 * min(b.x, b.y));',
+      '  float dpx = min(uG1.y, 0.25 * min(b.x, b.y));',
       '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(dpx/vec2(uHalfW*2.0,uHalfH*2.0));',
       '  float ck = uG2.x*amt;',
       '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
@@ -477,7 +478,7 @@
       '  col += vec3(smoothstep(0.30, 1.00, dFill) * rim * uG2.w * 0.42);',
       '  col += vec3(0.030 * (0.5 - p.y / max(1.0, b.y)));',
       '  col += vec3(amt*0.05);',
-      '  float a = max(texture2D(uSrc, vUV).a, 0.997);',
+      '  float a = max(texture2D(uSrc, vUV).a, 0.997) * uAlpha;',
       '  gl_FragColor = vec4(col, a);',
       '}'
     ].join('\n');
@@ -498,7 +499,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uSrc','uFrost','uHalfW','uHalfH','uMode','uMixF','uShape','uG1','uG2','uTint'].forEach(function (n) {
+      ['uSrc','uFrost','uHalfW','uHalfH','uMode','uMixF','uShape','uG1','uG2','uTint','uAlpha'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -797,16 +798,18 @@
       // 3) 形状列表：光标球（鼠标在页内时）+ 三个可见按钮
       //    每个形状 [cx, cy 自上而下, 半宽, 半高]，单位设备像素
       var shapes = [];
-      if (mouseIn) shapes.push([mouseX * dpr, mouseY * dpr, rpx, rpx]);
+      if (mouseIn) shapes.push([mouseX * dpr, mouseY * dpr, rpx, rpx, 1]);
       [toggleEl, navPrev, navNext].forEach(function (el) {
         if (!el) return;
-        if ((parseFloat(getComputedStyle(el).opacity) || 0) < 0.02) return;
+        var op = parseFloat(getComputedStyle(el).opacity) || 0;
+        if (op < 0.004) return;                        // 完全不可见才跳过
         var rct = el.getBoundingClientRect();
         if (rct.width < 2 || rct.height < 2) return;
         shapes.push([(rct.left + rct.width * 0.5) * dpr,
                      (rct.top + rct.height * 0.5) * dpr,
                      rct.width * dpr * 0.5,
-                     rct.height * dpr * 0.5]);
+                     rct.height * dpr * 0.5,
+                     Math.min(1, op)]);                // 第 5 项：不透明度
       });
 
 
@@ -844,6 +847,7 @@
         // uG2 = (chroma, 保留, rimW, glint)
         gl.uniform4f(postLoc.uG2, GLASS_CHROMA, 0.0, GLASS_RIM_W, GLASS_GLINT);
         gl.uniform4f(postLoc.uTint, 0.70, 0.84, 0.96, GLASS_TINT);
+        gl.uniform1f(postLoc.uAlpha, (sp[4] === undefined) ? 1 : sp[4]);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
