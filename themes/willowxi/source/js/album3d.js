@@ -434,17 +434,35 @@
       'uniform vec2 uRes;',
       'uniform vec2 uBall;',      // 光标球心（设备像素，y 自下而上）
       'uniform float uR;',        // 球半径（设备像素）
+      // 三个按钮：uSh = (cx, cy, 半宽, 半高)，uShR = 圆角半径，uShN = 有效个数
+      'uniform vec4 uSh[3];',
+      'uniform vec3 uShR;',
+      'uniform float uShN;',
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
       'varying vec2 vUV;',
       'void main() {',
       '  vec2 fc = vUV * uRes;',
-      '  vec2 p = fc - uBall;',
-      '  float dist = length(p) - uR;',
+      '  // 并集：球 + 三个按钮，谁在最外就用谁的 SDF 与法线',
+      '  vec2 pB = fc - uBall;',
+      '  float dBest = length(pB) - uR;',
+      '  vec2 pBest = pB; vec2 bBest = vec2(uR, uR); float rBest = uR;',
+      '  for (int i = 0; i < 3; i++) {',
+      '    if (float(i) < uShN) {',
+      '      vec4 sh = uSh[i];',
+      '      vec2 pi = fc - sh.xy;',
+      '      vec2 bi = vec2(sh.z, sh.w);',
+      '      float ri = uShR[i];',
+      '      float di = sd(pi, bi, ri);',
+      '      if (di < dBest) { dBest = di; pBest = pi; bBest = bi; rBest = ri; }',
+      '    }',
+      '  }',
+      '  vec2 p = pBest;',
+      '  float dist = dBest;',
       '  vec4 src = texture2D(uScene, vUV);',
       '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
-      '  vec2 nrm = length(p) > 0.001 ? normalize(p) : vec2(0.0);',
+      '  vec2 nrm = nrmSDF(p, bBest, rBest);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
       '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
@@ -482,7 +500,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uBall','uR','uSh','uShR','uShN','uG','uRim','uExtra'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -776,6 +794,30 @@
       var bx = mouseX * dpr, by = H - mouseY * dpr;
       gl.uniform2f(postLoc.uBall, bx, by);
       gl.uniform1f(postLoc.uR, rpx);
+      // 三个按钮的屏幕矩形（CSS px -> 设备像素，y 翻到自下而上）
+      var btns = [toggleEl, navPrev, navNext], nSh = 0, arr = [];
+      for (var bi2 = 0; bi2 < 3; bi2++) {
+        var el2 = btns[bi2];
+        if (!el2) continue;
+        var op2 = parseFloat(getComputedStyle(el2).opacity) || 0;
+        if (op2 < 0.02) continue;                       // 看不见的按钮不参与
+        var rr2 = el2.getBoundingClientRect();
+        if (rr2.width < 2 || rr2.height < 2) continue;
+        var hw2 = rr2.width * dpr * 0.5, hh2 = rr2.height * dpr * 0.5;
+        var cx2 = (rr2.left + rr2.width * 0.5) * dpr;
+        var cy2 = H - (rr2.top + rr2.height * 0.5) * dpr;
+        var rad2 = el2.classList.contains('album-nav-btn') ? Math.min(hw2, hh2) : hh2;
+        arr.push([cx2, cy2, hw2, hh2, rad2]);
+      }
+      var shArr = new Float32Array(12), rArr = new Float32Array(3);
+      for (var k2 = 0; k2 < arr.length && k2 < 3; k2++) {
+        shArr[k2 * 4] = arr[k2][0]; shArr[k2 * 4 + 1] = arr[k2][1];
+        shArr[k2 * 4 + 2] = arr[k2][2]; shArr[k2 * 4 + 3] = arr[k2][3];
+        rArr[k2] = arr[k2][4];
+      }
+      gl.uniform4fv(postLoc.uSh, shArr);
+      gl.uniform3fv(postLoc.uShR, rArr);
+      gl.uniform1f(postLoc.uShN, Math.min(3, arr.length));
       gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
                    GLASS_CURVE, GLASS_CHROMA);
       gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
@@ -1624,9 +1666,16 @@
     }
     // 参数变了就重装（位移图是按尺寸生成的，必须重算）
     function refreshGlass() {
-      applyGlassRefract(toggleEl, 999);
-      applyGlassRefract(navPrev, Math.round(NAV_SIZE / 2));
-      applyGlassRefract(navNext, Math.round(NAV_SIZE / 2));
+      // 三个按钮的玻璃改由 GL 后处理统一画（和光标球同一套材质），
+      // 所以这里把 DOM 那套 SVG 折射/背景/阴影全部清掉，只留图标与文字。
+      [toggleEl, navPrev, navNext].forEach(function (el) {
+        if (!el) return;
+        el.style.backdropFilter = 'none';
+        el.style.webkitBackdropFilter = 'none';
+        el.style.background = 'transparent';
+        el.style.boxShadow = 'none';
+        el.style.border = '0';
+      });
     }
 
 
