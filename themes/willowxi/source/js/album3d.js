@@ -663,6 +663,7 @@
         var nx = (e.clientX * dpr / W) * 2 - 1;
         var ny = 1 - (e.clientY * dpr / H) * 2;
         var hit = pickPhoto(nx, ny);
+
         setFocus(hit);                                 // 没命中 -> -1 = 退出聚焦
       });
       document.addEventListener('keydown', function (e) {
