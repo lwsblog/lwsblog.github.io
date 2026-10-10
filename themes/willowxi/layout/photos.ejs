@@ -192,7 +192,7 @@
   if (!/[?&]album=1/.test(location.search)) return;
   document.documentElement.classList.add('is-album');
   var sc = document.createElement('script');
-  sc.src = '/js/album3d.js';
+  sc.src = /[?&]v=before/.test(location.search) ? '/js/album3d-before.js' : '/js/album3d.js';
   sc.async = true;
   sc.onload = function () {
     window.__albumInstance = window.WillowXIAlbum.create(document);

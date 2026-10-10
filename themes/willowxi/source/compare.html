@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>玻璃材质对比 · 按钮改造前 / 后</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0d12; color: #dfe7f2;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .wrap { display: flex; height: 100%; }
+  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .pane + .pane { border-left: 1px solid rgba(255,255,255,.16); }
+  .hdr { padding: 7px 12px; display: flex; gap: 10px; align-items: baseline;
+    background: #11151d; border-bottom: 1px solid rgba(255,255,255,.08); white-space: nowrap; }
+  .hdr b { font-weight: 700; }
+  .hdr span { opacity: .62; }
+  .hdr code { opacity: .5; font-size: 12px; }
+  iframe { flex: 1; width: 100%; border: 0; background: #0b0d12; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pane">
+    <div class="hdr"><b>左 · 应用到按钮之前</b><code>?album=1&amp;v=before</code><span>按钮 = DOM 玻璃（backdrop-filter + SVG 折射）</span></div>
+    <iframe src="/photos/?album=1&amp;v=before"></iframe>
+  </div>
+  <div class="pane">
+    <div class="hdr"><b>右 · 现在</b><code>?album=1</code><span>按钮 = GL 材质（和光标球同一套着色器）</span></div>
+    <iframe src="/photos/?album=1"></iframe>
+  </div>
+</div>
+</body>
+</html>
