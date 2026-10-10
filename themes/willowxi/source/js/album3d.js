@@ -590,20 +590,35 @@
     }
 
     // ---- 合成 pass：我的场景 over 动态背景 canvas ----
+    // 背景重建：壁纸图（cover）-> 动态网格 canvas -> 一层冷色 -> 我的场景。
+    // 为什么不能只读 canvas：那层 canvas 绝大部分透明，
+    // 页面上看到的深蓝+网格主要来自 <img wallpaper> 和 CSS 层，texImage2D 读不到 DOM。
     var FS_COMPOSE = [
       'precision highp float;',
       'uniform sampler2D uScene;',
       'uniform sampler2D uBg;',
+      'uniform sampler2D uWall;',
+      'uniform float uWallOn;',
+      'uniform vec2 uWpScale;',
+      'uniform vec2 uWpOff;',
+      'uniform vec3 uTint;',
+      'uniform float uTintA;',
       'varying vec2 vUV;',
       'void main() {',
+      '  vec3 col = vec3(0.0);',
+      '  if (uWallOn > 0.5) {',
+      '    vec2 wuv = vUV * uWpScale + uWpOff;',
+      '    col = texture2D(uWall, clamp(wuv, 0.0, 1.0)).rgb;',
+      '  }',
+      '  vec4 bg = texture2D(uBg, vUV);',
+      '  col = bg.rgb * bg.a + col * (1.0 - bg.a);',
+      '  col = mix(col, uTint, uTintA);',
       '  vec4 s4 = texture2D(uScene, vUV);',
-      '  vec3 bg = texture2D(uBg, vUV).rgb;',
-      '  float a = s4.a;',
-      '  gl_FragColor = vec4(s4.rgb * a + bg * (1.0 - a), 1.0);',
+      '  gl_FragColor = vec4(s4.rgb * s4.a + col * (1.0 - s4.a), 1.0);',
       '}'
     ].join('\n');
     var compProg = null, compLoc = {}, compFbo = null, compTex = null, bgTex = null;
-    var bgCanvas = null, bgReady = false;
+    var bgCanvas = null, bgReady = false, wallImg = null, wallTex = null;
     function makeCompose() {
       function sh(t, src) {
         var o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
@@ -619,8 +634,17 @@
       if (!gl.getProgramParameter(compProg, gl.LINK_STATUS)) {
         console.error('[album3d] compose link: ' + gl.getProgramInfoLog(compProg)); return false;
       }
-      ['uScene','uBg'].forEach(function (n) { compLoc[n] = gl.getUniformLocation(compProg, n); });
+      ['uScene','uBg','uWall','uWallOn','uWpScale','uWpOff','uTint','uTintA'].forEach(function (n) {
+        compLoc[n] = gl.getUniformLocation(compProg, n);
+      });
       bgCanvas = document.querySelector('[data-scene-canvas]');
+      // 壁纸图（可见背景的主体）当纹理加载
+      var wImg = document.querySelector('[data-scene-wallpaper]');
+      if (wImg && wImg.src) {
+        var im = new Image();
+        im.onload = function () { wallImg = im; dirty = true; };
+        im.src = wImg.src;
+      }
       if (bgCanvas) {
         bgTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, bgTex);
@@ -643,7 +667,23 @@
       bgReady = true;
       return true;
     }
+    function ensureWallTex() {
+      if (!wallImg) return false;
+      if (!wallTex) {
+        wallTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, wallTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wallImg);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      }
+      return true;
+    }
     function composePass() {
+      var wallOn = ensureWallTex();
       gl.bindFramebuffer(gl.FRAMEBUFFER, compFbo);
       gl.viewport(0, 0, W, H);
       gl.disable(gl.BLEND);
@@ -658,6 +698,21 @@
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, bgTex);
       gl.uniform1i(compLoc.uBg, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, wallOn ? wallTex : null);
+      gl.uniform1i(compLoc.uWall, 2);
+      gl.uniform1f(compLoc.uWallOn, wallOn ? 1.0 : 0.0);
+      if (wallOn) {
+        // CSS background-size: cover 的等价变换
+        var iw = wallImg.naturalWidth || wallImg.width, ih = wallImg.naturalHeight || wallImg.height;
+        var sc = Math.max(W / iw, H / ih);
+        var dw = iw * sc, dh = ih * sc;
+        gl.uniform2f(compLoc.uWpScale, W / dw, H / dh);
+        gl.uniform2f(compLoc.uWpOff, -((W - dw) / 2) / dw, -((H - dh) / 2) / dh);
+      }
+      // 冷色一层（近似 theme 的 acrylic），值不大，避免盖掉壁纸
+      gl.uniform3f(compLoc.uTint, 0.055, 0.075, 0.125);
+      gl.uniform1f(compLoc.uTintA, 0.35);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
