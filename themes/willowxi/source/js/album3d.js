@@ -577,8 +577,18 @@
       // 相机推近：目标 camZ 由上面按目标照片深度算出（原来用固定 0.40 倍，
       // 结果照片贴在镜头上，放大成一片糊）
       var focusZoomGoal = focusCamZ / CAM_DIST;
-      var wantZoom = 1 + (focusZoomGoal - 1) * focusT;
-      camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
+      // 🔴 camZoom 必须和 scroll/panY 用**同一条缓动进度**，不能用指数追。
+      // 原来是指数追（永远差一点），而 focusPan 是按 camZoom 已到达目标算的，
+      // 于是深度对不上 -> focusNdcY 偏离目标。实测：camZoom=0.718 时 ndc=-0.045，
+      // 目标 -0.071；camZoom=0.579（接近目标）时误差才变小 —— 正是这个原因。
+      var wantZoom = focusTo === 0 ? 1 : focusZoomGoal;
+      if (focusT > 0.001 || focusT !== focusTo) {
+        var zpr = clamp01((now - focusAt) / FOCUS_MS);
+        var ze = zpr < 0.5 ? 4 * zpr * zpr * zpr : 1 - Math.pow(-2 * zpr + 2, 3) / 2;
+        camZoom = 1 + (wantZoom - 1) * ze;
+      } else {
+        camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
+      }
       // 硬夹：任何情况下 camZoom 都不能为 0 / 负数 / NaN（都会让投影爆掉）
       if (!isFinite(camZoom)) camZoom = 1;
       camZoom = Math.max(0.45, Math.min(1, camZoom));
@@ -879,7 +889,29 @@
       if (host && host.parentNode) host.parentNode.removeChild(host);
     }
 
-    return { init: init, destroy: destroy,
+    // 测试辅助：第 i 张照片当前在屏幕上的矩形（CSS 像素），供自动化逐张点击
+    function rectOfCss(i) {
+      var ph = photos[i];
+      if (!ph || !ph.ready) return null;
+      var mt = (ph.mt === undefined) ? modeT : ph.mt;
+      var x = ph.x * (1 - mt) + ph.gx * mt;
+      var y = ph.y * (1 - mt) + ph.gy * mt;
+      var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+      var sz = worldSize(ph, mt);
+      var pb2 = 1 / (1 + 2 * MATTE_BORDER);
+      var r = projRect(x, y, z, sz.hw / pb2, sz.hh / pb2);
+      // NDC -> CSS 像素（用 CSS 视口尺寸，不是设备像素）
+      var iw = window.innerWidth, ih = window.innerHeight;
+      return {
+        cx: (r.cx * 0.5 + 0.5) * iw,
+        cy: (0.5 - r.cy * 0.5) * ih,
+        w: r.hx * 0.5 * iw, h: r.hy * 0.5 * ih,
+        onscreen: (Math.abs(r.cx) - r.hx < 1) && (Math.abs(r.cy) - r.hy < 1),
+        idx: i, z: z
+      };
+    }
+
+    return { init: init, destroy: destroy, rectOf: rectOfCss,
              state: function () {
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
