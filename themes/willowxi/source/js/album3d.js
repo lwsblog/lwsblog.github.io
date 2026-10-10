@@ -756,54 +756,88 @@
 
     function drawPost() {
       if (!postProg) return;
-      // 1) 动态背景上传 + 合成（玻璃因此能折射背景，而不只是照片）
+      var rpx = GLASS_BALL_R * dpr;                 // 光标球半径（设备像素）
+
+      // 1) 动态背景上传 + 合成：玻璃因此能折射背景，而不只是照片
       var compOk = false;
       if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
+      var srcTex = compOk ? compTex : fboTex;
+
+      // 2) 四趟可分离高斯 -> blurTexB（磨砂纹理；实验页也是折射采它）
       if (blurProg && blurFboA && blurFboB && blurTexB) {
         var rad = Math.max(1, GLASS_FROST * dpr);
-        blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
+        blurPass(srcTex, blurFboA, 1, 0, rad);
         blurPass(blurTexA, blurFboB, 0, 1, rad);
         blurPass(blurTexB, blurFboA, 1, 0, rad * 2);
         blurPass(blurTexA, blurFboB, 0, 1, rad * 2);
       }
+      var frostTex = (blurProg && blurTexB) ? blurTexB : srcTex;
+
+      // 3) 形状列表：光标球（鼠标在页内时）+ 三个可见按钮
+      //    每个形状 [cx, cy 自上而下, 半宽, 半高]，单位设备像素
+      var shapes = [];
+      if (mouseIn) shapes.push([mouseX * dpr, mouseY * dpr, rpx, rpx]);
+      [toggleEl, navPrev, navNext].forEach(function (el) {
+        if (!el) return;
+        if ((parseFloat(getComputedStyle(el).opacity) || 0) < 0.02) return;
+        var rct = el.getBoundingClientRect();
+        if (rct.width < 2 || rct.height < 2) return;
+        shapes.push([(rct.left + rct.width * 0.5) * dpr,
+                     (rct.top + rct.height * 0.5) * dpr,
+                     rct.width * dpr * 0.5,
+                     rct.height * dpr * 0.5]);
+      });
+
+      if (!window.__shLog) {
+        window.__shLog = 1;
+        console.log('[album3d] SHAPES n=' + shapes.length + ' mouseIn=' + mouseIn +
+          ' glassOn=' + glassOn + ' postProg=' + !!postProg + ' fbo=' + !!fbo +
+          ' compOk=' + compOk + ' first=' + JSON.stringify(shapes[0] ? shapes[0].map(Math.round) : null) +
+          ' W=' + W + ' H=' + H + ' dpr=' + dpr);
+      }
+
+      // 4) 画到屏幕
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
-      gl.disable(gl.BLEND);
+      if (!shapes.length) { drawScene(); return; }   // 没有形状就原样画一遍
       gl.useProgram(postProg);
       gl.bindBuffer(gl.ARRAY_BUFFER, postQuad);
       var axy = gl.getAttribLocation(postProg, 'aXY'), auv = gl.getAttribLocation(postProg, 'aUV');
       gl.enableVertexAttribArray(axy); gl.vertexAttribPointer(axy, 2, gl.FLOAT, false, 16, 0);
       gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, fboTex);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, (compOk ? compTex : fboTex));
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.uniform1i(postLoc.uSrc, 0);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, (blurTexB || fboTex));
+      gl.bindTexture(gl.TEXTURE_2D, frostTex);
       gl.uniform1i(postLoc.uFrost, 1);
       gl.uniform1f(postLoc.uHalfW, W * 0.5);
       gl.uniform1f(postLoc.uHalfH, H * 0.5);
       gl.uniform1f(postLoc.uMode, 1.0);
       gl.uniform1f(postLoc.uMixF, 1.0);
-      // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       for (var si = 0; si < shapes.length; si++) {
-        var sp2 = shapes[si];
-        var rr3 = Math.min(sp2[2], sp2[3]);
-        gl.uniform4f(postLoc.uShape, sp2[0], H - sp2[1], sp2[2], sp2[3]);
-        gl.uniform4f(postLoc.uG1, rr3, GLASS_DEPTH_PCT * 2 * rpx, GLASS_FEATHER * rpx, GLASS_CURVE);
+        var sp = shapes[si];
+        var hw = sp[2], hh = sp[3], rad3 = Math.min(hw, hh);
+        // 实验页约定：uShape = (cx, cy 自上而下, 半宽, 半高)
+        // 注意：着色器内部已经把 gl_FragCoord.y 翻转成自上而下，所以这里直接传 sp[1]
+        gl.uniform4f(postLoc.uShape, sp[0], sp[1], hw, hh);
+        // uG1 = (R 带宽, depth px, feather px, curve)：按形状自身尺寸换算，
+        // 这样球和按钮的观感一致（否则小按钮上的位移会过大）
+        gl.uniform4f(postLoc.uG1, rad3, GLASS_DEPTH_PCT * 2 * rad3,
+                     GLASS_FEATHER * rad3, GLASS_CURVE);
+        // uG2 = (chroma, 保留, rimW, glint)
         gl.uniform4f(postLoc.uG2, GLASS_CHROMA, 0.0, GLASS_RIM_W, GLASS_GLINT);
         gl.uniform4f(postLoc.uTint, 0.70, 0.84, 0.96, GLASS_TINT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
 
-    // 外层 draw：有玻璃时先渲进 FBO 再后处理，否则直接画
+    // 外层 draw：有玻璃时先渲进 FBO 再后处理（按钮不依赖鼠标，球才依赖）
     function draw() {
       if (!gl) return;
-      if (!glassOn || !mouseIn || !postProg || !fbo) { drawScene(); return; }
+      if (!glassOn || !postProg || !fbo) { drawScene(); return; }
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, W, H);
       gl.clearColor(0, 0, 0, 0);
