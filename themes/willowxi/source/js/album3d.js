@@ -851,13 +851,14 @@
       buildToggle();
       // 面板：tune=1 打开；一旦打开过就记住（存 localStorage），
       // 之后用普通地址进来也在，省得每次敲参数。tune=0 可强制关掉并清除记忆。
+      // 面板：**默认就显示**（你一直在调参，之前那套"要带 tune=1 才出现"
+      // 太别扭；而且我的自动化测试会清掉那个记忆，于是面板就"不见了"）。
+      // ?tune=0 或点 × 才隐藏，之后记住；?tune=1 重新显示。
       var q = location.search;
-      if (/[?&]tune=1/.test(q)) { try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
-      if (/[?&]tune=0/.test(q)) { try { localStorage.removeItem('album3d-tuner-open'); } catch (e) {} }
-      var wantTuner = /[?&]tune=1/.test(q);
-      if (!wantTuner && !/[?&]tune=0/.test(q)) {
-        try { wantTuner = localStorage.getItem('album3d-tuner-open') === '1'; } catch (e) {}
-      }
+      var wantTuner = true;
+      try { if (localStorage.getItem('album3d-tuner-open') === '0') wantTuner = false; } catch (e) {}
+      if (/[?&]tune=1/.test(q)) { wantTuner = true; try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
+      if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
       if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
@@ -1299,7 +1300,7 @@
       closeBtn.style.cssText = 'position:absolute;right:8px;top:6px;width:22px;height:22px;border:0;border-radius:50%;' +
         'cursor:pointer;background:rgba(255,255,255,.14);color:#e8f0fa;font:14px/1 ui-monospace,monospace';
       closeBtn.addEventListener('click', function () {
-        try { localStorage.removeItem('album3d-tuner-open'); } catch (e) {}
+        try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {}
         panel.style.display = 'none';
       });
       head.appendChild(closeBtn);
