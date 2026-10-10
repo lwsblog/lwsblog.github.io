@@ -818,7 +818,16 @@
       // 而文字消失时它们要已经就位，所以飞入正好占满删除那一段。
       buildOpening();
       buildToggle();
-      if (/[?&]tune=1/.test(location.search)) buildTuner();
+      // 面板：tune=1 打开；一旦打开过就记住（存 localStorage），
+      // 之后用普通地址进来也在，省得每次敲参数。tune=0 可强制关掉并清除记忆。
+      var q = location.search;
+      if (/[?&]tune=1/.test(q)) { try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
+      if (/[?&]tune=0/.test(q)) { try { localStorage.removeItem('album3d-tuner-open'); } catch (e) {} }
+      var wantTuner = /[?&]tune=1/.test(q);
+      if (!wantTuner && !/[?&]tune=0/.test(q)) {
+        try { wantTuner = localStorage.getItem('album3d-tuner-open') === '1'; } catch (e) {}
+      }
+      if (wantTuner) buildTuner();
       refreshGlass();   // 初始装上折射
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
@@ -1237,8 +1246,18 @@
         'background:rgba(10,14,22,.62);backdrop-filter:blur(14px) saturate(150%);' +
         'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 10px 30px rgba(0,0,0,.45),0 0 0 1px rgba(150,190,255,.18);';
       var head = document.createElement('div');
-      head.textContent = '调参面板 (tune=1)';
+      head.textContent = '调参面板';
       head.style.cssText = 'font-weight:600;letter-spacing:.08em;margin-bottom:8px;opacity:.9';
+      var closeBtn = document.createElement('button');
+      closeBtn.textContent = '×';
+      closeBtn.title = '关闭（记住，之后不再出现；用 ?tune=1 可重新打开）';
+      closeBtn.style.cssText = 'position:absolute;right:8px;top:6px;width:22px;height:22px;border:0;border-radius:50%;' +
+        'cursor:pointer;background:rgba(255,255,255,.14);color:#e8f0fa;font:14px/1 ui-monospace,monospace';
+      closeBtn.addEventListener('click', function () {
+        try { localStorage.removeItem('album3d-tuner-open'); } catch (e) {}
+        panel.style.display = 'none';
+      });
+      head.appendChild(closeBtn);
       panel.appendChild(head);
 
       var state = {};
