@@ -593,32 +593,34 @@
     // 背景重建：壁纸图（cover）-> 动态网格 canvas -> 一层冷色 -> 我的场景。
     // 为什么不能只读 canvas：那层 canvas 绝大部分透明，
     // 页面上看到的深蓝+网格主要来自 <img wallpaper> 和 CSS 层，texImage2D 读不到 DOM。
+    // 按实测的 theme 公式重建背景，不再瞎猜：
+    //   [data-scene-background] bg = rgb(9,11,15)
+    //   .__wallpaper  filter = blur(46px) saturate(1.08) brightness(0.86)
+    //   .__acrylic    bg = rgba(9,11,15,0.64)   -> 壁纸只占 36%
+    //   .__plate      2% 白的网格渐变（opacity 0）
+    //   动态 canvas 画的是那些亮网格高光
     var FS_COMPOSE = [
       'precision highp float;',
       'uniform sampler2D uScene;',
       'uniform sampler2D uBg;',
       'uniform sampler2D uWall;',
       'uniform float uWallOn;',
-      'uniform vec2 uWpScale;',
-      'uniform vec2 uWpOff;',
-      'uniform vec3 uTint;',
-      'uniform float uTintA;',
+      'uniform vec3 uBase;',
+      'uniform float uWallAmt;',
+      'uniform float uWallGain;',
       'varying vec2 vUV;',
       'void main() {',
-      '  vec3 col = vec3(0.0);',
-      '  if (uWallOn > 0.5) {',
-      '    vec2 wuv = vUV * uWpScale + uWpOff;',
-      '    col = texture2D(uWall, clamp(wuv, 0.0, 1.0)).rgb;',
-      '  }',
+      '  vec3 col = uBase;',
+      '  if (uWallOn > 0.5) col = mix(col, texture2D(uWall, vUV).rgb * uWallGain, uWallAmt);',
       '  vec4 bg = texture2D(uBg, vUV);',
       '  col = bg.rgb * bg.a + col * (1.0 - bg.a);',
-      '  col = mix(col, uTint, uTintA);',
       '  vec4 s4 = texture2D(uScene, vUV);',
       '  gl_FragColor = vec4(s4.rgb * s4.a + col * (1.0 - s4.a), 1.0);',
       '}'
     ].join('\n');
     var compProg = null, compLoc = {}, compFbo = null, compTex = null, bgTex = null;
     var bgCanvas = null, bgReady = false, wallImg = null, wallTex = null;
+    var wallBlurFbo = null, wallBlurTex = null, wallBlurDone = false;
     function makeCompose() {
       function sh(t, src) {
         var o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
@@ -634,7 +636,7 @@
       if (!gl.getProgramParameter(compProg, gl.LINK_STATUS)) {
         console.error('[album3d] compose link: ' + gl.getProgramInfoLog(compProg)); return false;
       }
-      ['uScene','uBg','uWall','uWallOn','uWpScale','uWpOff','uTint','uTintA'].forEach(function (n) {
+      ['uScene','uBg','uWall','uWallOn','uBase','uWallAmt','uWallGain'].forEach(function (n) {
         compLoc[n] = gl.getUniformLocation(compProg, n);
       });
       bgCanvas = document.querySelector('[data-scene-canvas]');
@@ -682,8 +684,20 @@
       }
       return true;
     }
+    // 壁纸是静态图，只模糊一次（对应 CSS 的 blur(46px)）
+    function bakeWallBlur() {
+      if (wallBlurDone || !wallTex || !blurProg) return;
+      var r = Math.max(6, 46 * dpr * 0.5);
+      if (!wallBlurFbo) { var q = mkBlurRt(wallBlurTex, wallBlurFbo); wallBlurTex = q.t; wallBlurFbo = q.f; }
+      blurPass(wallTex, blurFboA, 1, 0, r);
+      blurPass(blurTexA, wallBlurFbo, 0, 1, r);
+      blurPass(wallBlurTex, blurFboA, 1, 0, r * 1.5);
+      blurPass(blurTexA, wallBlurFbo, 0, 1, r * 1.5);
+      wallBlurDone = true;
+    }
     function composePass() {
       var wallOn = ensureWallTex();
+      if (wallOn) { bakeWallBlur(); if (wallBlurTex) wallOn = 2; }
       gl.bindFramebuffer(gl.FRAMEBUFFER, compFbo);
       gl.viewport(0, 0, W, H);
       gl.disable(gl.BLEND);
@@ -699,20 +713,13 @@
       gl.bindTexture(gl.TEXTURE_2D, bgTex);
       gl.uniform1i(compLoc.uBg, 1);
       gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, wallOn ? wallTex : null);
+      gl.bindTexture(gl.TEXTURE_2D, (wallOn === 2) ? wallBlurTex : (wallOn ? wallTex : null));
       gl.uniform1i(compLoc.uWall, 2);
       gl.uniform1f(compLoc.uWallOn, wallOn ? 1.0 : 0.0);
-      if (wallOn) {
-        // CSS background-size: cover 的等价变换
-        var iw = wallImg.naturalWidth || wallImg.width, ih = wallImg.naturalHeight || wallImg.height;
-        var sc = Math.max(W / iw, H / ih);
-        var dw = iw * sc, dh = ih * sc;
-        gl.uniform2f(compLoc.uWpScale, W / dw, H / dh);
-        gl.uniform2f(compLoc.uWpOff, -((W - dw) / 2) / dw, -((H - dh) / 2) / dh);
-      }
-      // 冷色一层（近似 theme 的 acrylic），值不大，避免盖掉壁纸
-      gl.uniform3f(compLoc.uTint, 0.055, 0.075, 0.125);
-      gl.uniform1f(compLoc.uTintA, 0.35);
+      // 实测公式的参数：底色 rgb(9,11,15)、壁纸占 36%、亮度 0.86
+      gl.uniform3f(compLoc.uBase, 9 / 255, 11 / 255, 15 / 255);
+      gl.uniform1f(compLoc.uWallAmt, 0.36);
+      gl.uniform1f(compLoc.uWallGain, 0.86);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
