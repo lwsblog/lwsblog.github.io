@@ -54,6 +54,9 @@
   var BUILD = 'focusY-4fbefdf+';
   var toggleEl = null, dimEl2 = null;
   var navPrev = null, navNext = null;   // 灯箱左右切换按钮
+  // 按钮位置（可在 tune=1 面板里用滑块调）
+  var NAV_INSET = 28, NAV_TOP = 50, NAV_SIZE = 56;
+  var TOGGLE_BOTTOM = 26, TOGGLE_LEFT = 50;
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
@@ -805,6 +808,7 @@
       // 而文字消失时它们要已经就位，所以飞入正好占满删除那一段。
       buildOpening();
       buildToggle();
+      if (/[?&]tune=1/.test(location.search)) buildTuner();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
@@ -971,6 +975,7 @@
       host.appendChild(b);
       // 液态玻璃：给底部按钮套上玻璃类
       b.className = 'album-glass album-btn-toggle';
+      toggleEl = b;   // 原来只读没赋值，导致位置滑块与逐帧文字更新都不生效
 
       // 灯箱左右两侧的圆形上一张 / 下一张（固定位置，聚焦时才出现）
       function makeNavBtn(dir) {
@@ -992,6 +997,146 @@
       }
       navPrev = makeNavBtn(-1);
       navNext = makeNavBtn(1);
+    }
+
+
+    // ---------- 调参面板（?album=1&tune=1 才出现）----------
+    // 把可调参数做成滑块，用户自己拖；拖完把面板底部那行 JSON 发我即可。
+    // 这里的量都是模块级 var，所以面板能直接改到正在跑的代码上。
+    var tunerEl = null;
+    function buildTuner() {
+      var rows = [
+        ['开屏 停留 ms', 'HOLD_MS', 0, 4000, 50],
+        ['开屏 打字 ms', 'TYPE_MS', 20, 200, 5],
+        ['开屏 删除 ms', 'DEL_MS', 15, 150, 5],
+        ['飞入 单张 ms', 'FLY_MS', 150, 3000, 25],
+        ['飞入 错峰 ms', 'FLY_STAGGER', 0, 400, 5],
+        ['水平间距 GAP', 'GAP', 1.0, 6.0, 0.05],
+        ['上下幅度 JITTER', 'JITTER', 0, 2.0, 0.02],
+        ['深度跨度 Z_SPREAD', 'Z_SPREAD', 0.5, 4.0, 0.05],
+        ['卡片大小 CARD_H', 'CARD_H', 0.6, 3.0, 0.05],
+        ['摄像机距离 CAM_DIST', 'CAM_DIST', 2.0, 8.0, 0.1],
+        ['聚焦填充 FOCUS_FILL', 'FOCUS_FILL', 0.30, 1.20, 0.02],
+        ['压暗上限 DIM_MAX', 'DIM_MAX', 0, 0.90, 0.01],
+        ['聚焦时长 FOCUS_MS', 'FOCUS_MS', 200, 2500, 50],
+        ['滚轮冲量 WHEEL_IMPULSE', 'WHEEL_IMPULSE', 0.02, 1.00, 0.01],
+        ['惯性时间 INERTIA_TAU', 'INERTIA_TAU', 80, 1500, 20],
+      ];
+      var posRows = [
+        ['左右按钮 边距 px', 'NAV_INSET', 0, 220, 2],
+        ['左右按钮 垂直 %', 'NAV_TOP', 10, 90, 1],
+        ['左右按钮 直径 px', 'NAV_SIZE', 32, 120, 2],
+        ['底部按钮 底距 px', 'TOGGLE_BOTTOM', 0, 200, 2],
+        ['底部按钮 左偏 %', 'TOGGLE_LEFT', 0, 100, 1],
+      ];
+      var panel = document.createElement('div');
+      panel.setAttribute('data-album-tuner', '');
+      panel.style.cssText =
+        'position:fixed;right:14px;top:14px;z-index:60;width:268px;max-height:86vh;overflow:auto;' +
+        'padding:12px 14px 14px;border-radius:16px;pointer-events:auto;' +
+        'font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#e8f0fa;' +
+        'background:rgba(10,14,22,.62);backdrop-filter:blur(14px) saturate(150%);' +
+        'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 10px 30px rgba(0,0,0,.45),0 0 0 1px rgba(150,190,255,.18);';
+      var head = document.createElement('div');
+      head.textContent = '调参面板 (tune=1)';
+      head.style.cssText = 'font-weight:600;letter-spacing:.08em;margin-bottom:8px;opacity:.9';
+      panel.appendChild(head);
+
+      var state = {};
+      function addRow(label, key, min, max, step) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'margin:7px 0';
+        var lab = document.createElement('div');
+        lab.style.cssText = 'display:flex;justify-content:space-between;opacity:.85';
+        var name = document.createElement('span'); name.textContent = label;
+        var val = document.createElement('span'); val.textContent = String(getVar(key));
+        lab.appendChild(name); lab.appendChild(val);
+        var r = document.createElement('input');
+        r.type = 'range'; r.min = min; r.max = max; r.step = step;
+        r.value = getVar(key);
+        r.style.cssText = 'width:100%;margin-top:3px;accent-color:#8fc7ff';
+        r.addEventListener('input', function () {
+          setVar(key, parseFloat(r.value));
+          val.textContent = String(getVar(key));
+          dirty = true;
+          if (key === 'GAP' || key === 'JITTER' || key === 'Z_SPREAD' ||
+              key === 'CARD_H' || key === 'CAM_DIST') layout();
+          applyPositions();
+          out.textContent = dump();
+        });
+        wrap.appendChild(lab); wrap.appendChild(r);
+        panel.appendChild(wrap);
+        state[key] = r;
+        return r;
+      }
+      function getVar(k) { return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS,
+        FLY_MS: FLY_MS, FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER,
+        Z_SPREAD: Z_SPREAD, CARD_H: CARD_H, CAM_DIST: CAM_DIST, FOCUS_FILL: FOCUS_FILL,
+        DIM_MAX: DIM_MAX, FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE,
+        INERTIA_TAU: INERTIA_TAU, NAV_INSET: NAV_INSET, NAV_TOP: NAV_TOP,
+        NAV_SIZE: NAV_SIZE, TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT })[k]; }
+      function setVar(k, v) {
+        if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
+        else if (k === 'DEL_MS') DEL_MS = v; else if (k === 'FLY_MS') FLY_MS = v;
+        else if (k === 'FLY_STAGGER') FLY_STAGGER = v; else if (k === 'GAP') GAP = v;
+        else if (k === 'JITTER') JITTER = v; else if (k === 'Z_SPREAD') Z_SPREAD = v;
+        else if (k === 'CARD_H') CARD_H = v; else if (k === 'CAM_DIST') CAM_DIST = v;
+        else if (k === 'FOCUS_FILL') FOCUS_FILL = v; else if (k === 'DIM_MAX') DIM_MAX = v;
+        else if (k === 'FOCUS_MS') FOCUS_MS = v; else if (k === 'WHEEL_IMPULSE') WHEEL_IMPULSE = v;
+        else if (k === 'INERTIA_TAU') INERTIA_TAU = v; else if (k === 'NAV_INSET') NAV_INSET = v;
+        else if (k === 'NAV_TOP') NAV_TOP = v; else if (k === 'NAV_SIZE') NAV_SIZE = v;
+        else if (k === 'TOGGLE_BOTTOM') TOGGLE_BOTTOM = v; else if (k === 'TOGGLE_LEFT') TOGGLE_LEFT = v;
+      }
+      // 按钮位置（也做成滑块）
+      var sec2 = document.createElement('div');
+      sec2.textContent = '按钮位置';
+      sec2.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
+      panel.appendChild(sec2);
+      posRows.forEach(function (r) { addRow(r[0], r[1], r[2], r[3], r[4]); });
+
+      var sec1 = document.createElement('div');
+      sec1.textContent = '动效与排布';
+      sec1.style.cssText = 'margin:12px 0 2px;font-weight:600;opacity:.75';
+      panel.appendChild(sec1);
+      rows.forEach(function (r) { addRow(r[0], r[1], r[2], r[3], r[4]); });
+
+      var out = document.createElement('div');
+      out.style.cssText = 'margin-top:10px;padding:7px 8px;border-radius:8px;background:rgba(255,255,255,.07);' +
+        'font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-all;user-select:all';
+      panel.appendChild(out);
+      function dump() {
+        var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
+                    'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT'];
+        return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
+      }
+      out.textContent = dump();
+
+      var reset = document.createElement('button');
+      reset.textContent = '复位';
+      reset.style.cssText = 'margin-top:8px;padding:5px 12px;border-radius:8px;border:0;cursor:pointer;' +
+        'background:rgba(255,255,255,.14);color:#e8f0fa;font:inherit';
+      reset.addEventListener('click', function () { location.reload(); });
+      panel.appendChild(reset);
+
+      host.appendChild(panel);
+      tunerEl = panel;
+      applyPositions();
+    }
+    // 按钮位置滑块 -> 实际样式
+    function applyPositions() {
+      if (navPrev) {
+        navPrev.style.left = NAV_INSET + 'px';
+        navNext.style.right = NAV_INSET + 'px';
+        navPrev.style.top = NAV_TOP + '%';
+        navNext.style.top = NAV_TOP + '%';
+        navPrev.style.width = NAV_SIZE + 'px';  navPrev.style.height = NAV_SIZE + 'px';
+        navNext.style.width = NAV_SIZE + 'px';  navNext.style.height = NAV_SIZE + 'px';
+      }
+      if (toggleEl) {
+        toggleEl.style.bottom = TOGGLE_BOTTOM + 'px';
+        toggleEl.style.left = TOGGLE_LEFT + '%';
+      }
     }
 
     function destroy() {
