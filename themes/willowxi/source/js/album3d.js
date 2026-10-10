@@ -43,6 +43,10 @@
   var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
   var DIM_MAX = 0.55;          // 聚焦时整屏压暗的上限
+  // 构建戳：写在页面属性 + 底部按钮上，方便一眼确认浏览器跑的是哪一版。
+  // 必须定义在模块级 —— 放到 init 里会导致 buildToggle() 拿不到它而抛
+  // ReferenceError，整个初始化挂掉（我刚踩过）。
+  var BUILD = 'focusY-4fbefdf+';
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
@@ -688,6 +692,8 @@
       st.textContent = '@keyframes albumCaret{0%,49%{opacity:.85}50%,100%{opacity:0}}';
       document.head.appendChild(st);
 
+      host.setAttribute('data-album-build', BUILD);
+      console.log('[album3d] build ' + BUILD);
       buildOpening();
       buildToggle();
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
@@ -811,7 +817,7 @@
     function buildToggle() {
       var b = document.createElement('button');
       b.setAttribute('data-album-toggle', '');
-      b.textContent = '总览';
+      b.textContent = '总览 · ' + BUILD;
       b.style.cssText =
         'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:41;' +
         'pointer-events:auto;cursor:pointer;padding:9px 22px;border-radius:999px;' +
@@ -835,7 +841,7 @@
           viewTo.pan = 0;                 // 纵向回中
         }
         scrollV = 0; panV = 0;
-        b.textContent = mode ? '浏览' : '总览';
+        b.textContent = (mode ? '浏览' : '总览') + ' · ' + BUILD;
       });
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
