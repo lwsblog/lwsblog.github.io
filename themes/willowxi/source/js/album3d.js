@@ -115,19 +115,19 @@
     var FS = [
       'precision highp float;',
       'uniform sampler2D uTex, uBlur;',
-      'uniform float uMix, uAlpha, uPaper, uTint;',
+      'uniform float uMix, uAlpha, uPaper, uTint, uDim;',
     'uniform vec4 uUVO;',        // xy = uv 偏移, zw = uv 缩放
     'uniform vec3 uPaperRGB;',   // 相纸/数字的颜色
       'varying vec2 vUV;',
       'varying float vFade;',
       'void main() {',
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
-      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB, uAlpha); return; }',
+      '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
       '  if (uPaper > 1.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
-      '  gl_FragColor = vec4(c, uAlpha);',
+      '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
       '}'
     ].join('\n');
 
@@ -341,6 +341,9 @@
 
       // 远的先画（画家算法），近的覆盖
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
+      // 聚焦时被聚焦那张 uDim=0（保持原亮度），其余随聚焦进度变暗。
+      // 用着色器里的一个乘法实现，不增加任何几何 —— 不会像整屏四边形那样拖垮软件渲染。
+      var focusNum2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
       for (var i = 0; i < order.length; i++) {
         var p = order[i];
         if (!p.ready) continue;
@@ -385,6 +388,10 @@
         gl.uniform1f(loc.uScroll, scroll);
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 相纸
+        // 变暗系数：被聚焦那张为 0（保持原亮度），其余按聚焦进度变暗。
+        // 只是在片元着色器里乘一下，不增加任何几何。
+        var dimK = (focusNum2 >= 0 && p.num !== focusNum2) ? DIM_MAX * focusT : 0;
+        gl.uniform1f(loc.uDim, dimK);
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
         gl.uniform3f(loc.uCenter, x, y, z);
@@ -621,7 +628,7 @@
       if (!gl) { host.remove(); return; }
 
       prog = program(VS, FS);
-      ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll',
+      ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
        'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
@@ -672,9 +679,12 @@
       // 聚焦时的整屏压暗层（用户选：整屏压暗，照片也一起暗）
       dimEl = document.createElement('div');
       dimEl.setAttribute('data-album-dim', '');
-      dimEl.style.cssText = 'position:fixed;inset:0;z-index:38;pointer-events:none;' +
+      // 🔴 插在画布**之前**，所以渲染在画布下面 —— 只压主题背景，
+      // 不压 GL 里的照片（照片由上面的 uDim 自己变暗）。
+      // 原来它是 position:fixed 盖在最上层，所以连被聚焦那张一起压暗了。
+      dimEl.style.cssText = 'position:absolute;inset:0;z-index:0;pointer-events:none;' +
         'background:#05070b;opacity:0;';
-      host.appendChild(dimEl);
+      host.insertBefore(dimEl, host.firstChild);
       raf = requestAnimationFrame(frame);
     }
 
