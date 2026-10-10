@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Liquid Glass Cursor</title>
+<style>
+  html, body { margin:0; height:100%; background:#0a0d12; overflow:hidden;
+               font:12px/1.6 ui-monospace, Consolas, monospace; color:#cfe3f5; cursor:none; }
+  #gl { position:fixed; inset:0; display:block; width:100vw; height:100vh; }
+  #panel { position:fixed; top:0; right:0; width:300px; height:100%; overflow-y:auto;
+           background:rgba(8,11,16,.84); border-left:1px solid rgba(140,190,255,.18);
+           padding:14px 16px 60px; box-sizing:border-box; cursor:auto; }
+  h2 { font-size:12px; letter-spacing:.18em; margin:0 0 10px; color:#8fb6dd; }
+  h3 { font-size:11px; letter-spacing:.14em; margin:16px 0 8px; color:#7fe3d0;
+       border-top:1px solid rgba(140,190,255,.16); padding-top:12px; }
+  .row { margin-bottom:9px; }
+  .row label { display:flex; justify-content:space-between; margin-bottom:3px; }
+  .row b { color:#7fe3d0; font-weight:400; }
+  input[type=range] { width:100%; accent-color:#4fd1c5; }
+  .hint { color:#6b8299; }
+  kbd { background:#16202e; border:1px solid rgba(140,190,255,.3); border-radius:4px; padding:0 4px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="panel">
+  <h2>Liquid Glass · Cursor</h2>
+  <div class="hint">
+    移动鼠标：玻璃跟随<br>
+    按住：<b>缩小</b>（松开还原）<br>
+    滚轮：<b>圆形 ⇄ 圆角矩形</b>，带补间<br>
+    <kbd>R</kbd> 复位
+  </div>
+  <h3>形状与大小</h3>
+  <div id="c1"></div>
+  <h3>玻璃（你给的那组）</h3>
+  <div id="c2"></div>
+</div>
+<script>
+// ===== 你一开始给的参数 =====
+var P = {
+  circleD: 94,          // 圆形直径
+  rectW: 94, rectH: 49, // 圆角矩形的宽高
+  rectR: 22,            // 矩形圆角半径（滑块可调）
+  morph: 0,             // 0=圆形 1=矩形（滚轮切换，带动画）
+  grow: 0.82,           // 按住时缩到多少（小于 1 才是缩小）
+  follow: 0.18,         // 跟随鼠标的缓动系数
+  // —— 玻璃材质（你截图那组）——
+  depth: 45, feather: 12, curve: 1.2,
+  chroma: 0.12, glint: 0.64, rimW: 2.6, rimGain: 0.41,
+  tintA: 0,
+  // —— 共用 ——
+  blurR: 1.0, blurPasses: 3, frostMix: 1.0
+};
+var SPEC1 = [
+  ['circleD','圆形直径','20,260,1'],
+  ['rectW','矩形宽','20,400,1'],
+  ['rectH','矩形高','20,260,1'],
+  ['rectR','矩形圆角半径','0,140,1'],
+  ['grow','按住缩小倍率','0.5,1,0.01'],
+  ['follow','跟随缓动','0.03,0.5,0.005']
+];
+var SPEC2 = [
+  ['depth','折射位移 depth','0,300,1'], ['feather','折射带宽度 feather','2,200,1'],
+  ['curve','过渡曲线 curve','0.4,6,0.05'], ['chroma','色散 chroma','0,0.4,0.002'],
+  ['glint','方向高光 glint','0,2,0.01'], ['rimW','内壁高光宽 rimW','0,40,0.2'],
+  ['rimGain','内壁高光强 rimGain','0,2,0.01'], ['tintA','底色浓度 tintA','0,0.5,0.005'],
+  ['blurR','模糊半径 blurR','0,24,0.25'], ['blurPasses','模糊轮数 blurPasses','1,3,1'],
+  ['frostMix','磨砂占比 frostMix','0,1,0.02']
+];
+function build(host, spec) {
+  spec.forEach(function (sp) {
+    var k = sp[0], lab = sp[1], rg = (sp[2]||'0,900,1').split(',');
+    var row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = '<label><span>'+lab+'</span><b>'+P[k]+'</b></label>'+
+      '<input type="range" min="'+rg[0]+'" max="'+rg[1]+'" step="'+rg[2]+'">';
+    host.appendChild(row);
+    var inp = row.querySelector('input'), out = row.querySelector('b');
+    inp.value = P[k];
+    inp.addEventListener('input', function () {
+      P[k] = parseFloat(inp.value); out.textContent = inp.value;
+    });
+  });
+}
+build(document.getElementById('c1'), SPEC1);
+build(document.getElementById('c2'), SPEC2);
+
+// ===== WebGL =====
+var cv = document.getElementById('gl');
+var gl = cv.getContext('webgl', { alpha:false, antialias:true });
+function compile(t, src) {
+  var sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+  return sh;
+}
+function program(vs, fs) {
+  var pr = gl.createProgram();
+  gl.attachShader(pr, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(pr, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(pr, 0, 'aXY'); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  return pr;
+}
+var VS = "attribute vec2 aXY; varying vec2 vUV; void main(){ vUV=aXY*0.5+0.5; gl_Position=vec4(aXY,0.,1.); }";
+var FS_SCENE = "precision highp float; uniform sampler2D uT; varying vec2 vUV;"
+  + "void main(){ gl_FragColor = texture2D(uT,vUV); }";
+var FS_BLUR = "precision highp float; uniform sampler2D uT; uniform vec2 uDir; varying vec2 vUV;"
+  + "void main(){ vec4 c=texture2D(uT,vUV)*0.196;"
+  + " c+=(texture2D(uT,vUV+uDir)+texture2D(uT,vUV-uDir))*0.175;"
+  + " c+=(texture2D(uT,vUV+uDir*2.)+texture2D(uT,vUV-uDir*2.))*0.120;"
+  + " c+=(texture2D(uT,vUV+uDir*3.)+texture2D(uT,vUV-uDir*3.))*0.066;"
+  + " c+=(texture2D(uT,vUV+uDir*4.)+texture2D(uT,vUV-uDir*4.))*0.028;"
+  + " gl_FragColor=c; }";
+// 玻璃：uShape = (cx, cy, bx, by, r) 用两个 vec4 传
+var FS_GLASS = [
+  'precision highp float;',
+  'uniform sampler2D uSrc, uFrost;',
+  'uniform float uHalfW, uHalfH, uMode, uMixF;',
+  'uniform vec4 uShape, uG1, uG2, uTint;',   // uShape=(cx,cy,bx,by) uG1=(r,depth,feather,curve) uG2=(chroma,glint,rimW,rimGain)
+  'varying vec2 vUV;',
+  'float sd(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r);',
+  '  return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r; }',
+  'vec2 nrmSDF(vec2 p, vec2 b, float r){ float e=0.75;',
+  '  float dx=sd(p+vec2(e,0.),b,r)-sd(p-vec2(e,0.),b,r);',
+  '  float dy=sd(p+vec2(0.,e),b,r)-sd(p-vec2(0.,e),b,r);',
+  '  vec2 g=vec2(dx,dy); return (dot(g,g)<1e-9)?vec2(0.):normalize(g); }',
+  'void main(){',
+  '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
+  '  vec2 fc = vec2(gl_FragCoord.x, uHalfH*2.0 - gl_FragCoord.y);',
+  '  vec2 b = vec2(uShape.z, uShape.w);',
+  '  vec2 p = fc - vec2(uShape.x, uShape.y);',
+  '  float r = uG1.x;',
+  '  float d = sd(p, b, r);',
+  '  if (d > 0.0) discard;',
+  '  float feather = max(1.0, uG1.z);',
+  '  float edge = clamp((d + feather)/feather, 0.0, 1.0);',
+  '  float amt = pow(edge, uG1.w);',
+  '  vec2 nrm = nrmSDF(p, b, r);',
+  '  float inner = -d;',
+  '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(uG1.y/vec2(uHalfW*2.0,uHalfH*2.0));',
+  '  float ck = uG2.x*amt;',
+  '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
+  '  float cg = texture2D(uFrost, vUV-base).g;',
+  '  float cb = texture2D(uFrost, vUV-base*(1.0-ck)).b;',
+  '  float t = smoothstep(0.0, feather, inner);',
+  '  vec3 col = mix(vec3(cr,cg,cb), mix(texture2D(uSrc,vUV).rgb, texture2D(uFrost,vUV).rgb, uMixF), t);',
+  '  col = mix(col, uTint.rgb, uTint.a);',
+  // ---- 边缘高光 ----
+  // 🔴 上一版有三个毛病，看着"假"：
+  //   1 法线 y 被我取反了（vec2(nrm.x,-nrm.y)），光跑到**左下**，与实际打光相反
+  //   2 pow(dot,4) 是一刀切 -> 硬边月牙，真玻璃是渐变
+  //   3 只有一侧亮、对侧死黑；而且高光摊在整条折射带里，没有贴着边
+  // 修正：方向不翻转、改用 smoothstep 做柔和过渡、只在边几像素内、并给对侧一点弱光。
+  '  float rimBand = max(2.5, uG2.z * 2.5);',
+  '  float rim = 1.0 - smoothstep(0.0, rimBand, inner);',   // 只贴在边缘几像素
+  // 主光：左上（DOM 坐标里"上"是 -y）。nrm 已是 DOM 坐标的外法线，直接点乘，不翻转。
+  '  vec2 Lmain = normalize(vec2(-0.60, -0.80));',
+  '  float dMain = dot(nrm, Lmain);',
+  '  col += vec3(smoothstep(0.10, 0.92, dMain) * rim * uG2.w * 1.15);',
+  // 副光：右下补一点，避免另一侧死黑（真玻璃两侧都接光）
+  '  vec2 Lfill = normalize(vec2(0.60, 0.80));',
+  '  float dFill = dot(nrm, Lfill);',
+  '  col += vec3(smoothstep(0.30, 1.00, dFill) * rim * uG2.w * 0.42);',
+  // 玻璃体：上亮下暗的竖向渐变，给一点厚度感
+  '  col += vec3(0.030 * (0.5 - p.y / max(1.0, b.y)));',
+  '  col += vec3(amt*0.05);',
+  '  gl_FragColor = vec4(col, 1.0);',
+  '}'
+].join('\n');
+var pScene = program(VS, FS_SCENE), pBlur = program(VS, FS_BLUR), pGlass = program(VS, FS_GLASS);
+var quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+function mkFBO(w,h){
+  var f=gl.createFramebuffer(), t=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  return {f:f,t:t};
+}
+// 背景（仿站上场景）
+var bg=document.createElement('canvas');
+function paintBG(w,h){
+  bg.width=w; bg.height=h;
+  var c=bg.getContext('2d');
+  var g=c.createLinearGradient(0,0,w,h);
+  g.addColorStop(0,'#121a26'); g.addColorStop(.5,'#1b2a3d'); g.addColorStop(1,'#0e1621');
+  c.fillStyle=g; c.fillRect(0,0,w,h);
+  var cols=['#e8a13a','#4fd1c5','#e05c7a','#7fb2ff','#c8f06a'];
+  for(var i=0;i<5;i++){ c.fillStyle=cols[i]; c.globalAlpha=.85;
+    c.fillRect((i*271+60)%(w-200),(i*173+90)%(h-160),150,110); }
+  c.globalAlpha=1;
+  c.strokeStyle='rgba(150,200,255,.22)'; c.lineWidth=1;
+  for(var x=0;x<w;x+=72){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,h); c.stroke(); }
+  for(var y=0;y<h;y+=56){ c.beginPath(); c.moveTo(0,y); c.lineTo(w,y); c.stroke(); }
+  c.fillStyle='rgba(226,238,250,.9)'; c.font='600 34px ui-sans-serif, system-ui, sans-serif';
+  c.fillText('WillowXI / Photographs',120,96);
+  c.fillStyle='rgba(200,220,240,.75)'; c.font='15px ui-monospace, monospace';
+  for(var k=0;k<8;k++) c.fillText('REF-000'+(k+1)+'  ·  fine detail test  ·  abcdefghijklmnop',120,130+k*22);
+}
+var sceneTex=gl.createTexture();
+function uploadScene(){
+  gl.bindTexture(gl.TEXTURE_2D,sceneTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,bg);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+}
+var fbScene,fbA,fbB,W=0,H=0;
+function bindQuad(){ gl.bindBuffer(gl.ARRAY_BUFFER,quad); gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0); }
+function passTo(d){ gl.bindFramebuffer(gl.FRAMEBUFFER,d); gl.viewport(0,0,W,H); gl.drawArrays(gl.TRIANGLES,0,3); }
+
+// ===== 交互：鼠标跟随 / 点击放大 / 滚轮变形 =====
+var mx=640,my=400, cx=640,cy=400,      // 鼠标目标 / 玻璃当前位置
+    morph=0, morphT=0,                  // 当前动画值 / 目标值（滚轮切换）
+    grow=1, growT=1;                    // 放大动画
+addEventListener('mousemove',function(e){ mx=e.clientX; my=e.clientY; });
+// 仅仅在按住的时候缩小：按下缩、松开还原（不是开关式切换）
+var pressed = false;
+addEventListener('mousedown',function(e){ if(e.target.closest('#panel')) return; pressed = true; });
+addEventListener('mouseup',function(){ pressed = false; });
+addEventListener('mouseleave',function(){ pressed = false; });
+addEventListener('wheel',function(e){ if(e.target.closest('#panel')) return;
+  e.preventDefault(); morphT = morphT>0.5 ? 0 : 1; },{passive:false});
+addEventListener('keydown',function(e){ if(e.key==='r'||e.key==='R'){ morphT=0; growT=1; }});
+
+function draw(){
+  if(!W) return;
+  // 缓动（补间动画）
+  cx += (mx-cx)*P.follow; cy += (my-cy)*P.follow;
+  morph += (morphT-morph)*0.14;
+  grow  += ((pressed ? P.grow : 1.0) - grow)*0.14;
+  // 形状插值：圆形 = b(s,s), r=s；矩形 = b(w/2,h/2), r=rectR
+  var s = P.circleD*0.5*grow;
+  var rw = P.rectW*0.5*grow, rh = P.rectH*0.5*grow;
+  var bx = s+(rw-s)*morph, by = s+(rh-s)*morph;
+  var rr = s+(P.rectR*grow-s)*morph;
+  rr = Math.min(rr, Math.min(bx,by));      // 圆角不能超过半宽/半高
+  // ① 场景
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  gl.useProgram(pScene); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,sceneTex);
+  gl.uniform1i(gl.getUniformLocation(pScene,'uT'),0); bindQuad(); passTo(fbScene.f);
+  // ② 可分离高斯
+  gl.useProgram(pBlur); gl.uniform1i(gl.getUniformLocation(pBlur,'uT'),0);
+  var uDir=gl.getUniformLocation(pBlur,'uDir'), src=fbScene.t;
+  for(var i=0;i<P.blurPasses;i++){
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,src);
+    gl.uniform2f(uDir,P.blurR/W,0); bindQuad(); passTo(fbA.f);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,fbA.t);
+    gl.uniform2f(uDir,0,P.blurR/H); bindQuad(); passTo(fbB.f);
+    src=fbB.t;
+  }
+  // ③ 原样铺 + 玻璃
+  gl.useProgram(pGlass);
+  var U=function(n){ return gl.getUniformLocation(pGlass,n); };
+  gl.uniform1f(U('uHalfW'),W*0.5); gl.uniform1f(U('uHalfH'),H*0.5);
+  gl.uniform1f(U('uMixF'),P.frostMix);
+  gl.uniform4f(U('uShape'),cx,cy,bx,by);
+  gl.uniform4f(U('uG1'),rr,P.depth,P.feather,P.curve);
+  gl.uniform4f(U('uG2'),P.chroma,P.glint,P.rimW,P.rimGain);
+  gl.uniform4f(U('uTint'),0.70,0.84,0.96,P.tintA);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,fbScene.t); gl.uniform1i(U('uSrc'),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,src); gl.uniform1i(U('uFrost'),1);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  gl.uniform1f(U('uMode'),0); bindQuad(); passTo(null);
+  gl.uniform1f(U('uMode'),1); bindQuad(); passTo(null);
+  gl.disable(gl.BLEND);
+  requestAnimationFrame(draw);
+}
+function resize(){
+  W=cv.width=Math.floor(cv.clientWidth); H=cv.height=Math.floor(cv.clientHeight);
+  paintBG(W,H); uploadScene();
+  fbScene=mkFBO(W,H); fbA=mkFBO(W,H); fbB=mkFBO(W,H);
+}
+addEventListener('resize',resize);
+resize(); requestAnimationFrame(draw);
+window.__gl = { P:P, state:function(){ return {cx:cx,cy:cy,morph:morph,grow:grow}; },
+                set:function(o){ Object.assign(P,o); } };
+</script>
+</body>
+</html>

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Liquid Glass Lab · 文字玻璃</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0d12; overflow: hidden;
+               font: 12px/1.6 ui-monospace, Consolas, monospace; color: #cfe3f5; }
+  /* canvas 是替换元素：fixed+inset:0 不会拉伸它，必须显式给宽高 */
+  #gl { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; }
+  #panel { position: fixed; top: 0; right: 0; width: 320px; height: 100%; overflow-y: auto;
+           background: rgba(8,11,16,.84); border-left: 1px solid rgba(140,190,255,.18);
+           padding: 14px 16px 60px; box-sizing: border-box; }
+  #panel h2 { font-size: 12px; letter-spacing: .18em; margin: 0 0 10px; color: #8fb6dd; }
+  #panel h3 { font-size: 11px; letter-spacing: .14em; margin: 18px 0 8px; color: #7fe3d0;
+              border-top: 1px solid rgba(140,190,255,.16); padding-top: 12px; }
+  .row { margin-bottom: 10px; }
+  .row label { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .row b { color: #7fe3d0; font-weight: 400; }
+  input[type=range] { width: 100%; accent-color: #4fd1c5; }
+  input[type=text] { width: 100%; box-sizing: border-box; background: #0e1622; color: #dff0ff;
+                     border: 1px solid rgba(140,190,255,.28); border-radius: 5px; padding: 5px 7px;
+                     font: 12px ui-monospace, monospace; }
+  .hint { color: #6b8299; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="panel">
+  <h2>Liquid Glass Lab</h2>
+  <div class="hint">拖动滑块实时生效。背景仿站上场景（网格 + 色块 + 细字），便于看折射与磨砂。</div>
+  <h3>胶囊玻璃（方块）</h3>
+  <div id="ctrls"></div>
+  <h3>文字玻璃（Ubuntu Mono）</h3>
+  <div class="row"><label><span>文字内容</span></label>
+    <input type="text" id="txt" value="WillowXI"></div>
+  <div id="ctrls2"></div>
+</div>
+<script>
+// ============ 参数 ============
+var P = {   // 胶囊玻璃（原有）
+  lensX: 437, lensY: 353, lensW: 94, lensH: 49,
+  radius: 22, depth: 45, feather: 12, curve: 1.2,
+  chroma: 0.12, glint: 0.64, rimW: 2.6, rimGain: 0.41,
+  tintA: 0
+};
+var T = {   // 文字玻璃（新增）
+  fontSize: 96, letterSpacing: 0, fontWeight: 400,
+  depth: 14, edgeSoft: 0.22, curve: 1.2,
+  chroma: 0.12, glint: 0.64, rimGain: 0.41, tintA: 0,
+  posY: 0.42            // 文字纵向位置（占屏高比例）
+};
+var G = {   // 两层共用
+  blurR: 1.0, blurPasses: 3, frostMix: 1.0
+};
+var SPEC1 = [
+  ['lensX','玻璃 X'], ['lensY','玻璃 Y'], ['lensW','玻璃宽'], ['lensH','玻璃高'],
+  ['radius','圆角半径 R','0,200,1'], ['depth','折射位移 depth','0,300,1'],
+  ['feather','折射带宽度 feather','2,200,1'], ['curve','过渡曲线 curve','0.4,6,0.05'],
+  ['chroma','色散 chroma','0,0.4,0.002'], ['glint','方向高光 glint','0,2,0.01'],
+  ['rimW','内壁高光宽 rimW','0,40,0.2'], ['rimGain','内壁高光强 rimGain','0,2,0.01'],
+  ['tintA','底色浓度 tintA','0,0.5,0.005']
+];
+var SPEC2 = [
+  ['fontSize','字号 px','20,320,1'], ['letterSpacing','字距 px','-10,40,0.5'],
+  ['fontWeight','字重','400,700,100'], ['posY','纵向位置','0.05,0.95,0.01'],
+  ['depth','折射位移 depth','0,200,1'], ['edgeSoft','边缘带宽 band','0.02,1.0,0.01'],
+  ['curve','过渡曲线 curve','0.4,6,0.05'], ['chroma','色散 chroma','0,0.4,0.002'],
+  ['glint','方向高光 glint','0,2,0.01'], ['rimGain','边缘高光强 rimGain','0,2,0.01'],
+  ['tintA','底色浓度 tintA','0,0.5,0.005']
+];
+var SPECG = [
+  ['blurR','模糊半径 blurR','0,24,0.25'], ['blurPasses','模糊轮数 blurPasses','1,3,1'],
+  ['frostMix','磨砂占比 frostMix','0,1,0.02']
+];
+function build(host, spec, obj, prefix) {
+  spec.forEach(function (sp) {
+    var k = sp[0], lab = sp[1], rng = (sp[2] || '0,900,1').split(',');
+    var row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = '<label><span>' + lab + '</span><b id="v_' + prefix + k + '">' + obj[k] + '</b></label>' +
+      '<input type="range" id="i_' + prefix + k + '" min="' + rng[0] + '" max="' + rng[1] + '" step="' + rng[2] + '">';
+    host.appendChild(row);
+    var inp = row.querySelector('input'), out = row.querySelector('b');
+    inp.value = obj[k];
+    inp.addEventListener('input', function () {
+      obj[k] = parseFloat(inp.value); out.textContent = inp.value; draw();
+    });
+    obj['__el_' + k] = inp; obj['__out_' + k] = out;
+  });
+}
+build(document.getElementById('ctrls'), SPEC1, P, '');
+build(document.getElementById('ctrls2'), SPEC2, T, 't_');
+build(document.getElementById('ctrls2'), SPECG, G, 'g_');
+var txtInput = document.getElementById('txt');
+txtInput.addEventListener('input', function () { draw(); });
+
+// ============ WebGL ============
+var cv = document.getElementById('gl');
+var gl = cv.getContext('webgl', { alpha: false, antialias: true });
+function compile(t, src) {
+  var sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+  return sh;
+}
+function program(vs, fs) {
+  var pr = gl.createProgram();
+  gl.attachShader(pr, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(pr, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(pr, 0, 'aXY'); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  return pr;
+}
+var VS = "attribute vec2 aXY; varying vec2 vUV; void main(){ vUV=aXY*0.5+0.5; gl_Position=vec4(aXY,0.,1.); }";
+var FS_SCENE = "precision highp float; uniform sampler2D uT; varying vec2 vUV;"
+  + "void main(){ gl_FragColor = texture2D(uT, vUV); }";
+var FS_BLUR = "precision highp float; uniform sampler2D uT; uniform vec2 uDir; varying vec2 vUV;"
+  + "void main(){ vec4 c = texture2D(uT,vUV)*0.196;"
+  + " c += (texture2D(uT,vUV+uDir*1.)+texture2D(uT,vUV-uDir*1.))*0.175;"
+  + " c += (texture2D(uT,vUV+uDir*2.)+texture2D(uT,vUV-uDir*2.))*0.120;"
+  + " c += (texture2D(uT,vUV+uDir*3.)+texture2D(uT,vUV-uDir*3.))*0.066;"
+  + " c += (texture2D(uT,vUV+uDir*4.)+texture2D(uT,vUV-uDir*4.))*0.028;"
+  + " gl_FragColor = c; }";
+
+// 玻璃：uMode 0=原样铺 1=胶囊(SDF) 2=文字(遮罩梯度当法线)
+var FS_GLASS = [
+  'precision highp float;',
+  'uniform sampler2D uSrc, uFrost, uMask, uMaskB;',
+  'uniform float uHalfW, uHalfH, uMode, uMixF;',
+  'uniform vec4 uLens, uG1, uG2, uTint, uMaskRect, uT1, uT2;',
+  'uniform vec2 uRim;',
+  'varying vec2 vUV;',
+  'float sd(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r);',
+  '  return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r; }',
+  'vec2 nrmSDF(vec2 p, vec2 b, float r){ float e=0.75;',
+  '  float dx=sd(p+vec2(e,0.),b,r)-sd(p-vec2(e,0.),b,r);',
+  '  float dy=sd(p+vec2(0.,e),b,r)-sd(p-vec2(0.,e),b,r);',
+  '  vec2 g=vec2(dx,dy); return (dot(g,g)<1e-9)?vec2(0.):normalize(g); }',
+  // 折射 + 色散 + 磨砂，胶囊与文字共用
+  'vec3 glassColor(vec2 vUV, vec2 nrm, float amt, float curve, float depth, float chroma, float rimGain, float tintA, vec3 tint, float soft){',
+  '  vec4 bl = texture2D(uFrost, vUV);',
+  '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(depth/vec2(uHalfW*2.0,uHalfH*2.0));',
+  '  float ck = chroma*amt;',
+  '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
+  '  float cg = texture2D(uFrost, vUV-base).g;',
+  '  float cb = texture2D(uFrost, vUV-base*(1.0-ck)).b;',
+  '  vec3 col = mix(vec3(cr,cg,cb), mix(texture2D(uSrc,vUV).rgb, bl.rgb, uMixF), soft);',
+  '  col = mix(col, tint, tintA);',
+  '  col += vec3(amt*rimGain);',
+  '  return col;',
+  '}',
+  'void main(){',
+  '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
+  '  vec2 fc = vec2(gl_FragCoord.x, uHalfH*2.0 - gl_FragCoord.y);',
+  '  if (uMode < 1.5) {',
+  '    vec2 hb = uLens.zw*0.5;',
+  '    vec2 p = fc - (uLens.xy + hb);',
+  '    float d = sd(p, hb, uG1.x);',
+  '    if (d > 0.0) discard;',
+  '    float edge = clamp((d + uG1.z)/uG1.z, 0.0, 1.0);',
+  '    float amt = pow(edge, uG1.w);',
+  '    vec2 nrm = nrmSDF(p, hb, uG1.x);',
+  '    float inner = -d;',
+  '    float t = smoothstep(0.0, uG1.z, inner);',
+  '    vec2 base = vec2(nrm.x,-nrm.y)*amt*(uG1.y/vec2(uHalfW*2.0,uHalfH*2.0));',
+  '    float ck = uG2.x*amt;',
+  '    float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
+  '    float cg = texture2D(uFrost, vUV-base).g;',
+  '    float cb = texture2D(uFrost, vUV-base*(1.0-ck)).b;',
+  '    vec3 col = mix(vec3(cr,cg,cb), mix(texture2D(uSrc,vUV).rgb, texture2D(uFrost,vUV).rgb, uMixF), t);',
+  '    col = mix(col, uTint.rgb, uTint.a);',
+  '    float rim = 1.0 - smoothstep(0.0, uRim.x, inner);',
+  '    col += vec3(rim*(0.55+0.45*abs(nrm.y))*uRim.y);',
+  '    col += vec3(amt*0.05);',
+  '    vec2 L = normalize(vec2(-1.,-1.));',
+  '    col += vec3(pow(max(dot(vec2(nrm.x,-nrm.y),L),0.0),4.0)*amt*uG2.y);',
+  '    gl_FragColor = vec4(col, 1.0);',
+  '    return;',
+  '  }',
+  // ===== 模式 2：文字玻璃 =====
+  '  vec2 muv = (fc - uMaskRect.xy) / uMaskRect.zw;',
+  '  if (muv.x < 0.0 || muv.x > 1.0 || muv.y < 0.0 || muv.y > 1.0) discard;',
+  '  float m = texture2D(uMask, muv).a;',
+  '  if (m < 0.004) discard;',
+  // dd ≈ 到字形边界的**有符号距离**：模糊遮罩在边界处是线性斜坡，减 0.5 即得。
+  // 字内为正、字外为负，|dd| 与像素距离成正比 —— 这样才能做**等宽**的一圈边。
+  '  float mb = texture2D(uMaskB, muv).a;',
+  '  float dd = (mb - 0.5) * 2.0;',
+  // 法线取**模糊遮罩**的梯度：它天然连续，不像清晰遮罩那样在一像素内跳变。
+  '  vec2 tx = vec2(3.0/uMaskRect.z, 3.0/uMaskRect.w);',
+  '  float gx = texture2D(uMaskB, muv+vec2(tx.x,0.0)).a - texture2D(uMaskB, muv-vec2(tx.x,0.0)).a;',
+  '  float gy = texture2D(uMaskB, muv+vec2(0.0,tx.y)).a - texture2D(uMaskB, muv-vec2(0.0,tx.y)).a;',
+  '  vec2 g = vec2(gx, gy);',
+  '  vec2 nrm = (dot(g,g) < 1e-8) ? vec2(0.0) : normalize(g);',
+  // 🔴 **不做除法**。上一版把 (mb-0.5) 除以梯度幅值来换算像素距离，
+  // 但远离边界时模糊遮罩已压平（梯度≈0），商变成大数乱跳 -> 边缘抖成**点状锯齿**。
+  // 直接用差值即可：小半径高斯的斜坡在边界附近本来就接近线性，
+  // 把差值 clamp 住，带宽就由 band 稳定控制（band 大 = 边宽）。
+  '  float dd2 = clamp((mb - 0.5) * 2.0, -1.0, 1.0);',
+  '  float band = max(0.02, uT2.y);',
+  '  float edge = 1.0 - smoothstep(0.0, band, abs(dd2));',
+  '  float amt = pow(edge, uT2.z);',
+  '  float soft = 1.0 - smoothstep(0.0, band, abs(dd2));',
+  '  vec3 col = glassColor(vUV, nrm, amt, uT2.z, uT1.x, uT1.y, uT1.z, uT1.w, vec3(0.7,0.84,0.96), 1.0);',
+  // 玻璃**体量**：字内给一点极淡的亮，否则在深色背景上只剩一圈边、看着像描边字
+  '  col += vec3(0.055 * smoothstep(-0.1, 0.35, mb));',
+  '  col += vec3(edge * uT1.z);',                            // 等宽亮边
+  '  vec2 L = normalize(vec2(-1.,-1.));',
+  '  col += vec3(pow(max(dot(vec2(nrm.x,-nrm.y),L),0.0),4.0)*amt*uT2.x);',
+  '  gl_FragColor = vec4(col, smoothstep(0.0, 0.5, m));',
+  '}'
+].join('\n');
+
+var pScene = program(VS, FS_SCENE), pBlur = program(VS, FS_BLUR), pGlass = program(VS, FS_GLASS);
+var quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+function mkFBO(w, h) {
+  var f = gl.createFramebuffer(), t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { f: f, t: t };
+}
+// ---------- 背景 ----------
+var bg = document.createElement('canvas');
+function paintBG(w, h) {
+  bg.width = w; bg.height = h;
+  var c = bg.getContext('2d');
+  var g = c.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, '#121a26'); g.addColorStop(0.5, '#1b2a3d'); g.addColorStop(1, '#0e1621');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  var cols = ['#e8a13a', '#4fd1c5', '#e05c7a', '#7fb2ff', '#c8f06a'];
+  for (var i = 0; i < 5; i++) {
+    c.fillStyle = cols[i]; c.globalAlpha = 0.85;
+    c.fillRect((i * 271 + 60) % (w - 200), (i * 173 + 90) % (h - 160), 150, 110);
+  }
+  c.globalAlpha = 1;
+  c.strokeStyle = 'rgba(150,200,255,.22)'; c.lineWidth = 1;
+  for (var x = 0; x < w; x += 72) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); }
+  for (var y = 0; y < h; y += 56) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+  c.fillStyle = 'rgba(226,238,250,.9)'; c.font = '600 34px ui-sans-serif, system-ui, sans-serif';
+  c.fillText('WillowXI / Photographs', 120, 96);
+  c.fillStyle = 'rgba(200,220,240,.75)'; c.font = '15px ui-monospace, monospace';
+  for (var r = 0; r < 8; r++) c.fillText('REF-000' + (r + 1) + '  ·  fine detail test  ·  abcdefghijklmnop', 120, 130 + r * 22);
+}
+// ---------- 文字遮罩 ----------
+var maskCv = document.createElement('canvas'), maskTex = null, maskRect = [0,0,1,1];
+// 预模糊遮罩：它边缘是一条线性斜坡，(mb-0.5) 就是**到字形边界的有符号距离**的近似。
+// 有了距离才能做出**等宽**的一圈边 —— 只用清晰遮罩的话边缘只有 1px 抗锯齿斜坡，
+// 无论怎么调参数都只能得到描边字。
+var maskBCv = document.createElement('canvas'), maskBTex = null;
+var MASK_BLUR_PX = 5;   // 小半径：斜坡在边界附近接近线性，且不会压平太快
+function paintMask(w, h) {
+  var txt = txtInput.value || 'WillowXI';
+  var fs = T.fontSize, ls = T.letterSpacing, fw = T.fontWeight;
+  var mc = maskCv.getContext('2d');
+  mc.font = fw + ' ' + fs + 'px "Ubuntu Mono", ui-monospace, monospace';
+  var tw = 0;
+  for (var i = 0; i < txt.length; i++) tw += mc.measureText(txt[i]).width + ls;
+  var pad = Math.ceil(fs * 0.5);
+  var mw = Math.ceil(tw + pad * 2), mh = Math.ceil(fs * 1.7 + pad * 2);
+  if (maskCv.width !== mw || maskCv.height !== mh) { maskCv.width = mw; maskCv.height = mh; }
+  mc = maskCv.getContext('2d');
+  mc.clearRect(0, 0, mw, mh);
+  mc.font = fw + ' ' + fs + 'px "Ubuntu Mono", ui-monospace, monospace';
+  mc.fillStyle = '#fff'; mc.textBaseline = 'middle'; mc.textAlign = 'left';
+  var x = pad;
+  for (var k = 0; k < txt.length; k++) {
+    mc.fillText(txt[k], x, mh * 0.5);
+    x += mc.measureText(txt[k]).width + ls;
+  }
+  // 同一份文字再画一张**预模糊**版（CPU 一次真高斯，与亚克力同一套做法）
+  if (maskBCv.width !== mw || maskBCv.height !== mh) { maskBCv.width = mw; maskBCv.height = mh; }
+  var bc = maskBCv.getContext('2d');
+  bc.clearRect(0, 0, mw, mh);
+  bc.filter = 'blur(' + MASK_BLUR_PX + 'px)';
+  bc.drawImage(maskCv, 0, 0);
+  bc.filter = 'none';
+  if (!maskBTex) maskBTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, maskBTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maskBCv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  if (!maskTex) maskTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, maskTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);   // v=0 对应遮罩顶行，与 DOM y 一致
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maskCv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  maskRect = [(w - mw) * 0.5, h * T.posY - mh * 0.5, mw, mh];
+}
+var sceneTex = gl.createTexture();
+function uploadScene() {
+  gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);   // vUV.y=0 在屏幕底部，2D 画布第 0 行在顶部
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bg);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+var fbScene = null, fbA = null, fbB = null, W = 0, H = 0;
+function bindQuad() {
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+}
+function passTo(dst) { gl.bindFramebuffer(gl.FRAMEBUFFER, dst); gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+function draw() {
+  if (!W) return;
+  paintMask(W, H);
+  // ① 场景
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  gl.useProgram(pScene); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.uniform1i(gl.getUniformLocation(pScene, 'uT'), 0); bindQuad(); passTo(fbScene.f);
+  // ② 可分离高斯
+  gl.useProgram(pBlur);
+  gl.uniform1i(gl.getUniformLocation(pBlur, 'uT'), 0);
+  var uDir = gl.getUniformLocation(pBlur, 'uDir'), src = fbScene.t;
+  for (var i = 0; i < G.blurPasses; i++) {
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform2f(uDir, G.blurR / W, 0); bindQuad(); passTo(fbA.f);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, fbA.t);
+    gl.uniform2f(uDir, 0, G.blurR / H); bindQuad(); passTo(fbB.f);
+    src = fbB.t;
+  }
+  // ③ 原样铺 + 胶囊 + 文字
+  gl.useProgram(pGlass);
+  var U = function (n) { return gl.getUniformLocation(pGlass, n); };
+  gl.uniform1f(U('uHalfW'), W * 0.5); gl.uniform1f(U('uHalfH'), H * 0.5);
+  gl.uniform1f(U('uMixF'), G.frostMix);
+  gl.uniform4f(U('uLens'), P.lensX, P.lensY, P.lensW, P.lensH);
+  gl.uniform4f(U('uG1'), P.radius, P.depth, P.feather, P.curve);
+  gl.uniform4f(U('uG2'), P.chroma, P.glint, 0, 0);
+  gl.uniform4f(U('uTint'), 0.70, 0.84, 0.96, P.tintA);
+  gl.uniform2f(U('uRim'), P.rimW, P.rimGain);
+  gl.uniform4f(U('uMaskRect'), maskRect[0], maskRect[1], maskRect[2], maskRect[3]);
+  gl.uniform4f(U('uT1'), T.depth, T.chroma, T.rimGain, T.tintA);
+  gl.uniform4f(U('uT2'), T.glint, T.edgeSoft, T.curve, 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, fbScene.t); gl.uniform1i(U('uSrc'), 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(U('uFrost'), 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, maskTex); gl.uniform1i(U('uMask'), 2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, maskBTex); gl.uniform1i(U('uMaskB'), 3);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.uniform1f(U('uMode'), 0); bindQuad(); passTo(null);
+  gl.uniform1f(U('uMode'), 1); bindQuad(); passTo(null);
+  gl.uniform1f(U('uMode'), 2); bindQuad(); passTo(null);
+  gl.disable(gl.BLEND);
+}
+function resize() {
+  W = cv.width = Math.floor(cv.clientWidth);
+  H = cv.height = Math.floor(cv.clientHeight);
+  paintBG(W, H); uploadScene();
+  fbScene = mkFBO(W, H); fbA = mkFBO(W, H); fbB = mkFBO(W, H);
+  draw();
+}
+window.addEventListener('resize', resize);
+window.addEventListener('load', function () { setTimeout(resize, 120); });  // 等 webfont
+resize();
+window.__lab = { P: P, T: T, G: G, draw: draw, maskRect: function () { return maskRect; } };
+</script>
+</body>
+</html>
