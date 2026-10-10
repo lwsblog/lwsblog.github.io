@@ -432,19 +432,28 @@
       'uniform sampler2D uFrostTex;',
       'uniform sampler2D uComp;',
       'uniform vec2 uRes;',
-      'uniform vec2 uBall;',      // 光标球心（设备像素，y 自下而上）
-      'uniform float uR;',        // 球半径（设备像素）
+      // 形状：一个圆角矩形（uSh=(cx,cy,半宽,半高) 设备像素 y 自下而上；uShR=圆角半径）
+      // 圆 = 半宽=半高=半径 的圆角矩形，所以球和按钮共用同一套代码
+      'uniform vec4 uSh;',
+      'uniform float uShR;',
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
+      'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
+      '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
+      'vec2 nrmSDF(vec2 p, vec2 b, float r) { float e = 0.75;',
+      '  float dx = sd(p + vec2(e, 0.), b, r) - sd(p - vec2(e, 0.), b, r);',
+      '  float dy = sd(p + vec2(0., e), b, r) - sd(p - vec2(0., e), b, r);',
+      '  vec2 g = vec2(dx, dy); return (dot(g, g) < 1e-9) ? vec2(0.) : normalize(g); }',
       'varying vec2 vUV;',
       'void main() {',
       '  vec2 fc = vUV * uRes;',
-      '  vec2 p = fc - uBall;',
-      '  float dist = length(p) - uR;',
+      '  vec2 p = fc - uSh.xy;',
+      '  vec2 bsh = vec2(uSh.z, uSh.w);',
+      '  float dist = sd(p, bsh, uShR);',
       '  vec4 src = texture2D(uScene, vUV);',
       '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
-      '  vec2 nrm = length(p) > 0.001 ? normalize(p) : vec2(0.0);',
+      '  vec2 nrm = nrmSDF(p, bsh, uShR);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
       '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
@@ -482,7 +491,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uBall','uR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -774,15 +783,31 @@
       var rpx = GLASS_BALL_R * dpr;
       // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
       var bx = mouseX * dpr, by = H - mouseY * dpr;
-      gl.uniform2f(postLoc.uBall, bx, by);
-      gl.uniform1f(postLoc.uR, rpx);
+      // 形状列表：光标球 + 三个按钮（都用圆角矩形表达）
+      var shapes = [];
+      if (mouseIn) shapes.push([bx, by, rpx, rpx, rpx]);
+      [toggleEl, navPrev, navNext].forEach(function (el3) {
+        if (!el3) return;
+        if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
+        var r3 = el3.getBoundingClientRect();
+        if (r3.width < 2 || r3.height < 2) return;
+        var hw3 = r3.width * dpr * 0.5, hh3 = r3.height * dpr * 0.5;
+        shapes.push([(r3.left + r3.width * 0.5) * dpr,
+                     H - (r3.top + r3.height * 0.5) * dpr,
+                     hw3, hh3, Math.min(hw3, hh3)]);
+      });
       gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
                    GLASS_CURVE, GLASS_CHROMA);
       gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
       gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      for (var si = 0; si < shapes.length; si++) {
+        gl.uniform4f(postLoc.uSh, shapes[si][0], shapes[si][1], shapes[si][2], shapes[si][3]);
+        gl.uniform1f(postLoc.uShR, shapes[si][4]);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
     }
 
     // 外层 draw：有玻璃时先渲进 FBO 再后处理，否则直接画
