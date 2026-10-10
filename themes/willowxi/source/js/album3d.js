@@ -47,6 +47,7 @@
   // 必须定义在模块级 —— 放到 init 里会导致 buildToggle() 拿不到它而抛
   // ReferenceError，整个初始化挂掉（我刚踩过）。
   var BUILD = 'focusY-4fbefdf+';
+  var toggleEl = null, dimEl2 = null;
   var SHOW_NUM = false;        // 是否显示照片编号（用户要求不显示；改 true 即可恢复）
   // 列表要**纵向**：列数少 -> 行数多 -> 高度溢出 -> 竖滚才有内容。
   // 6 列时 22 张只有 4 行，一屏就装下了，竖滚是空的。
@@ -150,7 +151,8 @@
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
-  var focusFromScroll = 0, focusFromPan = 0;   // 聚焦补间的起始镜头位置
+  var focusFromScroll = 0, focusFromPan = 0;
+  var navHLast = 0;   // 聚焦补间的起始镜头位置
   var preScroll = 0, prePan = 0;      // 进入聚焦前的镜头位置，退出时回到它
   var INERTIA_TAU = 480;           // 惯性衰减时间常数(ms)
   var WHEEL_IMPULSE = 0.13;        // 每格滚轮给多少速度（0.55 时 6 格就冲到底，太大）
@@ -591,6 +593,17 @@
         scrollTarget = scroll; panTarget = panY;
       }
       if (dimEl) dimEl.style.opacity = (DIM_MAX * focusT).toFixed(3);
+      // 调试读数：聚焦时把关键量显示在底部按钮上，用户截图即可定位问题
+      if (toggleEl) {
+        if (focusTo === 1 || focusT > 0.001) {
+          var _fp = photos[focusIdx];
+          toggleEl.textContent = 'pan ' + panY.toFixed(2) + ' / tgt ' + focusPan.toFixed(2) +
+            ' / nav ' + (navHLast | 0) + ' / h ' + window.innerHeight +
+            ' / z ' + camZoom.toFixed(2) + ' / y ' + (_fp ? _fp.y.toFixed(2) : '-');
+        } else {
+          toggleEl.textContent = (mode ? '浏览' : '总览') + ' · ' + BUILD;
+        }
+      }
 
       var switching = (modeFrom !== mode);
       if (switching) {
@@ -769,6 +782,7 @@
         // 照片被推到画面下方、底部被裁掉。顶部栏再高也不会超过视口的一小部分。
         var navH = navEl ? navEl.getBoundingClientRect().height : 0;
         navH = Math.max(0, Math.min(navH, window.innerHeight * 0.14));
+        navHLast = navH;
         var dyNdc = -(navH / Math.max(1, window.innerHeight));   // 负 = 画面中心偏下
         // z0 必须在这里先算出来：原来我在 var z0 之前用了它，
         // 得到 camZ - undefined = NaN，panY 整条变成 NaN（画面直接乱掉）。
