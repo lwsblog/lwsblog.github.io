@@ -148,6 +148,7 @@
   // 视图切换时视角的补间起止（与 modeT 同一条缓动，所以不会硬切）
   var viewFrom = { scroll: 0, pan: 0 }, viewTo = { scroll: 0, pan: 0 };
   var rowDur = 375, rowCount = 1;
+  var seqDur = 600, seqGap = 40;     // 逐个飞入：单张时长 / 相邻错峰
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
@@ -303,6 +304,10 @@
       gridBottomY = -((rows - 1) / 2) * cellH;
       // 逐行扫描：总时长 MODE_MS 分摊到 rows 行，每行自己走完 rowDur
       rowCount = rows;
+      // 一个一个飞（用户要求）：按序号错峰，一行从左到右、再下一行。
+      // 网格里照片的下标本身就是这个顺序。
+      seqDur = MODE_MS * 0.42;                                  // 单张自己走完的时长
+      seqGap = Math.max(0, MODE_MS - seqDur) / Math.max(1, n - 1);  // 相邻两张错开的间隔
       rowDur = MODE_MS / Math.max(1, rows);
       var vis = camZ * 0.72;
       panMin = gridBottomY + vis;
@@ -649,8 +654,8 @@
         for (var q = 0; q < photos.length; q++) {
           var ph = photos[q];
           var rowI = Math.floor((ph.num - 1) / GRID_COLS);
-          var dly = ROW_STAGGER ? rowI * rowDur : 0;
-          var ppr = clamp01((now - modeAt - dly) / rowDur);
+          var dly = ROW_STAGGER ? q * seqGap : 0;
+          var ppr = clamp01((now - modeAt - dly) / seqDur);
           var pee = ppr < 0.5 ? 4 * ppr * ppr * ppr : 1 - Math.pow(-2 * ppr + 2, 3) / 2;
           ph.mt = modeFrom + (mode - modeFrom) * pee;
         }
@@ -801,7 +806,10 @@
       focusFromScroll = scroll;      // 记录起点，供补间按进度精确插值
       focusFromPan = panY;
       focusFromZoom = camZoom;       // 退出时要从这里插值回 1，否则拉远动画会消失
-      if (i < 0) { focusScroll = preScroll; focusPan = prePan; }   // 退出：目标回到原位
+      // 退出聚焦（用户要求）：**不要飞回原来的位置**。
+      // 镜头就停在当前这张照片上（横向保持不动），只把 zoom 拉到最远（=1），
+      // 纵向恢复到自然位置（0）。
+      if (i < 0) { focusScroll = scroll; focusPan = 0; }
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
         preScroll = scroll; prePan = panY;             // 先记住原位
@@ -939,6 +947,7 @@
     return { init: init, destroy: destroy, rectOf: rectOfCss,
              // 临时测试钩子：强制设定 panY（用来验证 uPanY 真的到了 GPU）
              __setPan: function (y) { panY = y; dirty = true; },
+             __mtOf: function (i) { var p = photos[i]; return (p && p.mt !== undefined) ? p.mt : modeT; },
              state: function () {
                return { photos: photos.length, ready: ready, openState: openState,
                         scroll: scroll, target: scrollTarget,
