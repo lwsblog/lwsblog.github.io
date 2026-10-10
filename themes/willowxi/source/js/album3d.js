@@ -1084,6 +1084,12 @@
     var GLASS_CHROMA = 1.5;      // 色散强度（0 = 关）
     var GLASS_FROST = 2;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 180;         // 聚光 saturate%
+    // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
+    // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
+    var GLASS_RIM_W = 26;        // 环高光宽度 px
+    var GLASS_RIM_A = 0.85;      // 环高光强度
+    var GLASS_GLINT = 0.35;      // 内部冷光（glint）
+    var GLASS_TINT = 0.05;       // 玻璃底色浓度
     var glassFilterSeq = 0;
 
     // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
@@ -1118,8 +1124,11 @@
             var L = Math.sqrt(dx * dx + dy * dy);
             if (L > 1e-6) { nx = dx / L; ny = dy / L; }
           }
-          img.data[i] = Math.round(128 + nx * amt * 127);
-          img.data[i + 1] = Math.round(128 + ny * amt * 127);
+          // 🔴 位移方向：取**负法线**。
+          // 真正的玻璃球是把边缘的影像往中心吸（压缩），
+          // 用正法线是往外推（拉伸）—— 那看起来是"被拉出条纹"，不是"透过玻璃弯折"。
+          img.data[i] = Math.round(128 - nx * amt * 127);
+          img.data[i + 1] = Math.round(128 - ny * amt * 127);
           img.data[i + 2] = 128; img.data[i + 3] = 255;
         }
       }
@@ -1200,6 +1209,16 @@
       var bf = 'url(#' + id + ') blur(' + GLASS_FROST + 'px) saturate(' + GLASS_SAT + '%)';
       el.style.backdropFilter = bf;
       el.style.webkitBackdropFilter = bf;
+      // 环高光 + 冷色内光 + 底色 + 外阴影：图二那种质感主要来自这一层
+      var rw = GLASS_RIM_W, ra = GLASS_RIM_A, gt = GLASS_TINT, gl = GLASS_GLINT;
+      el.style.background = 'rgba(255,255,255,' + (0.03 + gt).toFixed(3) + ')';
+      el.style.boxShadow =
+        'inset 0 0 0 1px rgba(255,255,255,' + (ra * 0.30).toFixed(3) + '),' +
+        'inset 0 -' + (rw * 0.34).toFixed(1) + 'px ' + (rw * 0.72).toFixed(1) + 'px -' + (rw * 0.30).toFixed(1) + 'px rgba(255,255,255,' + (ra * 0.72).toFixed(3) + '),' +
+        'inset 0 ' + (rw * 0.34).toFixed(1) + 'px ' + (rw * 0.72).toFixed(1) + 'px -' + (rw * 0.34).toFixed(1) + 'px rgba(255,255,255,' + (ra * 0.42).toFixed(3) + '),' +
+        'inset 0 0 ' + (rw * 1.3).toFixed(1) + 'px -' + (rw * 0.2).toFixed(1) + 'px rgba(170,215,255,' + (gl * 0.55).toFixed(3) + '),' +
+        '0 8px 24px rgba(0,0,0,.35)';
+      el.style.borderRadius = el.classList.contains('album-nav-btn') ? '50%' : '999px';
       return id;
     }
     // 参数变了就重装（位移图是按尺寸生成的，必须重算）
@@ -1224,6 +1243,8 @@
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
         GLASS_DEPTH_PCT: GLASS_DEPTH_PCT, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
         GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
+        GLASS_RIM_W: GLASS_RIM_W, GLASS_RIM_A: GLASS_RIM_A,
+        GLASS_GLINT: GLASS_GLINT, GLASS_TINT: GLASS_TINT,
         GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
     }
     function setVar(k, v) {
@@ -1240,6 +1261,8 @@
       else if (k === 'GLASS_DEPTH_PCT') GLASS_DEPTH_PCT = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
       else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
+      else if (k === 'GLASS_RIM_W') GLASS_RIM_W = v; else if (k === 'GLASS_RIM_A') GLASS_RIM_A = v;
+      else if (k === 'GLASS_GLINT') GLASS_GLINT = v; else if (k === 'GLASS_TINT') GLASS_TINT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
       else if (k === 'GRID_GAPY') GRID_GAPY = v; else if (k === 'GRID_FIT') GRID_FIT = v;
     }
@@ -1349,7 +1372,11 @@
        ['带宽集中度 curve(小=带更宽)','GLASS_CURVE',0.20,5.0,0.05],
        ['色散 chroma','GLASS_CHROMA',0,10,0.2],
        ['磨砂 blur px','GLASS_FROST',0,24,0.5],
-       ['聚光 saturate %','GLASS_SAT',100,300,5]
+       ['聚光 saturate %','GLASS_SAT',100,300,5],
+       ['环高光 宽 px','GLASS_RIM_W',0,70,1],
+       ['环高光 强','GLASS_RIM_A',0,1.4,0.02],
+       ['冷色内光 glint','GLASS_GLINT',0,1,0.02],
+       ['底色 tint','GLASS_TINT',0,0.35,0.01]
       ].forEach(function (r) {
         var row = addRow(r[0], r[1], r[2], r[3], r[4]);
         row.addEventListener('input', function () { refreshGlass(); });
