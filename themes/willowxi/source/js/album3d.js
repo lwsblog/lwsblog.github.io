@@ -1066,12 +1066,20 @@
     // DOM 上的做法：把上面算出的 (法线*强度) 编码成一张位移图（R/G 通道，128 为 0），
     // 用 SVG feImage + feDisplacementMap 挂到 backdrop-filter 上。
     // 实测：Edge/Chromium 支持 backdrop-filter: url(#svgFilter)，位移真实生效。
-    var GLASS_DEPTH = 26;      // 折射位移（feDisplacementMap 的 scale）
-    var GLASS_FEATHER = 0.34;  // 边缘羽化：只有靠边这一圈做折射
-    var GLASS_CURVE = 1.6;     // 曲线指数：越大越集中在最外缘
-    var GLASS_CHROMA = 0.0;    // 色散强度（0 = 关，需要三通道合成，开销更高）
-    var GLASS_FROST = 6;       // 磨砂模糊 px
-    var GLASS_SAT = 180;       // 聚光 saturate%
+    // 默认值照抄 dome3d.js 那套调好的液态玻璃：
+    //   uG1.y depth ≈ 28px、uG1.z feather ≈ 90px（**很宽**的过渡带）、
+    //   折射采的是磨砂图、另有 rim 环高光 / glint / tint。
+    // 之前我把 feather 设成 0.34*56px ≈ 9px，折射只发生在极窄一圈里，所以看不见。
+    var GLASS_DEPTH = 30;      // 折射位移 px（feDisplacementMap 的 scale）
+    var GLASS_FEATHER = 0.88;  // 过渡带宽度（占短边比例）：0.88 = 几乎整个玻璃
+    var GLASS_CURVE = 1.25;    // 曲线指数：越大越集中在最外缘
+    var GLASS_CHROMA = 2.0;    // 色散（0 = 关）
+    var GLASS_FROST = 3;       // 磨砂模糊 px
+    var GLASS_SAT = 170;       // 聚光 saturate%
+    var GLASS_RIM_W = 22;      // 环高光宽度 px
+    var GLASS_RIM_A = 0.55;    // 环高光强度
+    var GLASS_GLINT = 0.30;    // 高光（glint）
+    var GLASS_TINT = 0.06;     // 玻璃底色浓度
     var glassFilterSeq = 0;
 
     // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
@@ -1187,6 +1195,16 @@
       var bf = 'url(#' + id + ') blur(' + GLASS_FROST + 'px) saturate(' + GLASS_SAT + '%)';
       el.style.backdropFilter = bf;
       el.style.webkitBackdropFilter = bf;
+      // 环高光（rim）+ 外阴影 + glint + 底色，按参数实时算
+      var rimW = GLASS_RIM_W, rimA = GLASS_RIM_A, gl = GLASS_GLINT, tint = GLASS_TINT;
+      el.style.background = 'rgba(255,255,255,' + (0.05 + tint).toFixed(3) + ')';
+      el.style.boxShadow =
+        'inset 0 ' + (rimW * 0.12).toFixed(1) + 'px ' + (rimW * 0.5).toFixed(1) + 'px -' + (rimW * 0.35).toFixed(1) + 'px rgba(255,255,255,' + (rimA * 0.75).toFixed(3) + '),' +
+        'inset 0 -' + (rimW * 0.05).toFixed(1) + 'px ' + (rimW * 0.45).toFixed(1) + 'px -' + (rimW * 0.3).toFixed(1) + 'px rgba(255,255,255,' + (rimA * 0.35).toFixed(3) + '),' +
+        'inset 0 0 ' + rimW.toFixed(1) + 'px rgba(160,200,255,' + (gl * 0.5).toFixed(3) + '),' +
+        '0 6px 22px rgba(0,0,0,.34),' +
+        '0 0 0 1px rgba(160,200,255,' + (0.16 + gl * 0.2).toFixed(3) + ')';
+      el.style.borderRadius = (el.classList.contains('album-nav-btn') ? '50%' : '999px');
       return id;
     }
     // 参数变了就重装（位移图是按尺寸生成的，必须重算）
@@ -1200,7 +1218,7 @@
     var TUNE_KEY = 'album3d-tune-v1';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT', 'GLASS_RIM_W', 'GLASS_RIM_A', 'GLASS_GLINT', 'GLASS_TINT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
@@ -1210,7 +1228,9 @@
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
         GLASS_DEPTH: GLASS_DEPTH, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
         GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
-        GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
+        GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT,
+        GLASS_RIM_W: GLASS_RIM_W, GLASS_RIM_A: GLASS_RIM_A,
+        GLASS_GLINT: GLASS_GLINT, GLASS_TINT: GLASS_TINT })[k];
     }
     function setVar(k, v) {
       if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
@@ -1228,6 +1248,8 @@
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
       else if (k === 'GRID_GAPY') GRID_GAPY = v; else if (k === 'GRID_FIT') GRID_FIT = v;
+      else if (k === 'GLASS_RIM_W') GLASS_RIM_W = v; else if (k === 'GLASS_RIM_A') GLASS_RIM_A = v;
+      else if (k === 'GLASS_GLINT') GLASS_GLINT = v; else if (k === 'GLASS_TINT') GLASS_TINT = v;
     }
     function saveTune() {
       try {
@@ -1335,7 +1357,11 @@
        ['曲线 curve','GLASS_CURVE',0.4,5,0.1],
        ['色散 chroma','GLASS_CHROMA',0,10,0.2],
        ['磨砂 blur px','GLASS_FROST',0,24,0.5],
-       ['聚光 saturate %','GLASS_SAT',100,300,5]
+       ['聚光 saturate %','GLASS_SAT',100,300,5],
+       ['环高光 宽 px','GLASS_RIM_W',0,60,1],
+       ['环高光 强','GLASS_RIM_A',0,1,0.02],
+       ['高光 glint','GLASS_GLINT',0,1,0.02],
+       ['底色 tint','GLASS_TINT',0,0.4,0.01]
       ].forEach(function (r) {
         var row = addRow(r[0], r[1], r[2], r[3], r[4]);
         row.addEventListener('input', function () { refreshGlass(); });
@@ -1373,7 +1399,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT', 'GLASS_RIM_W', 'GLASS_RIM_A', 'GLASS_GLINT', 'GLASS_TINT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
