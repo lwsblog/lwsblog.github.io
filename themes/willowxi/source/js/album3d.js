@@ -426,52 +426,56 @@
       'void main() { vUV = aUV; gl_Position = vec4(aXY, 0.0, 1.0); }'
     ].join('\n');
 
+    // VERBATIM from glass-cursor.html (the lab page). Only three wiring changes:
+    //   uSrc/uFrost -> my composed texture / its blurred version
+    //   uShape      -> (cx, cy top-down px, halfW, halfH) of the ball or a button
+    //   uMode/uMixF -> 1 / 1
+    // Plus one early-out so pixels outside the shape keep my own scene (my canvas is transparent).
     var FS_POST = [
       'precision highp float;',
-      'uniform sampler2D uScene;',
-      'uniform sampler2D uFrostTex;',
-      'uniform sampler2D uComp;',
-      'uniform vec2 uRes;',
-      // 形状：一个圆角矩形（uSh=(cx,cy,半宽,半高) 设备像素 y 自下而上；uShR=圆角半径）
-      // 圆 = 半宽=半高=半径 的圆角矩形，所以球和按钮共用同一套代码
-      'uniform vec4 uSh;',
-      'uniform float uShR;',
-      'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
-      'uniform vec2 uRim;',       // x=环宽 px, y=环强度
-      'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
-      'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
-      '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
-      'vec2 nrmSDF(vec2 p, vec2 b, float r) { float e = 0.75;',
-      '  float dx = sd(p + vec2(e, 0.), b, r) - sd(p - vec2(e, 0.), b, r);',
-      '  float dy = sd(p + vec2(0., e), b, r) - sd(p - vec2(0., e), b, r);',
-      '  vec2 g = vec2(dx, dy); return (dot(g, g) < 1e-9) ? vec2(0.) : normalize(g); }',
+      'uniform sampler2D uSrc, uFrost;',
+      'uniform float uHalfW, uHalfH, uMode, uMixF;',
+      'uniform vec4 uShape, uG1, uG2, uTint;',
       'varying vec2 vUV;',
-      'void main() {',
-      '  vec2 fc = vUV * uRes;',
-      '  vec2 p = fc - uSh.xy;',
-      '  vec2 bsh = vec2(uSh.z, uSh.w);',
-      '  float dist = sd(p, bsh, uShR);',
-      '  vec4 src = texture2D(uScene, vUV);',
-      '  if (dist > 1.5) { gl_FragColor = src; return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
-      '  vec2 nrm = nrmSDF(p, bsh, uShR);',
-      '  float inner = -dist;',
-      '  float feather = max(uG.x, 0.001);',
-      '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
-      '  float amt = pow(edge, uG.z);',
-      '  vec2 base = nrm * amt * uG.y / uRes;',
-      '  float ck = uG.w * amt;',
-      // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
-      '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
-      '  float cg = texture2D(uFrostTex, vUV - base).g;',
-      '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
-      '  float ca = 1.0;',   // 球内是合成图（背景+照片），完全不透明
-      '  vec3 sharp = texture2D(uComp, vUV).rgb;',   // 球内的清晰底图 = 合成图（含动态背景）
-      '  vec3 col = vec3(cr, cg, cb);',
-      '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
-      '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
-      '  col += vec3(rim * uRim.y) * 0.55;',
-      '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
-      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
+      'float sd(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b+vec2(r);',
+      '  return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r; }',
+      'vec2 nrmSDF(vec2 p, vec2 b, float r){ float e=0.75;',
+      '  float dx=sd(p+vec2(e,0.),b,r)-sd(p-vec2(e,0.),b,r);',
+      '  float dy=sd(p+vec2(0.,e),b,r)-sd(p-vec2(0.,e),b,r);',
+      '  vec2 g=vec2(dx,dy); return (dot(g,g)<1e-9)?vec2(0.):normalize(g); }',
+      'void main(){',
+      '  if (uMode < 0.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
+      '  vec2 fc = vec2(gl_FragCoord.x, uHalfH*2.0 - gl_FragCoord.y);',
+      '  vec2 b = vec2(uShape.z, uShape.w);',
+      '  vec2 p = fc - vec2(uShape.x, uShape.y);',
+      '  float r = uG1.x;',
+      '  float d = sd(p, b, r);',
+      '  if (d > 1.5) { gl_FragColor = texture2D(uSrc, vUV); return; }',
+      '  float feather = max(1.0, uG1.z);',
+      '  float edge = clamp((d + feather)/feather, 0.0, 1.0);',
+      '  float amt = pow(edge, uG1.w);',
+      '  vec2 nrm = nrmSDF(p, b, r);',
+      '  float inner = -d;',
+      '  vec2 base = vec2(nrm.x,-nrm.y)*amt*(uG1.y/vec2(uHalfW*2.0,uHalfH*2.0));',
+      '  float ck = uG2.x*amt;',
+      '  float cr = texture2D(uFrost, vUV-base*(1.0+ck)).r;',
+      '  float cg = texture2D(uFrost, vUV-base).g;',
+      '  float cb = texture2D(uFrost, vUV-base*(1.0-ck)).b;',
+      '  float t = smoothstep(0.0, feather, inner);',
+      '  vec3 col = mix(vec3(cr,cg,cb), mix(texture2D(uSrc,vUV).rgb, texture2D(uFrost,vUV).rgb, uMixF), t);',
+      '  col = mix(col, uTint.rgb, uTint.a);',
+      '  float rimBand = max(2.5, uG2.z * 2.5);',
+      '  float rim = 1.0 - smoothstep(0.0, rimBand, inner);',
+      '  vec2 Lmain = normalize(vec2(-0.60, -0.80));',
+      '  float dMain = dot(nrm, Lmain);',
+      '  col += vec3(smoothstep(0.10, 0.92, dMain) * rim * uG2.w * 1.15);',
+      '  vec2 Lfill = normalize(vec2(0.60, 0.80));',
+      '  float dFill = dot(nrm, Lfill);',
+      '  col += vec3(smoothstep(0.30, 1.00, dFill) * rim * uG2.w * 0.42);',
+      '  col += vec3(0.030 * (0.5 - p.y / max(1.0, b.y)));',
+      '  col += vec3(amt*0.05);',
+      '  float a = max(texture2D(uSrc, vUV).a, 0.997);',
+      '  gl_FragColor = vec4(col, a);',
       '}'
     ].join('\n');
 
@@ -491,7 +495,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra'].forEach(function (n) {
+      ['uSrc','uFrost','uHalfW','uHalfH','uMode','uMixF','uShape','uG1','uG2','uTint'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -772,40 +776,26 @@
       gl.enableVertexAttribArray(auv); gl.vertexAttribPointer(auv, 2, gl.FLOAT, false, 16, 8);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, fboTex);
-      gl.uniform1i(postLoc.uScene, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, (compOk ? compTex : fboTex));
+      gl.uniform1i(postLoc.uSrc, 0);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, (blurTexB || fboTex));
-      gl.uniform1i(postLoc.uFrostTex, 1);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, compOk ? compTex : fboTex);
-      gl.uniform1i(postLoc.uComp, 2);
-      gl.uniform2f(postLoc.uRes, W, H);
-      var rpx = GLASS_BALL_R * dpr;
-      // 光标：CSS 像素 -> 设备像素，y 翻到自下而上（gl_FragCoord 约定）
-      var bx = mouseX * dpr, by = H - mouseY * dpr;
-      // 形状列表：光标球 + 三个按钮（都用圆角矩形表达）
-      var shapes = [];
-      if (mouseIn) shapes.push([bx, by, rpx, rpx, rpx]);
-      [toggleEl, navPrev, navNext].forEach(function (el3) {
-        if (!el3) return;
-        if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
-        var r3 = el3.getBoundingClientRect();
-        if (r3.width < 2 || r3.height < 2) return;
-        var hw3 = r3.width * dpr * 0.5, hh3 = r3.height * dpr * 0.5;
-        shapes.push([(r3.left + r3.width * 0.5) * dpr,
-                     H - (r3.top + r3.height * 0.5) * dpr,
-                     hw3, hh3, Math.min(hw3, hh3)]);
-      });
-      gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
-                   GLASS_CURVE, GLASS_CHROMA);
-      gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
-      gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+      gl.uniform1i(postLoc.uFrost, 1);
+      gl.uniform1f(postLoc.uHalfW, W * 0.5);
+      gl.uniform1f(postLoc.uHalfH, H * 0.5);
+      gl.uniform1f(postLoc.uMode, 1.0);
+      gl.uniform1f(postLoc.uMixF, 1.0);
       // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       for (var si = 0; si < shapes.length; si++) {
-        gl.uniform4f(postLoc.uSh, shapes[si][0], shapes[si][1], shapes[si][2], shapes[si][3]);
-        gl.uniform1f(postLoc.uShR, shapes[si][4]);
+        var sp2 = shapes[si];
+        var rr3 = Math.min(sp2[2], sp2[3]);
+        gl.uniform4f(postLoc.uShape, sp2[0], H - sp2[1], sp2[2], sp2[3]);
+        gl.uniform4f(postLoc.uG1, rr3, GLASS_DEPTH_PCT * 2 * rpx, GLASS_FEATHER * rpx, GLASS_CURVE);
+        gl.uniform4f(postLoc.uG2, GLASS_CHROMA, 0.0, GLASS_RIM_W, GLASS_GLINT);
+        gl.uniform4f(postLoc.uTint, 0.70, 0.84, 0.96, GLASS_TINT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
