@@ -821,10 +821,14 @@
         if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
         var r3 = el3.getBoundingClientRect();
         if (r3.width < 2 || r3.height < 2) return;
-        // ★ 直接复用光标胶囊的形状与尺寸（只换中心点）——保证按钮和光标一模一样
+        // 底部按钮：和光标同一颗胶囊（它本来就是药丸）
+        // 左右按钮：圆形，用自身尺寸当圆（半径=半边）
+        var isPill = el3.classList.contains('album-btn-toggle');
+        var hw3 = isPill ? GLASS_PILL_HW * dpr : r3.width * dpr * 0.5;
+        var hh3 = isPill ? GLASS_PILL_HH * dpr : r3.height * dpr * 0.5;
         shapes.push([(r3.left + r3.width * 0.5) * dpr,
                      H - (r3.top + r3.height * 0.5) * dpr,
-                     GLASS_PILL_HW * dpr, GLASS_PILL_HH * dpr, GLASS_PILL_HH * dpr]);
+                     hw3, hh3, Math.min(hw3, hh3)]);
       });
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
       // 原来它们在循环外、用光标球的半径 rpx 算，于是按钮（半高只有球的 1/3）
