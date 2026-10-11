@@ -814,22 +814,50 @@
       var bx = mouseX * dpr, by = H - mouseY * dpr;
       // 形状列表：光标球 + 三个按钮（都用圆角矩形表达）
       var shapes = [];
-      // 光标：胶囊（半宽 GLASS_PILL_HW、半高 GLASS_PILL_HH，圆角=半高）
-      if (mouseIn) shapes.push([bx, by, GLASS_PILL_HW * dpr, GLASS_PILL_HH * dpr, GLASS_PILL_HH * dpr]);
-      [toggleEl, navPrev, navNext].forEach(function (el3) {
-        if (!el3) return;
-        if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
-        var r3 = el3.getBoundingClientRect();
-        if (r3.width < 2 || r3.height < 2) return;
-        // 底部按钮：和光标同一颗胶囊（它本来就是药丸）
-        // 左右按钮：圆形，用自身尺寸当圆（半径=半边）
-        var isPill = el3.classList.contains('album-btn-toggle');
-        var hw3 = isPill ? GLASS_PILL_HW * dpr : r3.width * dpr * 0.5;
-        var hh3 = isPill ? GLASS_PILL_HH * dpr : r3.height * dpr * 0.5;
-        shapes.push([(r3.left + r3.width * 0.5) * dpr,
-                     H - (r3.top + r3.height * 0.5) * dpr,
-                     hw3, hh3, Math.min(hw3, hh3)]);
-      });
+      // 光标胶囊已按要求删除
+      // ---- 分裂进度：0 = 只有底部胶囊 / 1 = 只有两侧圆形 ----
+      // 由 focusT 驱动：聚焦时胶囊分裂成两个圆，沿弧线飞到左右
+      var sp0 = clamp01((focusT - 0.22) / 0.55);
+      var sp = (sp0 <= 0) ? 0 : (sp0 >= 1 ? 1 : easeOutBack(sp0));
+      // 胶囊 DOM 的文字随分裂淡出
+      if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
+
+      function rectOf(el) {
+        var r = el.getBoundingClientRect();
+        return { cx: (r.left + r.width * 0.5) * dpr,
+                 cy: H - (r.top + r.height * 0.5) * dpr,
+                 hw: r.width * dpr * 0.5, hh: r.height * dpr * 0.5 };
+      }
+      // 点击回弹：按下后 420ms 内先缩再弹回
+      function pressScale(el) {
+        if (!el || !el.__pressAt) return 1;
+        var k = clamp01((performance.now() - el.__pressAt) / 420);
+        return 1 - 0.14 * Math.sin(Math.PI * k) * (1 - k * 0.5);
+      }
+
+      // ① 底部胶囊：随分裂【缩小并消失】
+      if (toggleEl && sp < 0.999) {
+        var t = rectOf(toggleEl);
+        var k1 = 1 - sp;
+        var ps1 = pressScale(toggleEl);
+        shapes.push([t.cx, t.cy, t.hw * k1 * ps1, t.hh * k1 * ps1, t.hh * k1 * ps1]);
+      }
+      // ② 左右圆形：从胶囊位置【沿弧线】飞到各自位置，带缩放与回弹
+      if (sp > 0.001 && toggleEl) {
+        var base = rectOf(toggleEl);            // 起点 = 胶囊中心
+        [navPrev, navNext].forEach(function (el4) {
+          if (!el4) return;
+          var tg = rectOf(el4);
+          var ps2 = pressScale(el4);
+          // 弧线：线性插值 + 竖直方向的正弦拱起（y 自下而上，所以往下拱用减）
+          var ax = base.cx + (tg.cx - base.cx) * Math.min(sp, 1);
+          var ay = base.cy + (tg.cy - base.cy) * Math.min(sp, 1)
+                   - Math.sin(Math.PI * clamp01(sp)) * H * 0.16;
+          var rr = Math.min(tg.hw, tg.hh) * clamp01(sp) * ps2;
+          var rx = tg.hw * clamp01(sp) * ps2, ry = tg.hh * clamp01(sp) * ps2;
+          if (rr > 1) shapes.push([ax, ay, rx, ry, rr]);
+        });
+      }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
       // 原来它们在循环外、用光标球的半径 rpx 算，于是按钮（半高只有球的 1/3）
       // 会拿到 2~3 倍于自身尺寸的位移 -> 采样被推到形状外 -> 变形/硬边。
@@ -1301,6 +1329,7 @@
       // 而文字消失时它们要已经就位，所以飞入正好占满删除那一段。
       buildOpening();
       buildToggle();
+      hookPress(toggleEl); hookPress(navPrev); hookPress(navNext);
       // 面板：tune=1 打开；一旦打开过就记住（存 localStorage），
       // 之后用普通地址进来也在，省得每次敲参数。tune=0 可强制关掉并清除记忆。
       // 面板：**默认就显示**（你一直在调参，之前那套"要带 tune=1 才出现"
@@ -1948,6 +1977,14 @@
       for (var i = 0; i < photos.length; i++) { photos[i].mt = 0; }
       buildOpening();
       dirty = true;
+    }
+
+    // 按钮按下反馈：记录时间，由 pressScale 在 420ms 内先缩再回弹
+    function hookPress(el) {
+      if (!el || el.__pressHooked) return;
+      el.__pressHooked = 1;
+      el.addEventListener('mousedown', function () { el.__pressAt = performance.now(); dirty = true; });
+      el.addEventListener('mouseup', function () { el.__pressAt = performance.now(); dirty = true; });
     }
 
     function destroy() {
