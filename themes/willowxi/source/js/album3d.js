@@ -471,16 +471,16 @@
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
       // feather 仍是"斜坡宽度"的旋钮：feather >= 短边时是满斜坡（到处都在弯）
-      '  float edge = clamp(ql * (min(bsh.x, bsh.y) / feather), 0.0, 1.0);',
+      // 只有靠边 feather 像素内才有位移（中心不动）——这才是边缘折射
+      '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
       // ★ 镜片：中心不动、边缘位移最大 -> amt 用 ql（0=中心 / 1=边界）
       // ★ 位移 = nrm * amt = (q/ql) * ql^curve = q * ql^(curve-1)
       // 没有除以 ql，所以中心不会出现奇点（用户说的"肚脐眼"）。
       // 指数下限取 0：curve<1 时也不会发散。
-      '  float qlc = clamp(ql, 0.0, 1.0);',
-      '  float amt = pow(qlc, uG.z);',   // 标量强度（中心 0 / 边界 1），ck 等还用它
-      '  vec2 disp = q * pow(max(qlc, 1e-4), max(uG.z - 1.0, 0.0));',
+      '  float amt = pow(edge, uG.z);',   // 中心 edge=0 -> amt=0（无奇点），靠边 -> 1
       // fc = vUV*uRes 与形状坐标同为【自下而上】，所以不需要翻转
-      '  vec2 base = disp * uG.y / uRes;',
+      // 方向(椭圆径向) × 强度。中心处 amt=0 且 nrm 已保护 -> 无奇点（无"肚脐眼"）
+      '  vec2 base = nrm * amt * uG.y / uRes;',
       '  float ck = uG.w * amt;',
       // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
       // ★ 折射采【清晰图 uComp】：原来采磨砂图，弯折被糊成一片，
