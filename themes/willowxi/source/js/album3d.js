@@ -299,7 +299,9 @@
         p.y = (rnd() * 2 - 1) * JITTER * 0.5 * 2;       // ±JITTER
         p.rot = (rnd() * 2 - 1) * TILT;
         p.scale = 0.78 + rnd() * 0.58;      // 大小不一（0.78~1.36），参考图就是这样
-        p.startAt = i * FLY_STAGGER * (0.6 + rnd() * 0.8);
+        // 错峰改成非线性（用户选 B）：sqrt(i)
+    // 前几张拉得开、后面逐渐收笼 -> 尾巴不拖，但保留顺序感
+    p.startAt = Math.sqrt(i) * FLY_STAGGER * (0.6 + rnd() * 0.8);
         p.dur = FLY_MS * (0.6 + rnd() * 0.8);           // 时长 ±40%
         p.overshoot = false;                          // 用户要求删掉回弹，不再有过冲那一档
         // 用户要求：**全部从右边屏幕外飞进来**。
@@ -1004,6 +1006,15 @@
         // 而 SHOW_NUM=false -> 那一行从不执行 -> 着色器里 uPanY 恒为 0
         // -> **摄像机在 GPU 上从来没有上下动过**（JS 里 panY 变化是真的，但传不到显卡）。
         gl.uniform1f(loc.uPanY, panY);
+        if (!window.__paperLogged) {
+          window.__paperLogged = 1;
+          var _pl = [];
+          for (var pi = 0; pi < Math.min(4, photos.length); pi++) {
+            _pl.push('#' + photos[pi].num + ' a=' + (photos[pi].alpha === undefined ? 'undef' : photos[pi].alpha) +
+                     ' mt=' + (photos[pi].mt === undefined ? 'undef' : photos[pi].mt.toFixed(2)));
+          }
+          console.log('[album3d] PAPER ' + _pl.join(' | ') + ' curNum=' + p.num + ' alpha=' + alpha + ' fadeA=' + fadeA);
+        }
         // 相纸
         // 变暗系数：被聚焦那张为 0（保持原亮度），其余按聚焦进度变暗。
         // 只是在片元着色器里乘一下，不增加任何几何。
