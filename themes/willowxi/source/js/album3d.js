@@ -445,7 +445,6 @@
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
-      'uniform float uAlpha;',
       'uniform float uFrostMix;',
       'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
       '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
@@ -503,7 +502,7 @@
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
       '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
-      '  gl_FragColor = vec4(col, max(ca, rim * 0.9) * uAlpha);',
+      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
       '}'
     ].join('\n');
 
@@ -851,9 +850,15 @@
       //   sp=1 时各自飞到左右、长大成圆。所以这里只画【两半】，不再单独画胶囊。
       if (toggleEl) {
         var t = rectOf(toggleEl);
-        var halves = [[navPrev, -1], [navNext, 1]];
         var s1 = clamp01(sp);
-        halves.forEach(function (h5) {
+        // sp 很小时：画【一整颗胶囊】——两半各自圆角会在中间留缝，看着不像一颗
+        if (s1 < 0.04) {
+          // 静止时只画【一整颗胶囊】；不要去画两半（会叠成"花生"）
+          var psC = pressScale(toggleEl);
+          shapes.push([t.cx, t.cy, t.hw * psC, t.hh * psC, t.hh * psC, 1]);
+        } else
+        var halves = [[navPrev, -1], [navNext, 1]];
+        if (s1 >= 0.04) halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           var tg = rectOf(el5);
@@ -892,7 +897,6 @@
                      GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
-        gl.uniform1f(postLoc.uAlpha, (sp[5] === undefined) ? 1 : sp[5]);
         gl.uniform1f(postLoc.uFrostMix, GLASS_FROST_MIX);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
