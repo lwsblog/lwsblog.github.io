@@ -869,6 +869,13 @@
       // ★ 分两个方向，因为 easeOutBack 在 t->0 时会变成负数：
       //   出去（t: 0->1）：小幅度冲过再回弹（原来 1.70158 太大）
       //   回来（t: 1->0）：减速靠近，绝不会反向（用 easeOutCubic）
+      // ★ 回落弹性：位置保持单调减速（不会反向），
+      // 弹跳改用【落地压扁再弹回】表达。
+      var land = 0;
+      if (splitTo < 1) {
+        var mp = 1 - splitT;                                     // 0 -> 1 落回过程
+        land = Math.exp(-5.5 * mp) * Math.sin(mp * 18) * 0.14;   // 衷减振荡
+      }
       var sp;
       if (splitTo >= 1) {
         sp = easeOutBack(splitT, 0.55);
@@ -913,7 +920,7 @@
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           var tg = rectOf(el5);
-          var ps = pressScale(el5);
+          var ps = pressScale(el5) * (1 + land);   // 落地压扁 / 弹回
           var hwS = t.hw * 0.5, hhS = t.hh;                 // 半颗胶囊
           var cxS = t.cx + side * t.hw * 0.5;               // 半颗胶囊的中心
           var ax = cxS + (tg.cx - cxS) * sPos;
@@ -1682,7 +1689,7 @@
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
     var GLASS_FROST_MIX = 0.34;
-    var GLASS_MERGE = 16;          // 流体黏连半径（CSS px）：越大黏连越粗、越像液体     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
+    var GLASS_MERGE = 40;          // 流体黏连半径（CSS px）：越大黏连越粗、越像液体     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 8;        // 环高光宽度 px
