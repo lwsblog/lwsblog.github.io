@@ -453,10 +453,21 @@
       // 圆 = 半宽=半高=半径 的圆角矩形，所以球和按钮共用同一套代码
       'uniform vec4 uSh;',
       'uniform float uShR;',
+      // 多形状平滑并集（流体黏连）
+      'uniform vec4 uShapes[4];',   // xy=中心, zw=半尺寸
+      'uniform float uRadii[4];',
+      'uniform float uCountF;',     // 形状个数
+      'uniform float uSminK;',      // 融合半径（像素）：越大黏连越粗
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
       'uniform float uFrostMix;',
+      // 平滑最小（流体并集的核心）
+      'float smin(float a, float b, float k) {',
+      '  if (k <= 0.0001) return min(a, b);',
+      '  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);',
+      '  return mix(b, a, h) - k * h * (1.0 - h);',
+      '}',
       'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
       '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
       'vec2 nrmSDF(vec2 p, vec2 b, float r) { float e = 0.75;',
@@ -467,8 +478,25 @@
       'void main() {',
       '  vec2 fc = vUV * uRes;',
       '  vec2 p = fc - uSh.xy;',
-      '  vec2 bsh = vec2(uSh.z, uSh.w);',
-      '  float dist = sd(p, bsh, uShR);',
+      // 并集：对所有形状做 smin，并记下最近的那一个作为局部坐标系
+      '  float dist = 1e9; int nearI = 0; float nearD = 1e9;',
+      '  for (int i = 0; i < 4; i++) {',
+      '    if (float(i) < uCountF) {',
+      '      vec4 sN = uShapes[i];',
+      '      float dN = sd(p - sN.xy, sN.zw, uRadii[i]);',
+      '      if (dN < nearD) { nearD = dN; nearI = i; }',
+      '      dist = (i == 0) ? dN : smin(dist, dN, uSminK);',
+      '    }',
+      '  }',
+      '  vec4 ns = uShapes[0]; float nr = uRadii[0];',
+      '  for (int i = 0; i < 4; i++) {',
+      '    if (float(i) == float(nearI)) { ns = uShapes[i]; nr = uRadii[i]; }',
+      '  }',
+      '  p = p - ns.xy;',
+      '  vec2 bsh = ns.zw;',
+      '  float distU = dist;',
+      '  float dist0 = sd(p, bsh, nr);',
+      '  dist = distU;',
       '  if (uMode < 0.5) { gl_FragColor = texture2D(uScene, vUV); return; }',
       '  vec4 src = texture2D(uScene, vUV);',
       // 形状外什么都不写：alpha=0，混合时 dst 保持不变。
@@ -533,7 +561,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix','uShapes','uRadii','uCountF','uSminK'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -910,7 +938,30 @@
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform1f(postLoc.uMode, 1.0);
-      for (var si = 0; si < shapes.length; si++) {
+      // —— 多形状一次画完（smin 平滑并集 -> 分裂时自动长出粘连颈部）——
+      var nSh = Math.min(shapes.length, 4);
+      if (nSh > 0) {
+        if (!window.__shArr) { window.__shArr = new Float32Array(16); window.__rdArr = new Float32Array(4); }
+        var arrSh = window.__shArr, arrRd = window.__rdArr;
+        var maxRad = 0;
+        for (var sb = 0; sb < nSh; sb++) {
+          var spb = shapes[sb];
+          arrSh[sb * 4] = spb[0]; arrSh[sb * 4 + 1] = spb[1];
+          arrSh[sb * 4 + 2] = spb[2]; arrSh[sb * 4 + 3] = spb[3];
+          arrRd[sb] = Math.min(spb[2], spb[3]);
+          if (arrRd[sb] > maxRad) maxRad = arrRd[sb];
+        }
+        gl.uniform4fv(postLoc.uShapes, arrSh);
+        gl.uniform1fv(postLoc.uRadii, arrRd);
+        gl.uniform1f(postLoc.uCountF, nSh);
+        gl.uniform1f(postLoc.uSminK, GLASS_MERGE * dpr);
+        var rad3 = maxRad;
+        gl.uniform4f(postLoc.uG, GLASS_FEATHER * rad3, GLASS_DEPTH_PCT * 2 * rad3, GLASS_CURVE, GLASS_CHROMA);
+        gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
+        gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      for (var si = 0; si < 0; si++) {
         var sp = shapes[si];
         var hw = sp[2], hh = sp[3], rad3 = Math.min(hw, hh);
         gl.uniform4f(postLoc.uSh, sp[0], sp[1], hw, hh);
@@ -1630,7 +1681,8 @@
     var GLASS_CHROMA = 0.2;     // 参考值
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
-    var GLASS_FROST_MIX = 0.34;     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
+    var GLASS_FROST_MIX = 0.34;
+    var GLASS_MERGE = 16;          // 流体黏连半径（CSS px）：越大黏连越粗、越像液体     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 8;        // 环高光宽度 px
