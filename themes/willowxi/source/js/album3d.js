@@ -824,11 +824,11 @@
       // 原来只占 focusT 的 0.55 区间（≈500ms），弧线和回弹都看不清。
       var wantSplit = (focusTo >= 1) ? 1 : 0;
       if (wantSplit !== splitTo) { splitFrom = splitT; splitTo = wantSplit; splitAt = performance.now(); }
-      // ★ 线性（用户要求：不要非线性）；出去/回来 各自时长
+      // ★ 非线性（用户要求）：线性推进 + easeOutBack 收尾（会冲过目标再回弹）
       var dur = (splitTo >= 1) ? SPLIT_OUT_MS : SPLIT_IN_MS;
       var ksp = clamp01((performance.now() - splitAt) / dur);
       splitT = splitFrom + (splitTo - splitFrom) * ksp;
-      var sp = clamp01(splitT);
+      var sp = easeOutBack(splitT, 1.70158);     // 位置用它（允许轻微冲过）
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
 
@@ -866,8 +866,8 @@
           var ps = pressScale(el5);
           var hwS = t.hw * 0.5, hhS = t.hh;                 // 半颗胶囊
           var cxS = t.cx + side * t.hw * 0.5;               // 半颗胶囊的中心
-          var ax = cxS + (tg.cx - cxS) * s1;
-          var ay = t.cy + (tg.cy - t.cy) * s1
+          var ax = cxS + (tg.cx - cxS) * sPos;
+          var ay = t.cy + (tg.cy - t.cy) * sPos
                    - Math.sin(Math.PI * s1) * H * 0.16;     // 竖直拱起 -> 弧线
           var hw = (hwS + (tg.hw - hwS) * s1) * ps;
           var hh = (hhS + (tg.hh - hhS) * s1) * ps;
