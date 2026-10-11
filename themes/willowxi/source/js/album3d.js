@@ -490,9 +490,11 @@
       '  float cb = texture2D(uComp, vUV - base * (1.0 - ck)).b;',
       '  float ca = 1.0;',   // 球内是合成图（背景+照片），完全不透明
       '  vec3 sharp = texture2D(uComp, vUV).rgb;',   // 球内的清晰底图 = 合成图（含动态背景）
-      // 中心磨砂、边缘清晰折射（这样边缘弯折才明显）
+      // ★ 整块都带磨砂（实验页 frostMix=1.0 那种感觉），
+      // 同时保留清晰的边缘折射（不再只有中心磨砂）。
       '  vec3 frostC = texture2D(uFrostTex, vUV).rgb;',
-      '  vec3 col = mix(frostC, vec3(cr, cg, cb), smoothstep(0.30, 1.0, ql));',
+      '  vec3 refr = vec3(cr, cg, cb);',
+      '  vec3 col = mix(refr, frostC, 0.45);',
       '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
