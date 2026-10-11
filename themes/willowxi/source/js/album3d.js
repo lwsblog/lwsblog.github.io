@@ -828,7 +828,15 @@
       var dur = (splitTo >= 1) ? SPLIT_OUT_MS : SPLIT_IN_MS;
       var ksp = clamp01((performance.now() - splitAt) / dur);
       splitT = splitFrom + (splitTo - splitFrom) * ksp;
-      var sp = easeOutBack(splitT, 1.70158);     // 位置用它（允许轻微冲过）
+      // ★ 分两个方向，因为 easeOutBack 在 t->0 时会变成负数：
+      //   出去（t: 0->1）：小幅度冲过再回弹（原来 1.70158 太大）
+      //   回来（t: 1->0）：减速靠近，绝不会反向（用 easeOutCubic）
+      var sp;
+      if (splitTo >= 1) {
+        sp = easeOutBack(splitT, 0.55);
+      } else {
+        sp = 1 - easeOutCubic(1 - splitT);
+      }
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
 
