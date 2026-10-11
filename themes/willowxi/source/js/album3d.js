@@ -824,9 +824,11 @@
       // 原来只占 focusT 的 0.55 区间（≈500ms），弧线和回弹都看不清。
       var wantSplit = (focusTo >= 1) ? 1 : 0;
       if (wantSplit !== splitTo) { splitFrom = splitT; splitTo = wantSplit; splitAt = performance.now(); }
-      var ksp = clamp01((performance.now() - splitAt) / SPLIT_MS);
-      splitT = splitFrom + (splitTo - splitFrom) * sym;
-      var sp = (splitT <= 0) ? 0 : (splitT >= 1 ? 1 : easeOutBack(splitT, 1.70158));
+      // ★ 线性（用户要求：不要非线性）；出去/回来 各自时长
+      var dur = (splitTo >= 1) ? SPLIT_OUT_MS : SPLIT_IN_MS;
+      var ksp = clamp01((performance.now() - splitAt) / dur);
+      splitT = splitFrom + (splitTo - splitFrom) * ksp;
+      var sp = clamp01(splitT);
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
 
