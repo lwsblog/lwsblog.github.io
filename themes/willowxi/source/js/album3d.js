@@ -1060,11 +1060,10 @@
 
     // ---------- 滚动：横向 + 到端回弹 ----------
     function onWheel(e) {
-      // 飞入动画做完之前禁用滚轮（用户要求）：
-      // 最后一张的 startAt + dur 就是结束时刻
+      // 飞入期间：画面固定在最左边，且前 5 张飞完就可以滚了（不等全部）
       if (startedAt) {
-        var flyEnd = 0;
-        for (var fi = 0; fi < photos.length; fi++) {
+        var flyEnd = 0, n5 = Math.min(5, photos.length);
+        for (var fi = 0; fi < n5; fi++) {
           var pf = photos[fi];
           var ef = pf.startAt + pf.dur;
           if (ef > flyEnd) flyEnd = ef;
