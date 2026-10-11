@@ -1006,15 +1006,6 @@
         // 而 SHOW_NUM=false -> 那一行从不执行 -> 着色器里 uPanY 恒为 0
         // -> **摄像机在 GPU 上从来没有上下动过**（JS 里 panY 变化是真的，但传不到显卡）。
         gl.uniform1f(loc.uPanY, panY);
-        if (!window.__paperLogged) {
-          window.__paperLogged = 1;
-          var _pl = [];
-          for (var pi = 0; pi < Math.min(4, photos.length); pi++) {
-            _pl.push('#' + photos[pi].num + ' a=' + (photos[pi].alpha === undefined ? 'undef' : photos[pi].alpha) +
-                     ' mt=' + (photos[pi].mt === undefined ? 'undef' : photos[pi].mt.toFixed(2)));
-          }
-          console.log('[album3d] PAPER ' + _pl.join(' | ') + ' curNum=' + p.num + ' alpha=' + alpha + ' fadeA=' + fadeA);
-        }
         // 相纸
         // 变暗系数：被聚焦那张为 0（保持原亮度），其余按聚焦进度变暗。
         // 只是在片元着色器里乘一下，不增加任何几何。
