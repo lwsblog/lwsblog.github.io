@@ -958,7 +958,11 @@
         gl.uniform4fv(postLoc.uShapes, arrSh);
         gl.uniform1fv(postLoc.uRadii, arrRd);
         gl.uniform1f(postLoc.uCountF, nSh);
-        gl.uniform1f(postLoc.uSminK, GLASS_MERGE * dpr);
+        // 融合半径随分裂进度变化：
+        // 静止 GLASS_MERGE_FUSE（很小：只把两半的内端融成直边，不会把胶囊吹成椭圆）
+        // 分裂中 GLASS_MERGE（大：拉出明显的黏连颈）
+        var mergeK = GLASS_MERGE_FUSE + GLASS_MERGE * Math.sin(Math.PI * clamp01(sp));
+        gl.uniform1f(postLoc.uSminK, mergeK * dpr);
         var rad3 = maxRad;
         gl.uniform4f(postLoc.uG, GLASS_FEATHER * rad3, GLASS_DEPTH_PCT * 2 * rad3, GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
@@ -1686,7 +1690,8 @@
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
     var GLASS_FROST_MIX = 0.34;
-    var GLASS_MERGE = 40;          // 流体黏连半径（CSS px）：越大黏连越粗、越像液体     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
+    var GLASS_MERGE = 42;          // 分裂中的黏连半径峰值（颈的粗细）
+    var GLASS_MERGE_FUSE = 7;      // 静止时的融合半径（很小：只消除两半的接缝，不改形状）          // 流体黏连半径（CSS px）：越大黏连越粗、越像液体     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 8;        // 环高光宽度 px
