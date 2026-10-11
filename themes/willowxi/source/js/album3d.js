@@ -416,7 +416,8 @@
     // 这才是和 lab 页一致的做法（DOM + backdrop-filter 是另一条路，永远不像）。
     var GLASS_BALL_R = 47;          // （保留：球的半径，旧值）
     // 光标改成【胶囊】形状：和底部按钮同比例（按钮 CSS 77x33 -> 半宽 38.5 / 半高 16.5）
-    var SPLIT_MS = 1700;            // 分裂/合并动画时长（毫秒）——够看清弧线与回弹
+    var SPLIT_OUT_MS = 1200;        // 分裂（出去）时长
+    var SPLIT_IN_MS = 750;          // 合并（回来）时长——回来快一点，不然显得"好久才回来"
     var splitT = 0, splitFrom = 0, splitTo = 0, splitAt = 0;
     var GLASS_PILL_HW = 38.5;       // 半宽（CSS px）
     var GLASS_PILL_HH = 16.5;       // 半高（CSS px）——同时也是圆角半径          // 球半径（CSS px）
@@ -824,8 +825,6 @@
       var wantSplit = (focusTo >= 1) ? 1 : 0;
       if (wantSplit !== splitTo) { splitFrom = splitT; splitTo = wantSplit; splitAt = performance.now(); }
       var ksp = clamp01((performance.now() - splitAt) / SPLIT_MS);
-      // 对称缓动（smoothstep）：出去和回来一样顺，不会一快一慢
-      var sym = ksp * ksp * (3 - 2 * ksp);
       splitT = splitFrom + (splitTo - splitFrom) * sym;
       var sp = (splitT <= 0) ? 0 : (splitT >= 1 ? 1 : easeOutBack(splitT, 1.70158));
       // 胶囊 DOM 的文字随分裂淡出
