@@ -818,7 +818,7 @@
       // ---- 分裂进度：0 = 只有底部胶囊 / 1 = 只有两侧圆形 ----
       // 由 focusT 驱动：聚焦时胶囊分裂成两个圆，沿弧线飞到左右
       var sp0 = clamp01((focusT - 0.22) / 0.55);
-      var sp = (sp0 <= 0) ? 0 : (sp0 >= 1 ? 1 : easeOutBack(sp0));
+      var sp = (sp0 <= 0) ? 0 : (sp0 >= 1 ? 1 : easeOutBack(sp0, 1.70158));
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
 
