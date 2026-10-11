@@ -445,6 +445,7 @@
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
+      'uniform float uAlpha;',
       'uniform float uFrostMix;',
       'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
       '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
@@ -502,7 +503,7 @@
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
       '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
-      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
+      '  gl_FragColor = vec4(col, max(ca, rim * 0.9) * uAlpha);',
       '}'
     ].join('\n');
 
@@ -824,7 +825,9 @@
       var wantSplit = (focusTo >= 1) ? 1 : 0;
       if (wantSplit !== splitTo) { splitFrom = splitT; splitTo = wantSplit; splitAt = performance.now(); }
       var ksp = clamp01((performance.now() - splitAt) / SPLIT_MS);
-      splitT = splitFrom + (splitTo - splitFrom) * easeOutCubic(ksp);
+      // 对称缓动（smoothstep）：出去和回来一样顺，不会一快一慢
+      var sym = ksp * ksp * (3 - 2 * ksp);
+      splitT = splitFrom + (splitTo - splitFrom) * sym;
       var sp = (splitT <= 0) ? 0 : (splitT >= 1 ? 1 : easeOutBack(splitT, 1.70158));
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
@@ -842,27 +845,29 @@
         return 1 - 0.14 * Math.sin(Math.PI * k) * (1 - k * 0.5);
       }
 
-      // ① 底部胶囊：随分裂【缩小并消失】
+      // ① 底部胶囊：尺寸不变，只【淡出】——不再缩小（用户要求）
       if (toggleEl && sp < 0.999) {
         var t = rectOf(toggleEl);
-        var k1 = 1 - sp;
         var ps1 = pressScale(toggleEl);
-        shapes.push([t.cx, t.cy, t.hw * k1 * ps1, t.hh * k1 * ps1, t.hh * k1 * ps1]);
+        shapes.push([t.cx, t.cy, t.hw * ps1, t.hh * ps1, t.hh * ps1, 1 - sp]);
       }
       // ② 左右圆形：从胶囊位置【沿弧线】飞到各自位置，带缩放与回弹
       if (sp > 0.001 && toggleEl) {
-        var base = rectOf(toggleEl);            // 起点 = 胶囊中心
-        [navPrev, navNext].forEach(function (el4) {
+        var base = rectOf(toggleEl);            // 起点 = 胶囊
+        // 两个圆分别从胶囊的【左右两端】出发（这才是"分裂"）
+        var pair = [[navPrev, base.cx - base.hw * 0.55], [navNext, base.cx + base.hw * 0.55]];
+        pair.forEach(function (pr5) {
+          var el4 = pr5[0];
           if (!el4) return;
           var tg = rectOf(el4);
           var ps2 = pressScale(el4);
-          // 弧线：线性插值 + 竖直方向的正弦拱起（y 自下而上，所以往下拱用减）
-          var ax = base.cx + (tg.cx - base.cx) * Math.min(sp, 1);
-          var ay = base.cy + (tg.cy - base.cy) * Math.min(sp, 1)
-                   - Math.sin(Math.PI * clamp01(sp)) * H * 0.16;
-          var rr = Math.min(tg.hw, tg.hh) * clamp01(sp) * ps2;
-          var rx = tg.hw * clamp01(sp) * ps2, ry = tg.hh * clamp01(sp) * ps2;
-          if (rr > 1) shapes.push([ax, ay, rx, ry, rr]);
+          var s1 = Math.min(sp, 1);
+          var ax = pr5[1] + (tg.cx - pr5[1]) * s1;
+          var ay = base.cy + (tg.cy - base.cy) * s1
+                   - Math.sin(Math.PI * clamp01(sp)) * H * 0.16;   // 竖直方向拱起成弧线
+          var kk2 = clamp01(sp) * ps2;
+          var rr = Math.min(tg.hw, tg.hh) * kk2;
+          if (rr > 1) shapes.push([ax, ay, tg.hw * kk2, tg.hh * kk2, rr, 1]);
         });
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
@@ -888,6 +893,7 @@
                      GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+        gl.uniform1f(postLoc.uAlpha, (sp[5] === undefined) ? 1 : sp[5]);
         gl.uniform1f(postLoc.uFrostMix, GLASS_FROST_MIX);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
