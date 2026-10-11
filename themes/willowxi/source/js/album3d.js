@@ -846,28 +846,27 @@
       }
 
       // ① 底部胶囊：尺寸不变，只【淡出】——不再缩小（用户要求）
-      if (toggleEl && sp < 0.999) {
+      // ★ 一颗胶囊【分裂】成两个：不缩小、不淡出。
+      //   sp=0 时两半颗胶囊拼在一起 = 一整颗胶囊（看不出两半）；
+      //   sp=1 时各自飞到左右、长大成圆。所以这里只画【两半】，不再单独画胶囊。
+      if (toggleEl) {
         var t = rectOf(toggleEl);
-        var ps1 = pressScale(toggleEl);
-        shapes.push([t.cx, t.cy, t.hw * ps1, t.hh * ps1, t.hh * ps1, 1 - sp]);
-      }
-      // ② 左右圆形：从胶囊位置【沿弧线】飞到各自位置，带缩放与回弹
-      if (sp > 0.001 && toggleEl) {
-        var base = rectOf(toggleEl);            // 起点 = 胶囊
-        // 两个圆分别从胶囊的【左右两端】出发（这才是"分裂"）
-        var pair = [[navPrev, base.cx - base.hw * 0.55], [navNext, base.cx + base.hw * 0.55]];
-        pair.forEach(function (pr5) {
-          var el4 = pr5[0];
-          if (!el4) return;
-          var tg = rectOf(el4);
-          var ps2 = pressScale(el4);
-          var s1 = Math.min(sp, 1);
-          var ax = pr5[1] + (tg.cx - pr5[1]) * s1;
-          var ay = base.cy + (tg.cy - base.cy) * s1
-                   - Math.sin(Math.PI * clamp01(sp)) * H * 0.16;   // 竖直方向拱起成弧线
-          var kk2 = clamp01(sp) * ps2;
-          var rr = Math.min(tg.hw, tg.hh) * kk2;
-          if (rr > 1) shapes.push([ax, ay, tg.hw * kk2, tg.hh * kk2, rr, 1]);
+        var halves = [[navPrev, -1], [navNext, 1]];
+        var s1 = clamp01(sp);
+        halves.forEach(function (h5) {
+          var el5 = h5[0], side = h5[1];
+          if (!el5) return;
+          var tg = rectOf(el5);
+          var ps = pressScale(el5);
+          var hwS = t.hw * 0.5, hhS = t.hh;                 // 半颗胶囊
+          var cxS = t.cx + side * t.hw * 0.5;               // 半颗胶囊的中心
+          var ax = cxS + (tg.cx - cxS) * s1;
+          var ay = t.cy + (tg.cy - t.cy) * s1
+                   - Math.sin(Math.PI * s1) * H * 0.16;     // 竖直拱起 -> 弧线
+          var hw = (hwS + (tg.hw - hwS) * s1) * ps;
+          var hh = (hhS + (tg.hh - hhS) * s1) * ps;
+          var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
+          if (hw > 0.5 && hh > 0.5) shapes.push([ax, ay, hw, hh, Math.min(rad, Math.min(hw, hh)), 1]);
         });
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
