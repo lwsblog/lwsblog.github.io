@@ -824,7 +824,7 @@
       var wantSplit = (focusTo >= 1) ? 1 : 0;
       if (wantSplit !== splitTo) { splitFrom = splitT; splitTo = wantSplit; splitAt = performance.now(); }
       var ksp = clamp01((performance.now() - splitAt) / SPLIT_MS);
-      splitT = splitFrom + (splitTo - splitFrom) * easeInOutCubic(ksp);
+      splitT = splitFrom + (splitTo - splitFrom) * easeOutCubic(ksp);
       var sp = (splitT <= 0) ? 0 : (splitT >= 1 ? 1 : easeOutBack(splitT, 1.70158));
       // 胶囊 DOM 的文字随分裂淡出
       if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
