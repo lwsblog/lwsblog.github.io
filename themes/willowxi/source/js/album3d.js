@@ -483,12 +483,16 @@
       '  vec2 base = disp * uG.y / uRes;',
       '  float ck = uG.w * amt;',
       // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
-      '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
-      '  float cg = texture2D(uFrostTex, vUV - base).g;',
-      '  float cb = texture2D(uFrostTex, vUV - base * (1.0 - ck)).b;',
+      // ★ 折射采【清晰图 uComp】：原来采磨砂图，弯折被糊成一片，
+      // 看起来就"没有边缘折射"。磨砂只用于中心（下面 mix）。
+      '  float cr = texture2D(uComp, vUV - base * (1.0 + ck)).r;',
+      '  float cg = texture2D(uComp, vUV - base).g;',
+      '  float cb = texture2D(uComp, vUV - base * (1.0 - ck)).b;',
       '  float ca = 1.0;',   // 球内是合成图（背景+照片），完全不透明
       '  vec3 sharp = texture2D(uComp, vUV).rgb;',   // 球内的清晰底图 = 合成图（含动态背景）
-      '  vec3 col = vec3(cr, cg, cb);',
+      // 中心磨砂、边缘清晰折射（这样边缘弯折才明显）
+      '  vec3 frostC = texture2D(uFrostTex, vUV).rgb;',
+      '  vec3 col = mix(frostC, vec3(cr, cg, cb), smoothstep(0.30, 1.0, ql));',
       '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
@@ -1295,6 +1299,11 @@
       // 太别扭；而且我的自动化测试会清掉那个记忆，于是面板就"不见了"）。
       // ?tune=0 或点 × 才隐藏，之后记住；?tune=1 重新显示。
       var q = location.search;
+      // 自验用：?fakecursor=1 把光标固定在画面中间，并强制 mouseIn
+      if (/[?&]fakecursor=1/.test(location.search)) {
+        mouseIn = true; mouseX = window.innerWidth * 0.5; mouseY = window.innerHeight * 0.55;
+      }
+
       var wantTuner = true;
       try { if (localStorage.getItem('album3d-tuner-open') === '0') wantTuner = false; } catch (e) {}
       if (/[?&]tune=1/.test(q)) { wantTuner = true; try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
