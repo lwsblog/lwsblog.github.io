@@ -801,10 +801,10 @@
                      H - (r3.top + r3.height * 0.5) * dpr,
                      hw3, hh3, Math.min(hw3, hh3)]);
       });
-      gl.uniform4f(postLoc.uG, GLASS_FEATHER * rpx, GLASS_DEPTH_PCT * 2 * rpx,
-                   GLASS_CURVE, GLASS_CHROMA);
-      gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
-      gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+      // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
+      // 原来它们在循环外、用光标球的半径 rpx 算，于是按钮（半高只有球的 1/3）
+      // 会拿到 2~3 倍于自身尺寸的位移 -> 采样被推到形状外 -> 变形/硬边。
+      // 球好看、按钮不能用，区别就在这里。
       // 每个形状各画一遍（球外像素输出的是原场景，所以重叠也不会糊）
       // ★ 先把场景【整屏铺一遍】（uMode=0 原样输出，不混合）
       gl.disable(gl.BLEND);
@@ -815,8 +815,15 @@
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform1f(postLoc.uMode, 1.0);
       for (var si = 0; si < shapes.length; si++) {
-        gl.uniform4f(postLoc.uSh, shapes[si][0], shapes[si][1], shapes[si][2], shapes[si][3]);
-        gl.uniform1f(postLoc.uShR, shapes[si][4]);
+        var sp = shapes[si];
+        var hw = sp[2], hh = sp[3], rad3 = Math.min(hw, hh);
+        gl.uniform4f(postLoc.uSh, sp[0], sp[1], hw, hh);
+        gl.uniform1f(postLoc.uShR, rad3);
+        // 每个形状按自身尺寸换算（球和按钮因此观感一致）
+        gl.uniform4f(postLoc.uG, GLASS_FEATHER * rad3, GLASS_DEPTH_PCT * 2 * rad3,
+                     GLASS_CURVE, GLASS_CHROMA);
+        gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
+        gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
@@ -824,7 +831,8 @@
     // 外层 draw：有玻璃时先渲进 FBO 再后处理，否则直接画
     function draw() {
       if (!gl) return;
-      if (!glassOn || !mouseIn || !postProg || !fbo) { drawScene(); return; }
+      // 只有光标球依赖 mouseIn（形状列表里已判断）；按钮任何时候都该画
+      if (!glassOn || !postProg || !fbo) { drawScene(); return; }
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, W, H);
       gl.clearColor(0, 0, 0, 0);
