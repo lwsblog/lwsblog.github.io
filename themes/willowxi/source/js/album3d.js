@@ -1688,9 +1688,17 @@
     }
     // 参数变了就重装（位移图是按尺寸生成的，必须重算）
     function refreshGlass() {
-      applyGlassRefract(toggleEl, 999);
-      applyGlassRefract(navPrev, Math.round(NAV_SIZE / 2));
-      applyGlassRefract(navNext, Math.round(NAV_SIZE / 2));
+      // 三个按钮的玻璃【只由 GL 后处理画】。DOM 这层必须彻底清掉：
+      // 原来它带着 backdrop-filter: url(#albumGlassF*)（SVG 位移），
+      // 于是按钮被做了两遍玻璃 -> 就是那块缺口/菱形；光标没有 DOM 层所以一直干净。
+      [toggleEl, navPrev, navNext].forEach(function (el) {
+        if (!el) return;
+        el.style.background = 'transparent';
+        el.style.backdropFilter = 'none';
+        el.style.webkitBackdropFilter = 'none';
+        el.style.boxShadow = 'none';
+        el.style.border = '0';
+      });
     }
 
 

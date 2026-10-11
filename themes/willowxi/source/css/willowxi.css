@@ -5745,3 +5745,18 @@ html.is-album .photo-lightbox { display: none !important; }
 [data-album] .album-nav-btn--prev { left: 28px; }
 [data-album] .album-nav-btn--next { right: 28px; }
 [data-album] .album-nav-btn:active { transform: translateY(-50%) scale(.94); }
+
+
+/* ===== 三个按钮的玻璃【只由 GL 后处理画】=====
+   原来 .album-glass 这类还在给按钮加 backdrop-filter: url(#albumGlassF*)（SVG 位移）、
+   半透明背景和内阴影 —— 于是按钮被做了两遍玻璃，右端出现缺口/菱形。
+   光标没有 DOM 层，所以它一直干净。这里用 !important 把那层彻底摁掉。 */
+[data-album-toggle],
+[data-album-nav] {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  outline: 0 !important;
+}
