@@ -466,15 +466,21 @@
       // 胶囊时中间那一段也会从中心连续变化，不再是一块平移。
       '  vec2 q = p / max(bsh, vec2(0.001));',
       '  float ql = length(q);',
-      '  vec2 nrm = (ql > 1e-4) ? normalize(q) : vec2(0.0);',
+      // nrm 只给 rim / glint 用；中心处方向未定义，所以只在 ql 明显大于 0 时取
+      '  vec2 nrm = (ql > 1e-3) ? q / ql : vec2(0.0);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
       // feather 仍是"斜坡宽度"的旋钮：feather >= 短边时是满斜坡（到处都在弯）
       '  float edge = clamp(ql * (min(bsh.x, bsh.y) / feather), 0.0, 1.0);',
       // ★ 镜片：中心不动、边缘位移最大 -> amt 用 ql（0=中心 / 1=边界）
-      '  float amt = pow(clamp(ql, 0.0, 1.0), uG.z);',
+      // ★ 位移 = nrm * amt = (q/ql) * ql^curve = q * ql^(curve-1)
+      // 没有除以 ql，所以中心不会出现奇点（用户说的"肚脐眼"）。
+      // 指数下限取 0：curve<1 时也不会发散。
+      '  float qlc = clamp(ql, 0.0, 1.0);',
+      '  float amt = pow(qlc, uG.z);',   // 标量强度（中心 0 / 边界 1），ck 等还用它
+      '  vec2 disp = q * pow(max(qlc, 1e-4), max(uG.z - 1.0, 0.0));',
       // fc = vUV*uRes 与形状坐标同为【自下而上】，所以不需要翻转
-      '  vec2 base = nrm * amt * uG.y / uRes;',
+      '  vec2 base = disp * uG.y / uRes;',
       '  float ck = uG.w * amt;',
       // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
       '  float cr = texture2D(uFrostTex, vUV - base * (1.0 + ck)).r;',
