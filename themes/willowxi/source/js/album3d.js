@@ -414,7 +414,10 @@
     //   在光标球范围内按 SDF 求外法线，edge = 1 - inner/feather，amt = pow(edge, curve)，
     //   位移 = 法线 * amt * depth，三通道用不同位移做色散，再叠磨砂 / 环高光 / glint / 底色。
     // 这才是和 lab 页一致的做法（DOM + backdrop-filter 是另一条路，永远不像）。
-    var GLASS_BALL_R = 47;          // 球半径（CSS px）
+    var GLASS_BALL_R = 47;          // （保留：球的半径，旧值）
+    // 光标改成【胶囊】形状：和底部按钮同比例（按钮 CSS 77x33 -> 半宽 38.5 / 半高 16.5）
+    var GLASS_PILL_HW = 38.5;       // 半宽（CSS px）
+    var GLASS_PILL_HH = 16.5;       // 半高（CSS px）——同时也是圆角半径          // 球半径（CSS px）
     var glassOn = true;
     var mouseX = -9999, mouseY = -9999, mouseIn = false;
     var fbo = null, fboTex = null, postProg = null, postLoc = {}, postQuad = null;
@@ -458,11 +461,19 @@
       // 原来这里输出的是清晰场景 -> 后面每个形状的整屏 pass 都会把
       // 先画好的玻璃（例如光标球）重新盖回去（球被照片挡住的原因）。
       '  if (dist > 1.5) { gl_FragColor = vec4(0.0); return; }',   // 球外：我自己的场景（保持透明，DOM 背景照常透出）
-      '  vec2 nrm = nrmSDF(p, bsh, uShR);',
+      // ★ 归一化到椭圆空间：q 的中心=0、边界=1。
+      // 圆球 (b=(r,r)) 时 ql=|p|/r，和原来一样是径向；
+      // 胶囊时中间那一段也会从中心连续变化，不再是一块平移。
+      '  vec2 q = p / max(bsh, vec2(0.001));',
+      '  float ql = length(q);',
+      '  vec2 nrm = (ql > 1e-4) ? normalize(q) : vec2(0.0);',
       '  float inner = -dist;',
       '  float feather = max(uG.x, 0.001);',
-      '  float edge = clamp(1.0 - inner / feather, 0.0, 1.0);',
-      '  float amt = pow(edge, uG.z);',
+      // feather 仍是"斜坡宽度"的旋钮：feather >= 短边时是满斜坡（到处都在弯）
+      '  float edge = clamp(ql * (min(bsh.x, bsh.y) / feather), 0.0, 1.0);',
+      // ★ 镜片：中心不动、边缘位移最大 -> amt 用 ql（0=中心 / 1=边界）
+      '  float amt = pow(clamp(ql, 0.0, 1.0), uG.z);',
+      // fc = vUV*uRes 与形状坐标同为【自下而上】，所以不需要翻转
       '  vec2 base = nrm * amt * uG.y / uRes;',
       '  float ck = uG.w * amt;',
       // 折射也采【模糊图】（实验页 frostMix=1.0：整块都是磨砂，不是只有中心）
@@ -790,7 +801,8 @@
       var bx = mouseX * dpr, by = H - mouseY * dpr;
       // 形状列表：光标球 + 三个按钮（都用圆角矩形表达）
       var shapes = [];
-      if (mouseIn) shapes.push([bx, by, rpx, rpx, rpx]);
+      // 光标：胶囊（半宽 GLASS_PILL_HW、半高 GLASS_PILL_HH，圆角=半高）
+      if (mouseIn) shapes.push([bx, by, GLASS_PILL_HW * dpr, GLASS_PILL_HH * dpr, GLASS_PILL_HH * dpr]);
       [toggleEl, navPrev, navNext].forEach(function (el3) {
         if (!el3) return;
         if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
