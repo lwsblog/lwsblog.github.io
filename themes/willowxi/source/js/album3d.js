@@ -912,21 +912,28 @@
         // sp 很小时：画【一整颗胶囊】——两半各自圆角会在中间留缝，看着不像一颗
         // ★ 删掉硬切换（用户看到的"卡一下"）：
         // 现在始终只画两半，靠 smin 并集无缝融成一整颗。
+        // ★ 始终只画【两半】。每半比一半【多出一个半高】的长度，
+        //   于是两者的内端圆帽互相埋进对方身体里：
+        //     静止时并集的轮廓是直边 -> 一个完整胶囊（不会出现腰）
+        //     分裂时重叠变少     -> 中间自然拉出黏连的颈，然后断开
+        //   全程只有两个形状，没有"第三块消失"的怪现象。
+        var s1 = clamp01(sp);
         var halves = [[navPrev, -1], [navNext, 1]];
         halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           var tg = rectOf(el5);
-          var ps = pressScale(el5) * (1 + land);   // 落地压扁 / 弹回
-          var hwS = t.hw * 0.5, hhS = t.hh;                 // 半颗胶囊
-          var cxS = t.cx + side * t.hw * 0.5;               // 半颗胶囊的中心
+          var ps = pressScale(el5) * (1 + land);
+          var hwS = t.hw * 0.5 + t.hh, hhS = t.hh;          // 加长版半颗
+          var cxS = t.cx + side * t.hw * 0.5;
           var ax = cxS + (tg.cx - cxS) * sPos;
           var ay = t.cy + (tg.cy - t.cy) * sPos
                    - Math.sin(Math.PI * s1) * H * 0.16;     // 竖直拱起 -> 弧线
           var hw = (hwS + (tg.hw - hwS) * s1) * ps;
           var hh = (hhS + (tg.hh - hhS) * s1) * ps;
           var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
-          if (hw > 0.5 && hh > 0.5) shapes.push([ax, ay, hw, hh, Math.min(rad, Math.min(hw, hh)), 1]);
+          var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
+          if (hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
         });
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
