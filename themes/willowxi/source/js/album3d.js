@@ -417,7 +417,7 @@
     var GLASS_BALL_R = 47;          // （保留：球的半径，旧值）
     // 光标改成【胶囊】形状：和底部按钮同比例（按钮 CSS 77x33 -> 半宽 38.5 / 半高 16.5）
     var SPLIT_OUT_MS = 1200;        // 分裂（出去）时长
-    var SPLIT_IN_MS = 750;          // 合并（回来）时长——回来快一点，不然显得"好久才回来"
+    var SPLIT_IN_MS = 1400;         // 合并（回来）时长——用户：回来太快了
     var splitT = 0, splitFrom = 0, splitTo = 0, splitAt = 0;
     var GLASS_PILL_HW = 38.5;       // 半宽（CSS px）
     var GLASS_PILL_HH = 16.5;       // 半高（CSS px）——同时也是圆角半径          // 球半径（CSS px）
@@ -1060,6 +1060,17 @@
 
     // ---------- 滚动：横向 + 到端回弹 ----------
     function onWheel(e) {
+      // 飞入动画做完之前禁用滚轮（用户要求）：
+      // 最后一张的 startAt + dur 就是结束时刻
+      if (startedAt) {
+        var flyEnd = 0;
+        for (var fi = 0; fi < photos.length; fi++) {
+          var pf = photos[fi];
+          var ef = pf.startAt + pf.dur;
+          if (ef > flyEnd) flyEnd = ef;
+        }
+        if (performance.now() - startedAt < flyEnd) return;
+      }
       // 在调参面板里滚轮时，是滚面板自己的列表，不要拿去滚相册，
       // 更不要当成跳过开屏（用户说老是点到下面的东西）。
       if (e.target && e.target.closest && e.target.closest('[data-album-tuner]')) return;
