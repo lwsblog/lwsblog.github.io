@@ -443,6 +443,7 @@
       'uniform vec4 uG;',         // x=feather px, y=depth px, z=curve, w=chroma
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
+      'uniform float uFrostMix;',
       'float sd(vec2 p, vec2 b, float r) { vec2 d = abs(p) - b + vec2(r);',
       '  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r; }',
       'vec2 nrmSDF(vec2 p, vec2 b, float r) { float e = 0.75;',
@@ -494,7 +495,7 @@
       // 同时保留清晰的边缘折射（不再只有中心磨砂）。
       '  vec3 frostC = texture2D(uFrostTex, vUV).rgb;',
       '  vec3 refr = vec3(cr, cg, cb);',
-      '  vec3 col = mix(refr, frostC, 0.45);',
+      '  vec3 col = mix(refr, frostC, uFrostMix);',
       '  float rim = 1.0 - smoothstep(0.0, max(uRim.x, 0.001), inner);',
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
@@ -519,7 +520,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -784,7 +785,7 @@
       var compOk = false;
       if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
       if (blurProg && blurFboA && blurFboB && blurTexB) {
-        var rad = Math.max(1, GLASS_FROST * dpr);
+        var rad = Math.max(2, GLASS_FROST * dpr);
         blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
         blurPass(blurTexA, blurFboB, 0, 1, rad);
         blurPass(blurTexB, blurFboA, 1, 0, rad * 2);
@@ -848,6 +849,7 @@
                      GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+        gl.uniform1f(postLoc.uFrostMix, GLASS_FROST_MIX);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     }
@@ -1545,7 +1547,8 @@
     var GLASS_CURVE = 1.25;       // 参考值
     var GLASS_CHROMA = 0.2;     // 参考值
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
-    var GLASS_SAT = 120;         // 聚光 saturate%
+    var GLASS_SAT = 120;
+    var GLASS_FROST_MIX = 0.45;     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 5;        // 环高光宽度 px
@@ -1698,7 +1701,7 @@
     var TUNE_KEY = 'album3d-tune-v9';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
@@ -1708,6 +1711,7 @@
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
         GLASS_DEPTH_PCT: GLASS_DEPTH_PCT, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
         GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
+        GLASS_FROST_MIX: GLASS_FROST_MIX,
         GLASS_RIM_W: GLASS_RIM_W, GLASS_RIM_A: GLASS_RIM_A,
         GLASS_GLINT: GLASS_GLINT, GLASS_TINT: GLASS_TINT,
         GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
@@ -1726,6 +1730,7 @@
       else if (k === 'GLASS_DEPTH_PCT') GLASS_DEPTH_PCT = v; else if (k === 'GLASS_FEATHER') GLASS_FEATHER = v;
       else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
+      else if (k === 'GLASS_FROST_MIX') GLASS_FROST_MIX = v;
       else if (k === 'GLASS_RIM_W') GLASS_RIM_W = v; else if (k === 'GLASS_RIM_A') GLASS_RIM_A = v;
       else if (k === 'GLASS_GLINT') GLASS_GLINT = v; else if (k === 'GLASS_TINT') GLASS_TINT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
@@ -1838,6 +1843,7 @@
        ['色散 chroma','GLASS_CHROMA',0,10,0.2],
        ['磨砂 blur px','GLASS_FROST',0,24,0.5],
        ['聚光 saturate %','GLASS_SAT',100,300,5],
+       ['磨砂混合 frostMix','GLASS_FROST_MIX',0,1,0.01],
        ['环高光 宽 px','GLASS_RIM_W',0,70,1],
        ['环高光 强','GLASS_RIM_A',0,1.4,0.02],
        ['冷色内光 glint','GLASS_GLINT',0,1,0.02],
@@ -1879,7 +1885,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
