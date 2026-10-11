@@ -910,13 +910,10 @@
         var s1 = clamp01(sp);
         var sPos = sp;               // 位置用未夹紧的（冲过目标再回来）
         // sp 很小时：画【一整颗胶囊】——两半各自圆角会在中间留缝，看着不像一颗
-        if (s1 < 0.04) {
-          // 静止时只画【一整颗胶囊】；不要去画两半（会叠成"花生"）
-          var psC = pressScale(toggleEl);
-          shapes.push([t.cx, t.cy, t.hw * psC, t.hh * psC, t.hh * psC, 1]);
-        } else
+        // ★ 删掉硬切换（用户看到的"卡一下"）：
+        // 现在始终只画两半，靠 smin 并集无缝融成一整颗。
         var halves = [[navPrev, -1], [navNext, 1]];
-        if (s1 >= 0.04) halves.forEach(function (h5) {
+        halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           var tg = rectOf(el5);
