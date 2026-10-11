@@ -147,9 +147,17 @@
       'varying float vFade;',
       'void main() {',
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
+      // uPaper=3: 一体化。uv 落在 [0,1] 之外 = 【白边】；之内 = 照片。
+      // 这样每张只有一个图元，后画的照片不可能盖住别人的白边。
+      '  if (uPaper > 2.5) {',
+      '    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {',
+      '      gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return;',
+      '    }',
+      '  }',
       '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
-      '  if (uPaper > 1.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
+      // 编号那一支：收窄到 < 2.5，否则会把 uPaper=3（一体化）也接住 -> 整张变白卡
+      '  if (uPaper > 1.5 && uPaper < 2.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
       '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
@@ -851,8 +859,11 @@
       // 点击回弹：按下后 420ms 内先缩再弹回
       function pressScale(el) {
         if (!el || !el.__pressAt) return 1;
-        var k = clamp01((performance.now() - el.__pressAt) / 420);
-        return 1 - 0.14 * Math.sin(Math.PI * k) * (1 - k * 0.5);
+        var k = clamp01((performance.now() - el.__pressAt) / 520);
+        var dip = 0.86, peak = 1.06;   // 按下缩到 86%，再放大到 106%（超过原大小），最后回弹到 1
+        if (k < 0.16) return 1 - (1 - dip) * (k / 0.16);
+        if (k < 0.42) return dip + (peak - dip) * easeOutCubic((k - 0.16) / 0.26);
+        return peak - (peak - 1) * easeOutCubic((k - 0.42) / 0.58);
       }
 
       // ① 底部胶囊：尺寸不变，只【淡出】——不再缩小（用户要求）
@@ -1015,14 +1026,14 @@
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
-        gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
         gl.uniform1f(loc.uRot, rot);
-        gl.uniform1f(loc.uPaper, 1);
-        gl.uniform1f(loc.uAlpha, alpha * fadeA);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        // 相纸那一遍已删除：白边和照片现在合成同一个四边形（见下面 uPaper=3）
         // 照片
-        gl.uniform2f(loc.uHalf, hw, hh);
-        gl.uniform1f(loc.uPaper, 0);
+        // 一体化：几何按【相纸】尺寸；UV 缩到内侧 = 照片，外侧 = 白边
+        gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
+        gl.uniform4f(loc.uUVO, -MATTE_BORDER, -MATTE_BORDER,
+                     1 + 2 * MATTE_BORDER, 1 + 2 * MATTE_BORDER);
+        gl.uniform1f(loc.uPaper, 3);
         gl.uniform1f(loc.uMix, blur);
         gl.uniform1f(loc.uAlpha, alpha * fadeA);
         gl.activeTexture(gl.TEXTURE0);
@@ -2021,8 +2032,8 @@
     function hookPress(el) {
       if (!el || el.__pressHooked) return;
       el.__pressHooked = 1;
+      // 只在按下时触发一次（原来 mousedown/mouseup 都触发 -> 缩了两次）
       el.addEventListener('mousedown', function () { el.__pressAt = performance.now(); dirty = true; });
-      el.addEventListener('mouseup', function () { el.__pressAt = performance.now(); dirty = true; });
     }
 
     function destroy() {
