@@ -821,10 +821,10 @@
         if ((parseFloat(getComputedStyle(el3).opacity) || 0) < 0.02) return;
         var r3 = el3.getBoundingClientRect();
         if (r3.width < 2 || r3.height < 2) return;
-        var hw3 = r3.width * dpr * 0.5, hh3 = r3.height * dpr * 0.5;
+        // ★ 直接复用光标胶囊的形状与尺寸（只换中心点）——保证按钮和光标一模一样
         shapes.push([(r3.left + r3.width * 0.5) * dpr,
                      H - (r3.top + r3.height * 0.5) * dpr,
-                     hw3, hh3, Math.min(hw3, hh3)]);
+                     GLASS_PILL_HW * dpr, GLASS_PILL_HH * dpr, GLASS_PILL_HH * dpr]);
       });
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
       // 原来它们在循环外、用光标球的半径 rpx 算，于是按钮（半高只有球的 1/3）
@@ -1542,17 +1542,17 @@
     // 参考页 glass-cursor.html 的"玻璃（参考的那组）"换算成比例：
     // 球直径 94、feather 12（=0.13）、depth 45（=0.48）、curve 1.2、chroma 0.12、glint 0.64
     // 关键：**窄带 + 大位移** —— 只有边缘一圈把影像吸进去，这才是玻璃边。
-    var GLASS_DEPTH_PCT = 0.48;  // 折射位移 = 短边 * 此值
-    var GLASS_FEATHER = 0.34;    // 折射带宽度：只有边缘 13% 的一圈
-    var GLASS_CURVE = 1.25;       // 参考值
+    var GLASS_DEPTH_PCT = 0.6;  // 折射位移 = 短边 * 此值
+    var GLASS_FEATHER = 0.71;    // 折射带宽度：只有边缘 13% 的一圈
+    var GLASS_CURVE = 2.15;       // 参考值
     var GLASS_CHROMA = 0.2;     // 参考值
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
-    var GLASS_FROST_MIX = 0.45;     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
+    var GLASS_FROST_MIX = 0.34;     // 磨砂混合：0=全透明折射 / 1=整块雾面         // 聚光 saturate%
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
-    var GLASS_RIM_W = 5;        // 环高光宽度 px
-    var GLASS_RIM_A = 0.24;      // 环高光强度
+    var GLASS_RIM_W = 8;        // 环高光宽度 px
+    var GLASS_RIM_A = 0.14;      // 环高光强度
     var GLASS_GLINT = 0;      // 参考值
     var GLASS_TINT = 0;       // 玻璃底色浓度
     var glassFilterSeq = 0;
@@ -1698,7 +1698,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v9';
+    var TUNE_KEY = 'album3d-tune-v10';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
