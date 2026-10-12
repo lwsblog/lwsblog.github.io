@@ -30,7 +30,10 @@
   // 用户的要求：整体小一点 = 把摄像机拉远（卡片世界尺寸不变，视觉变小）。3.2 -> 4.9。
   // 并且下面所有以世界单位计的常量都改成 CAM_DIST 的倍数 ——
   // 以后只调 CAM_DIST，其他量自己跟着缩放，不会再出现量级错。
-  var CAM_DIST = 3;          // 摄像机到 z=0 平面的距离
+  var CAM_DIST = 3;
+    // ★ 圆柱半径（虚拟圆柱：照片沿它的外表面摆开，法线朝外 = 朝相机）
+    // R=850 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
+    var CYL_R = 850;          // 摄像机到 z=0 平面的距离
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -114,6 +117,7 @@
       'uniform vec3 uCenter;',    // 卡片中心（世界坐标：x=横, y=纵, z=深度, 越大越近）
       'uniform vec2 uHalf;',      // 卡片半宽半高（世界单位）
       'uniform float uRot;',      // 卡片自身倾角
+      'uniform float uYaw;',      // ★ 绕 Y 轴的旋转（圆柱排列：让卡片朝外）
       'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY, uCamZoom;',
       'varying vec2 vUV;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
@@ -121,7 +125,11 @@
       '  vec2 p = aXY * uHalf;',
       '  float c = cos(uRot), s = sin(uRot);',
       '  p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);',
-      '  vec3 w = vec3(uCenter.xy + p, uCenter.z);',
+      // 把本地偏移绕 Y 轴转 uYaw：这样卡片平面会倾斜，
+      // 法线变成 (-sin(uYaw), 0, cos(uYaw))，且每个顶点的 z 不同
+      // -> 真正的透视（而不是现在这种永远平行屏幕的公告板）。
+      '  vec3 l = vec3(p.x * cos(uYaw), p.y, p.x * sin(uYaw));',
+      '  vec3 w = uCenter + l;',
             // uCamZoom 由 JS 每帧上传（原来那次误放在编号块里、SHOW_NUM=false 从不执行，
       // 所以值恒为 0 -> zc = -z -> 整排照片消失。根因是上传位置，不是编译器优化。）
       '  float zc = uCamZ * uCamZoom - w.z;',
@@ -302,8 +310,16 @@
       for (var i = 0; i < n; i++) {
         var p = photos[i];
         var layer = i % Z_COUNT;                        // 轮流分层，保证前后都有
-        p.z = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
-        p.x = i * GAP - (n - 1) * GAP * 0.5;
+        var layerZ = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
+        // ★ 圆柱排列：沿半径 CYL_R 的圆弧摆开，卡片法线朝外（= 朝相机）
+        var arcX = i * GAP - (n - 1) * GAP * 0.5;       // 沿弧的弧长坐标
+        p.theta = arcX / CYL_R;
+        p.yaw = -p.theta;                               // 绕自身 Y 轴转，法线指向圆心的反方向（朝外）
+        p.x = CYL_R * Math.sin(p.theta);
+        p.z = CYL_R * Math.cos(p.theta) - CYL_R;        // ≤ 0：两端退到后面
+        // 深度层沿【各自的法线】偏（不是沿世界 z）
+        p.x += layerZ * Math.sin(p.theta);
+        p.z += layerZ * Math.cos(p.theta);
         p.y = (rnd() * 2 - 1) * JITTER * 0.5 * 2;       // ±JITTER
         p.rot = (rnd() * 2 - 1) * TILT;
         p.scale = 0.78 + rnd() * 0.58;      // 大小不一（0.78~1.36），参考图就是这样
@@ -1169,6 +1185,8 @@
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform1f(loc.uRot, rot);
+        // cylinder: per-card Y rotation. multiplied by (1-mt) so the grid stays flat.
+        gl.uniform1f(loc.uYaw, (p.yaw || 0) * (1 - mt));
         // 相纸那一遍已删除：白边和照片现在合成同一个四边形（见下面 uPaper=3）
         // 照片
         // 一体化：几何按【相纸】尺寸；UV 缩到内侧 = 照片，外侧 = 白边
@@ -1490,7 +1508,7 @@
       if (!gl) { host.remove(); return; }
 
       prog = program(VS, FS);
-      ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
+      ['uCenter','uHalf','uRot','uYaw','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
        'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
