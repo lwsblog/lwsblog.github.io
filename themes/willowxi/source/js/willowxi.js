@@ -2214,7 +2214,11 @@
 
   function setupGallery() {
     // the album page renders the 3D album instead; do not build the old gallery there
-    if (document.documentElement.classList.contains('is-album')) return;
+    // Route check, not a class check: on a hard load of /photos/ this runs BEFORE the
+  // album page's inline script can add is-album, so the old gallery used to build its own
+  // JS-created nodes (the bottom-left pill) and those survived into the 3D album.
+  if (/^\/photos\/?$/.test(location.pathname)) return;
+  if (document.documentElement.classList.contains('is-album')) return;
     var root = document.querySelector('[data-gallery]');
     if (!root) return;
 
