@@ -32,8 +32,8 @@
   // 以后只调 CAM_DIST，其他量自己跟着缩放，不会再出现量级错。
   var CAM_DIST = 3;
     // ★ 圆柱半径（虚拟圆柱：照片沿它的外表面摆开，法线朝外 = 朝相机）
-    // R=850 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
-    var CYL_R = 850;          // 摄像机到 z=0 平面的距离
+    // R=150 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
+    var CYL_R = 150;          // 摄像机到 z=0 平面的距离
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -314,7 +314,7 @@
         // ★ 圆柱排列：沿半径 CYL_R 的圆弧摆开，卡片法线朝外（= 朝相机）
         var arcX = i * GAP - (n - 1) * GAP * 0.5;       // 沿弧的弧长坐标
         p.theta = arcX / CYL_R;
-        p.yaw = -p.theta;                               // 绕自身 Y 轴转，法线指向圆心的反方向（朝外）
+        p.yaw = -p.theta;   // convex: normal points outward, so a left card has its RIGHT border nearer (left short / right long)
         p.x = CYL_R * Math.sin(p.theta);
         p.z = CYL_R * Math.cos(p.theta) - CYL_R;        // ≤ 0：两端退到后面
         // 深度层沿【各自的法线】偏（不是沿世界 z）
