@@ -977,11 +977,15 @@
           txtOp = since <= 0 ? 0 : clamp01(since / 280);
           if (sp > 0.98) txtOp = 0;                                 // 还没开始合并
         }
-        toggleEl.style.opacity = String(txtOp);
-        // capsule fly-in: from 90px below, overshooting then settling (easeOutBack)
+        // capsule: hidden until the typing finishes, then it flies up from below with
+        // a single overshoot-and-settle. The transform is written every frame, so the
+        // CSS transition must be off for it - otherwise the two animations stack and it
+        // reads as two separate rises.
         var _tin = capInAt ? clamp01((performance.now() - capInAt) / 620) : 0;
         var _ty = (1 - easeOutBack(_tin, 1.3)) * 90;
+        toggleEl.style.transition = 'none';
         toggleEl.style.transform = 'translate(-50%, ' + _ty.toFixed(1) + 'px)';
+        toggleEl.style.opacity = String(capInAt ? txtOp * clamp01(_tin * 2.5) : 0);
       }
 
       function rectOf(el, cached) {
