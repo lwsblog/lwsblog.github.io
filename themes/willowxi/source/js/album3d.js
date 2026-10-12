@@ -430,7 +430,7 @@
       // 滚动范围：让首尾都能到屏幕中央
       scrollMin = photos[0].arc;
       scrollMax = photos[n - 1].arc;
-      scroll = scrollTarget = (scrollMin + scrollMax) * 0.5;
+      scroll = scrollTarget = scrollMin;   // opening ends at the LEFT end (was the middle)
     }
 
     // ---------- 缓动 ----------
@@ -1727,6 +1727,10 @@
         //    照片被推到画面外（实测 camZoom = -0.162、panY = -0.498、照片低了 420px），
         //    严重时就是之前那个 GPU 卡死。这里保证摄像机始终在照片前面。
         if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
+      // On the cylinder z0 is the card's z BEFORE the spin, so an edge card looks
+      // 3.5 units behind and focusCamZ goes negative - the camera ends up inside the
+      // photo. Never let the focus camera come closer than a safe distance.
+      if (focusCamZ < CAM_DIST * 0.45) focusCamZ = CAM_DIST * 0.45;
         // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
         // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
         // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
