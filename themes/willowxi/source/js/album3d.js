@@ -854,8 +854,8 @@
             var cm = ct.match(/matrix\(([^)]+)\)/);
             if (cm) {
               var cn = cm[1].split(',').map(parseFloat);
-              bpx = (cn[4] || 0) / W * GLASS_PARALLAX_GAIN;
-              bpy = -(cn[5] || 0) / H * GLASS_PARALLAX_GAIN;
+              bpx = (cn[4] || 0) / W * GLASS_PARALLAX_GAIN_BG;
+              bpy = -(cn[5] || 0) / H * GLASS_PARALLAX_GAIN_BG;
             }
           }
         }
@@ -1773,7 +1773,8 @@
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
     var GLASS_FROST_MIX = 0.34;
-    var GLASS_PARALLAX_GAIN = 7;  // 玻璃里那层背景的视差放大倍数（DOM 原位移只有 ±22px，太小看不出）
+    var GLASS_PARALLAX_GAIN = 7;      // 壁纸那层的视差放大
+    var GLASS_PARALLAX_GAIN_BG = 2;   // 网格（背景 canvas）那层：用户说太大，单独调小  // 玻璃里那层背景的视差放大倍数（DOM 原位移只有 ±22px，太小看不出）
     var GLASS_MERGE = 42;          // 分裂中的黏连半径峰值（颈的粗细）
     // ★ 静止时必须为 0：smin 的修正项在"两个形状一样近"的地方最大，
     //   正好落在两半重叠的中间 -> 会把中间吹鼓（用户看到的凸起），
