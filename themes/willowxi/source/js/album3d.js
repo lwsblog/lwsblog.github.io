@@ -840,7 +840,7 @@
           }
         }
       } catch (e) {}
-      gl.uniform2f(compLoc.uWallP, plx, ply);
+      gl.uniform2f(compLoc.uWallP, plx * GLASS_PARALLAX_GAIN, ply * GLASS_PARALLAX_GAIN);
       gl.uniform1f(compLoc.uWallS, pls);
       gl.uniform1f(compLoc.uWallAmt, 0.36);
       gl.uniform1f(compLoc.uWallGain, 0.86);
@@ -1753,6 +1753,7 @@
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
     var GLASS_FROST_MIX = 0.34;
+    var GLASS_PARALLAX_GAIN = 7;  // 玻璃里那层背景的视差放大倍数（DOM 原位移只有 ±22px，太小看不出）
     var GLASS_MERGE = 42;          // 分裂中的黏连半径峰值（颈的粗细）
     // ★ 静止时必须为 0：smin 的修正项在"两个形状一样近"的地方最大，
     //   正好落在两半重叠的中间 -> 会把中间吹鼓（用户看到的凸起），
