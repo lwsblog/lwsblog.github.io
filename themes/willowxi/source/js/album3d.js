@@ -1061,6 +1061,7 @@
         gl.uniform4f(postLoc.uG, GLASS_FEATHER * rad3, GLASS_DEPTH_PCT * 2 * rad3, GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+        gl.uniform1f(postLoc.uAlpha, 1);   // 后处理的 uAlpha 必须上传，否则玻璃全透明
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
       for (var si = 0; si < 0; si++) {
@@ -1073,6 +1074,7 @@
                      GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
+        gl.uniform1f(postLoc.uAlpha, 1);   // 后处理的 uAlpha 必须上传，否则玻璃全透明
         gl.uniform1f(postLoc.uFrostMix, GLASS_FROST_MIX);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
@@ -2001,7 +2003,7 @@
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
     var TUNE_KEY = 'album3d-tune-v10';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
-                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                     'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'REFL_ALPHA', 'REFL_H', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
@@ -2068,7 +2070,7 @@
         ['上下幅度 JITTER', 'JITTER', 0, 2.0, 0.02],
         ['深度跨度 Z_SPREAD', 'Z_SPREAD', 0.5, 4.0, 0.05],
         ['卡片大小 CARD_H', 'CARD_H', 0.6, 3.0, 0.05],
-        ['摄像机距离 CAM_DIST', 'CAM_DIST', 2.0, 8.0, 0.1],
+        ['摄像机距离 CAM_DIST', 2.0, 8.0, 0.1],
         ['聚焦填充 FOCUS_FILL', 'FOCUS_FILL', 0.30, 1.20, 0.02],
         ['压暗上限 DIM_MAX', 'DIM_MAX', 0, 0.90, 0.01],
         ['聚焦时长 FOCUS_MS', 'FOCUS_MS', 200, 2500, 50],
@@ -2189,7 +2191,7 @@
       panel.appendChild(out);
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
-                    'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                    'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'REFL_ALPHA', 'REFL_H', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
