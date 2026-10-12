@@ -1821,9 +1821,9 @@
     // 图二那种质感的关键：**磨砂内芯 + 一圈明显的亮边**（下方最亮）+ 一点冷色。
     // 这三项之前按回退要求删掉了，结果观感反而更差（用户拿图对比）。
     var GLASS_RIM_W = 8;        // 环高光宽度 px
-    var GLASS_RIM_A = 0.14;      // 环高光强度
+    var GLASS_RIM_A = 0.08;      // 环高光强度
     var GLASS_GLINT = 0;      // 参考值
-    var GLASS_TINT = 0;       // 玻璃底色浓度
+    var GLASS_TINT = 0.1;       // 玻璃底色浓度
     var glassFilterSeq = 0;
 
     // 生成一张圆角矩形的边缘位移图（返回 dataURL 与尺寸）
