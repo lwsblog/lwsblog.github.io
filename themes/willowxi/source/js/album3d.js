@@ -169,6 +169,8 @@
     // ---------- 状态 ----------
     var photos = [];        // {id, ratio, x, y, z, rot, startAt, dur, overshoot, tex, blurTex, ready}
     var scroll = 0, scrollTarget = 0, scrollMin = 0, scrollMax = 0;
+    var capInAt = 0;   // when typing ends -> the capsule fly-in starts
+    var CAP_DIST = 90, CAP_MS = 620, CAP_BACK = 1.3;   // fly-in distance(px) / duration(ms) / overshoot
   var scrollV = 0;                 // 惯性速度（只衰减、不回拉 —— 与弹簧的区别）
   var gridTopY = 0, gridBottomY = 0;
   // 纵向平移（总览视图用）。一排视图下恒为 0。
@@ -947,7 +949,14 @@
           txtOp = since <= 0 ? 0 : clamp01(since / 280);
           if (sp > 0.98) txtOp = 0;                                 // 还没开始合并
         }
-        toggleEl.style.opacity = String(txtOp);
+        // capsule: hidden until typing ends, then it flies up from below and settles.
+        // The transform is written every frame, so the CSS transition must be off for it,
+        // otherwise the two animations stack and it reads as two separate rises.
+        var _tin = capInAt ? clamp01((performance.now() - capInAt) / CAP_MS) : 0;
+        var _ty = (1 - easeOutBack(_tin, CAP_BACK)) * CAP_DIST;
+        toggleEl.style.transition = 'none';
+        toggleEl.style.transform = 'translate(-50%, ' + _ty.toFixed(1) + 'px)';
+        toggleEl.style.opacity = String(capInAt ? (String(txtOp)) * clamp01(_tin * 2.5) : 0);
       }
 
       function rectOf(el, cached) {
@@ -1336,6 +1345,7 @@
 
     function finishOpening() {
       openState = 'done';
+      capInAt = performance.now();   // capsule starts flying in now
       setFocus(-1);   // the opening must end UNFOCUSED, otherwise the first Esc runs a full un-focus animation and slams a photo into your face
       if (overlay) {
         overlay.style.opacity = '0';
