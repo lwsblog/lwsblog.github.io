@@ -992,6 +992,16 @@
         //     分裂时重叠变少     -> 中间自然拉出黏连的颈，然后断开
         //   全程只有两个形状，没有"第三块消失"的怪现象。
         var s1 = clamp01(sp);
+        var _rest = 1 - s1;
+        if (_rest > 0.9995) {
+          // At rest draw ONE complete capsule. The two extended halves below only ever
+          // existed to morph into the nav buttons, and at rest their inner ends leave a
+          // seam that no amount of merging hides. One rounded rect with radius = half
+          // height IS a capsule, so this frame has no seam at all.
+          var psT = pressScale(toggleEl) * (1 + land);
+          var hwT = Math.max(t.hw * psT, 0.6), hhT = Math.min(Math.max(t.hh * psT, 0.6), hwT);
+          shapes.push([t.cx, t.cy, hwT, hhT, Math.min(hwT, hhT), 1]);
+        }
         var halves = [[navPrev, -1], [navNext, 1]];
         halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
@@ -1009,7 +1019,7 @@
           var hh = (hhS + (tg.hh - hhS) * s1) * ps;
           var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
           var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
-          if (hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
+          if (_rest <= 0.9995 && hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
           // ★ 箭头跟着玻璃圆的中心走（并且分裂开始就渐显）
           // 箭头：不跟随、不动位置；等玻璃圆【到位之后】才渐显
           if (el5.style.transform) el5.style.transform = '';
