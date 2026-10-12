@@ -119,6 +119,8 @@
       'uniform float uRot;',      // 卡片自身倾角
       'uniform float uYaw;',      // ★ 绕 Y 轴的旋转（圆柱排列：让卡片朝外）
       'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY, uCamZoom;',
+      'uniform float uSpin;',
+      'uniform float uCylR;',
       'varying vec2 vUV;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
       'void main() {',
@@ -130,6 +132,10 @@
       // -> 真正的透视（而不是现在这种永远平行屏幕的公告板）。
       '  vec3 l = vec3(p.x * cos(uYaw), p.y, p.x * sin(uYaw));',
       '  vec3 w = uCenter + l;',
+      '  { float cs = cos(uSpin), sn = sin(uSpin);',
+      '    float rx = w.x, rz = w.z + uCylR;',
+      '    w.x = rx * cs + rz * sn;',
+      '    w.z = -rx * sn + rz * cs - uCylR; }',
             // uCamZoom 由 JS 每帧上传（原来那次误放在编号块里、SHOW_NUM=false 从不执行，
       // 所以值恒为 0 -> zc = -z -> 整排照片消失。根因是上传位置，不是编译器优化。）
       '  float zc = uCamZ * uCamZoom - w.z;',
@@ -1168,7 +1174,9 @@
           }
         }
 
-        gl.uniform1f(loc.uScroll, scroll);
+        gl.uniform1f(loc.uScroll, 0);
+      gl.uniform1f(loc.uSpin, scroll / CYL_R);
+      gl.uniform1f(loc.uCylR, CYL_R);
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 🔴🔴 uPanY 必须在这里上传！
         // 原来它只出现在下面那个 if (SHOW_NUM && ...) 编号块里，
@@ -1508,7 +1516,7 @@
       if (!gl) { host.remove(); return; }
 
       prog = program(VS, FS);
-      ['uCenter','uHalf','uRot','uYaw','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
+      ['uCenter','uHalf','uRot','uYaw','uSpin','uCylR','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
        'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
@@ -1609,10 +1617,15 @@
     // CPU 侧投影：必须与顶点着色器完全一致，否则点击会偏。
     // VS: scr = (w - (scroll,panY)) * k;  k = focal/(camZ - w.z);  ndc = scr/(half*0.5)
     function projRect(px, py, pz, hw, hh) {
+    var _sp = scroll / CYL_R, _cs = Math.cos(_sp), _sn = Math.sin(_sp);
+    var _rx = px, _rz = pz + CYL_R;
+    px = _rx * _cs + _rz * _sn;
+    pz = -_rx * _sn + _rz * _cs - CYL_R;
+    var _scr = 0;
       var zc = Math.max(0.12, camZ * camZoom - pz);
       var k = (FOCAL * H * 0.5) / zc;
       return {
-        cx: (px - scroll) * k / (W * 0.5),
+        cx: (px - _scr) * k / (W * 0.5),
         cy: (py - panY) * k / (H * 0.5),
         hx: hw * k / (W * 0.5),
         hy: hh * k / (H * 0.5)
