@@ -2149,6 +2149,8 @@
   }
 
   function setupGallery() {
+    // the album page renders the 3D album instead; do not build the old gallery there
+    if (document.documentElement.classList.contains('is-album')) return;
     var root = document.querySelector('[data-gallery]');
     if (!root) return;
 

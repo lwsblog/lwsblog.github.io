@@ -189,7 +189,7 @@
 %>
 <script>
 (function () {
-  if (!/[?&]album=1/.test(location.search)) return;
+  // The 3D album IS the album page now - no ?album=1 needed. The old gallery is gone.
   document.documentElement.classList.add('is-album');
   var sc = document.createElement('script');
   sc.src = /[?&]v=before/.test(location.search) ? '/js/album3d-before.js' : '/js/album3d.js';
