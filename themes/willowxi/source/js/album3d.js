@@ -1514,6 +1514,7 @@
       for (var i = 0; i < photos.length; i++) loadPhoto(photos[i]);
 
       resize();
+      watchSize();   // 初始化后开始盯着视口
       window.addEventListener('resize', resize);
       window.addEventListener('wheel', onWheel, { passive: false });
       document.addEventListener('mousedown', function (e) {
