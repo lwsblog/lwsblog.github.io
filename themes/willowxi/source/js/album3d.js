@@ -33,7 +33,7 @@
   var CAM_DIST = 3;
     // ★ 圆柱半径（虚拟圆柱：照片沿它的外表面摆开，法线朝外 = 朝相机）
     // R=150 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
-    var CYL_R = 150;          // 摄像机到 z=0 平面的距离
+    var CYL_R = 110;          // 摄像机到 z=0 平面的距离
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -1175,7 +1175,7 @@
         }
 
         gl.uniform1f(loc.uScroll, 0);
-      gl.uniform1f(loc.uSpin, scroll / CYL_R);
+      gl.uniform1f(loc.uSpin, -scroll / CYL_R);
       gl.uniform1f(loc.uCylR, CYL_R);
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 🔴🔴 uPanY 必须在这里上传！
@@ -1617,7 +1617,7 @@
     // CPU 侧投影：必须与顶点着色器完全一致，否则点击会偏。
     // VS: scr = (w - (scroll,panY)) * k;  k = focal/(camZ - w.z);  ndc = scr/(half*0.5)
     function projRect(px, py, pz, hw, hh) {
-    var _sp = scroll / CYL_R, _cs = Math.cos(_sp), _sn = Math.sin(_sp);
+    var _sp = -scroll / CYL_R, _cs = Math.cos(_sp), _sn = Math.sin(_sp);
     var _rx = px, _rz = pz + CYL_R;
     px = _rx * _cs + _rz * _sn;
     pz = -_rx * _sn + _rz * _cs - CYL_R;
