@@ -1725,7 +1725,12 @@
       // Fitting height alone makes a landscape card overflow sideways (looks very close)
       // and a portrait card look small - which is exactly what the user saw.
       var _sz = worldSize(ph, mt);
-      focusCamZ = Math.max(_sz.hh, _sz.hw * H / Math.max(1, W)) / FOCUS_FILL;   // A: distance from the card's own size only.
+      // What decides the fill is the distance from the camera to THE CARD,
+      // i.e. focusCamZ - card z. So the card's own depth (the radial layer it
+      // ends at once the spin centres it) must be added in, otherwise near cards
+      // overshoot and far cards undershoot.
+      var _req = Math.max(_sz.hh, _sz.hw * H / Math.max(1, W)) / FOCUS_FILL;
+      focusCamZ = (ph.layerZ || 0) + _req;   // A: distance from the card's own size only.
       // The depth layer must not move the camera - it only affects depth of field,
       // otherwise every card would focus at a different distance.
         // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
@@ -1737,7 +1742,7 @@
       // On the cylinder z0 is the card's z BEFORE the spin, so an edge card looks
       // 3.5 units behind and focusCamZ goes negative - the camera ends up inside the
       // photo. Never let the focus camera come closer than a safe distance.
-      if (focusCamZ < CAM_DIST * 0.30) focusCamZ = CAM_DIST * 0.30;   // safety only
+      if (focusCamZ - (ph.layerZ || 0) < CAM_DIST * 0.25) focusCamZ = (ph.layerZ || 0) + CAM_DIST * 0.25;
         // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
         // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
         // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
