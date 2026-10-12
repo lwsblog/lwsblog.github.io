@@ -5817,9 +5817,10 @@ html.is-album .photo-lightbox { display: none !important; }
    这里换成正经的中文栈（主题本来就有），并把字距松开一点让中文透气。 */
 [data-album] .album-btn-toggle {
   /* 文字改成英文 List / Soar，所以用主题的 Ubuntu Mono（英文在它里面是完整的） */
-  font: 400 13.5px/1 "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace;
-  letter-spacing: .22em;
-  text-indent: .22em;          /* 抵消字距在末尾多出的空隙，保持视觉居中 */
+  font: 400 16px/1 "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: .16em;
+  text-indent: .16em;
+  padding: 12px 26px;      /* 字大了，给足内边距；玻璃胶囊跟着 DOM 尺寸走，所以会自动变大 */          /* 抵消字距在末尾多出的空隙，保持视觉居中 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
