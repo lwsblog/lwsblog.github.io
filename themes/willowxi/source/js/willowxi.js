@@ -2190,6 +2190,28 @@
     window.addEventListener('pjax:complete', tick);
   })();
 
+  // --- Reach the album page cleanly on a soft navigation ------------------------
+  // Two things have to happen BEFORE the swap, not after it:
+  //  * arriving at /photos/ must set html.is-album at once, otherwise the frames
+  //    between the swap and the observer firing let the old gallery build its
+  //    capsule, which is the flash the user sees;
+  //  * leaving the album must fade its canvas out. The album host is fixed to the
+  //    body at z-index 35, above the site's [data-theme-transition] cover, so the
+  //    normal page fade cannot reach it and the photos stayed crisp over the fade.
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (/\/photos\/?$/.test(href)) {
+      document.documentElement.classList.add('is-album');
+      var h = document.querySelector('[data-album]');
+      if (h) { h.style.transition = 'none'; h.style.opacity = '1'; }
+    } else {
+      var cur = document.querySelector('[data-album]');
+      if (cur) { cur.style.transition = 'opacity .28s ease'; cur.style.opacity = '0'; }
+    }
+  }, true);
+
   function setupGallery() {
     // the album page renders the 3D album instead; do not build the old gallery there
     if (document.documentElement.classList.contains('is-album')) return;
