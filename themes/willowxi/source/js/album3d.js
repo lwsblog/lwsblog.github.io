@@ -1721,7 +1721,9 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        focusCamZ = (ph.layerZ !== undefined ? ph.layerZ : z0) + hh0 / FOCUS_FILL;
+        focusCamZ = hh0 / FOCUS_FILL;   // A: distance from the card's own size only.
+      // The depth layer must not move the camera - it only affects depth of field,
+      // otherwise every card would focus at a different distance.
         // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
         //    focusCamZ = z0 + hh0/0.72 可能 <= 0，摄像机直接跑到照片后面，
         //    于是 camZoom 为负 -> zc = camZ*camZoom - z 为负 -> 投影彻底退化：
