@@ -1634,22 +1634,29 @@
     }
     // 拾取：命中则返回最近的（z 最大）那张的下标
     function pickPhoto(nx, ny) {
-      var best = -1, bz = -1e9;
-      for (var i = 0; i < photos.length; i++) {
-        var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
-        var x = ph.x * (1 - mt) + ph.gx * mt;
-        var y = ph.y * (1 - mt) + ph.gy * mt;
-        var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
-        var sz = worldSize(ph, mt);
-        // 命中框用相纸尺寸（画面上看到的是相纸，比照片大一圈；
-        // 用照片尺寸会导致点白边完全没反应）
-        var pb = 1 / (1 + 2 * MATTE_BORDER);
-        var r = projRect(x, y, z, sz.hw / pb, sz.hh / pb);
-        if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
-          if (z > bz) { bz = z; best = i; }
+      // ★ 两遍拾取：
+      //   第一遍用【照片】尺寸 -> 两张叠在一起时，
+      //     点后面那张的【可见部分】不会被前面那张的白边抢走。
+      //   第二遍用【相纸】尺寸 -> 点白边也能聚焦。
+      var pb = 1 / (1 + 2 * MATTE_BORDER);
+      function scan(scale) {
+        var best = -1, bz = -1e9;
+        for (var i = 0; i < photos.length; i++) {
+          var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
+          var x = ph.x * (1 - mt) + ph.gx * mt;
+          var y = ph.y * (1 - mt) + ph.gy * mt;
+          var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+          var sz = worldSize(ph, mt);
+          var r = projRect(x, y, z, sz.hw * scale, sz.hh * scale);
+          if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
+            if (z > bz) { bz = z; best = i; }
+          }
         }
+        return best;
       }
-      return best;
+      var hit = scan(1);            // 先：照片尺寸
+      if (hit < 0) hit = scan(1 / pb);   // 再：相纸尺寸（白边）
+      return hit;
     }
 
     // 聚焦到第 i 张（-1 = 退出）。相机推近 + 整屏压暗，全部走补间。
