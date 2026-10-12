@@ -825,7 +825,11 @@
       if (!postProg) return;
       // 1) 动态背景上传 + 合成（玻璃因此能折射背景，而不只是照片）
       var compOk = false;
-      if (compProg && compFbo && uploadBg()) { composePass(); compOk = true; }
+      // ★ 不能用 uploadBg() 的返回值来决定要不要合成！
+      //   uploadBg 只在《2D 背景画布》有变化时才返回 true，
+      //   而鼠标移动只改了镜头 -> 合成被跳过
+      //   -> 玻璃里采到的是旧帧 -> 按钮里的背景静止。
+      if (compProg && compFbo) { uploadBg(); composePass(); compOk = true; }
       if (blurProg && blurFboA && blurFboB && blurTexB) {
         var rad = Math.max(2, GLASS_FROST * dpr);
         blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
