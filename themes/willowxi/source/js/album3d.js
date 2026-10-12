@@ -687,11 +687,17 @@
       'uniform float uWallOn;',
       'uniform vec3 uBase;',
       'uniform float uWallAmt;',
+      // 壁纸的 CSS 平移/缩放（从 DOM 读来，和外面那层完全一致）
+      'uniform vec2 uWallP;',
+      'uniform float uWallS;',
       'uniform float uWallGain;',
       'varying vec2 vUV;',
       'void main() {',
       '  vec3 col = uBase;',
-      '  if (uWallOn > 0.5) col = mix(col, texture2D(uWall, vUV).rgb * uWallGain, uWallAmt);',
+      // ★ 屏幕上那层壁纸是被 CSS transform 推着走的，
+      //   而贴图里只有原图 -> 这里把同一个变换重做一遍。
+      '  vec2 wuv = (vUV - 0.5) / uWallS + 0.5 - uWallP;',
+      '  if (uWallOn > 0.5) col = mix(col, texture2D(uWall, wuv).rgb * uWallGain, uWallAmt);',
       '  vec4 bg = texture2D(uBg, vUV);',
       '  col = bg.rgb * bg.a + col * (1.0 - bg.a);',
       '  vec4 s4 = texture2D(uScene, vUV);',
@@ -716,7 +722,7 @@
       if (!gl.getProgramParameter(compProg, gl.LINK_STATUS)) {
         console.error('[album3d] compose link: ' + gl.getProgramInfoLog(compProg)); return false;
       }
-      ['uScene','uBg','uWall','uWallOn','uBase','uWallAmt','uWallGain'].forEach(function (n) {
+      ['uScene','uBg','uWall','uWallOn','uBase','uWallAmt','uWallGain','uWallP','uWallS'].forEach(function (n) {
         compLoc[n] = gl.getUniformLocation(compProg, n);
       });
       bgCanvas = document.querySelector('[data-scene-canvas]');
@@ -816,6 +822,26 @@
       gl.uniform1f(compLoc.uWallOn, wallOn ? 1.0 : 0.0);
       // 实测公式的参数：底色 rgb(9,11,15)、壁纸占 36%、亮度 0.86
       gl.uniform3f(compLoc.uBase, 9 / 255, 11 / 255, 15 / 255);
+      // 每帧从 DOM 读壁纸那层的 transform（鼠标平移就在这里）
+      var plx = 0, ply = 0, pls = 1;
+      try {
+        var wel = document.querySelector('[data-scene-wallpaper]') ||
+                  document.querySelector('.scene-background__wallpaper');
+        if (wel) {
+          var mt = getComputedStyle(wel).transform;
+          if (mt && mt !== 'none') {
+            var mm = mt.match(/matrix\(([^)]+)\)/);
+            if (mm) {
+              var nn = mm[1].split(',').map(parseFloat);
+              pls = nn[0] || 1;            // scaleX
+              plx = (nn[4] || 0) / W;      // px -> UV
+              ply = -(nn[5] || 0) / H;     // DOM y 向下 / UV y 向上 -> 取负
+            }
+          }
+        }
+      } catch (e) {}
+      gl.uniform2f(compLoc.uWallP, plx, ply);
+      gl.uniform1f(compLoc.uWallS, pls);
       gl.uniform1f(compLoc.uWallAmt, 0.36);
       gl.uniform1f(compLoc.uWallGain, 0.86);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -830,6 +856,11 @@
       //   而鼠标移动只改了镜头 -> 合成被跳过
       //   -> 玻璃里采到的是旧帧 -> 按钮里的背景静止。
       if (compProg && compFbo) { uploadBg(); composePass(); compOk = true; }
+      // 把关键状态暴露出来，方便在控制台直接看
+      window.__glassDbg = { frame: (window.__glassDbg ? window.__glassDbg.frame : 0) + 1,
+                            compProg: !!compProg, compFbo: !!compFbo, compOk: compOk,
+                            fbo: !!fbo, postProg: !!postProg, glassOn: glassOn, dirty: dirty,
+                            frostRadius: (typeof GLASS_FROST !== 'undefined') ? GLASS_FROST : -1 };
       if (blurProg && blurFboA && blurFboB && blurTexB) {
         var rad = Math.max(2, GLASS_FROST * dpr);
         blurPass(compOk ? compTex : fboTex, blurFboA, 1, 0, rad);
