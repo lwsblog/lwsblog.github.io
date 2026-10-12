@@ -463,7 +463,6 @@
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
       'uniform float uFrostMix;',
       'uniform float uAlpha;',      // 每形状的透明度（倒影用）
-      'uniform float uAlpha;',      // 每形状的透明度（倒影用）
       // 平滑最小（流体并集的核心）
       'float smin(float a, float b, float k) {',
       '  if (k <= 0.0001) return min(a, b);',
