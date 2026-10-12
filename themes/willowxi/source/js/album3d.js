@@ -322,6 +322,7 @@
         var p = photos[i];
         var layer = i % Z_COUNT;                        // 轮流分层，保证前后都有
         var layerZ = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
+        p.layerZ = layerZ;      // radial depth offset; after the spin a centred card sits exactly here
         // ★ 圆柱排列：沿半径 CYL_R 的圆弧摆开，卡片法线朝外（= 朝相机）
         var arcX = i * GAP - (n - 1) * GAP * 0.5;       // 沿弧的弧长坐标
         p.arc = arcX;            // arc length along the cylinder = the scroll unit
@@ -1720,7 +1721,7 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        focusCamZ = z0 + hh0 / FOCUS_FILL;
+        focusCamZ = (ph.layerZ !== undefined ? ph.layerZ : z0) + hh0 / FOCUS_FILL;
         // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
         //    focusCamZ = z0 + hh0/0.72 可能 <= 0，摄像机直接跑到照片后面，
         //    于是 camZoom 为负 -> zc = camZ*camZoom - z 为负 -> 投影彻底退化：
@@ -1730,7 +1731,7 @@
       // On the cylinder z0 is the card's z BEFORE the spin, so an edge card looks
       // 3.5 units behind and focusCamZ goes negative - the camera ends up inside the
       // photo. Never let the focus camera come closer than a safe distance.
-      if (focusCamZ < CAM_DIST * 0.8) focusCamZ = CAM_DIST * 0.8;
+      if (focusCamZ < CAM_DIST * 0.30) focusCamZ = CAM_DIST * 0.30;   // safety only
         // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
         // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
         // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
