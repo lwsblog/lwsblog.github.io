@@ -1460,7 +1460,6 @@
           if (Math.abs(iw * dpr - W) > 1 || Math.abs(ih * dpr - H) > 1 ||
               Math.abs(iw - window.innerWidth) > 1) {
             resize();
-      watchSize();
           }
         };
         if (window.ResizeObserver) {
