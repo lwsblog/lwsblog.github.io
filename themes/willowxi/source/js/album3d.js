@@ -402,7 +402,7 @@
       // 滚动范围：让首尾都能到屏幕中央
       scrollMin = photos[0].x;
       scrollMax = photos[n - 1].x;
-      scroll = scrollTarget = (scrollMin + scrollMax) * 0.5;
+      scroll = scrollTarget = scrollMin;   // opening ends at the LEFT end
     }
 
     // ---------- 缓动 ----------
