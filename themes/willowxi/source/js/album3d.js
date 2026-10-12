@@ -1477,7 +1477,7 @@
         mouseIn = true; mouseX = window.innerWidth * 0.5; mouseY = window.innerHeight * 0.55;
       }
 
-      var wantTuner = true;
+      var wantTuner = false;   // 默认关闭（需要时用 ?tune=1 打开）
       try { if (localStorage.getItem('album3d-tuner-open') === '0') wantTuner = false; } catch (e) {}
       if (/[?&]tune=1/.test(q)) { wantTuner = true; try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
