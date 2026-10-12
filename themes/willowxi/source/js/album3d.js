@@ -188,6 +188,7 @@
     // ---------- 状态 ----------
     var photos = [];        // {id, ratio, x, y, z, rot, startAt, dur, overshoot, tex, blurTex, ready}
     var scroll = 0, scrollTarget = 0, scrollMin = 0, scrollMax = 0;
+    var capInAt = 0;          // when the opening's typing finished -> the capsule's fly-in starts
   var scrollV = 0;                 // 惯性速度（只衰减、不回拉 —— 与弹簧的区别）
   var gridTopY = 0, gridBottomY = 0;
   // 纵向平移（总览视图用）。一排视图下恒为 0。
@@ -977,6 +978,10 @@
           if (sp > 0.98) txtOp = 0;                                 // 还没开始合并
         }
         toggleEl.style.opacity = String(txtOp);
+        // capsule fly-in: from 90px below, overshooting then settling (easeOutBack)
+        var _tin = capInAt ? clamp01((performance.now() - capInAt) / 620) : 0;
+        var _ty = (1 - easeOutBack(_tin, 1.3)) * 90;
+        toggleEl.style.transform = 'translate(-50%, ' + _ty.toFixed(1) + 'px)';
       }
 
       function rectOf(el, cached) {
@@ -1197,6 +1202,11 @@
         gl.uniform1f(loc.uDim, dimK);
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
+        if (p.num === focusNum2 && focusT > 0.001) {
+          var _lf = (p.layerZ || 0) * focusT;
+          x -= _lf * Math.sin(p.theta || 0);
+          z -= _lf * Math.cos(p.theta || 0);
+        }
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform1f(loc.uRot, rot);
@@ -1369,6 +1379,7 @@
 
     function finishOpening() {
       openState = 'done';
+      capInAt = performance.now();   // capsule starts flying in now
       setFocus(-1);   // the opening must always end UNFOCUSED, otherwise the first Esc runs a full un-focus animation and slams a photo into your face
       if (overlay) {
         overlay.style.opacity = '0';
@@ -1662,6 +1673,11 @@
           var x = ph.x * (1 - mt) + ph.gx * mt;
           var y = ph.y * (1 - mt) + ph.gy * mt;
           var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+          if (i === focusIdx && focusT > 0.001) {
+            var _lf2 = (ph.layerZ || 0) * focusT;
+            x -= _lf2 * Math.sin(ph.theta || 0);
+            z -= _lf2 * Math.cos(ph.theta || 0);
+          }
           var sz = worldSize(ph, mt);
           var r = projRect(x, y, z, sz.hw * scale, sz.hh * scale);
           if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
@@ -1745,7 +1761,7 @@
         // 表现就是**放大幅度被砍**（用户：不会写上下位移就不位移只减小放大幅度了）。
         // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
         // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
-        focusCamZ = Math.max(z0n + 0.35, focusCamZ);
+        // _req alone is exact now: the focused card's whole radial offset is faded to 0 while focusing.
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
