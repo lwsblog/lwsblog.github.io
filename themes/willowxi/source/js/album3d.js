@@ -933,7 +933,7 @@
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           // 缓存静止时的位置：否则移动 DOM 会改变 getBoundingClientRect，玻璃会跟着漂
-          if (!el5.__base || s1 <= 0.001) el5.__base = el5.getBoundingClientRect();
+          if (!el5.__base) el5.__base = el5.getBoundingClientRect();   // 只取一次！
           var tg = rectOf(el5, el5.__base);
           var ps = pressScale(el5) * (1 + land);
           var hwS = t.hw * 0.5 + t.hh, hhS = t.hh;          // 加长版半颗
@@ -947,10 +947,15 @@
           var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
           if (hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
           // ★ 箭头跟着玻璃圆的中心走（并且分裂开始就渐显）
-          var offX = (ax - tg.cx) / dpr;          // CSS px
-          var offY = -(ay - tg.cy) / dpr;         // DOM 是自上而下，反一下
-          el5.style.transform = 'translate(' + offX.toFixed(2) + 'px,' + offY.toFixed(2) + 'px)';
-          el5.style.opacity = String(clamp01(sp * 2.2));
+          if (s1 <= 0.001) {
+            if (el5.style.transform) el5.style.transform = '';      // 静止：清掉偏移
+            el5.style.opacity = '0';
+          } else {
+            var offX = (ax - tg.cx) / dpr;        // CSS px
+            var offY = -(ay - tg.cy) / dpr;       // DOM 是自上而下，反一下
+            el5.style.transform = 'translate(' + offX.toFixed(2) + 'px,' + offY.toFixed(2) + 'px)';
+            el5.style.opacity = String(clamp01(sp * 2.2));
+          }
         });
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
