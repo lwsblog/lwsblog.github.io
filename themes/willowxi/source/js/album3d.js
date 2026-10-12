@@ -33,7 +33,7 @@
   var CAM_DIST = 3;
     // ★ 圆柱半径（虚拟圆柱：照片沿它的外表面摆开，法线朝外 = 朝相机）
     // R=150 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
-    var CYL_R = 110;          // 摄像机到 z=0 平面的距离
+    var CYL_R = 85;          // 摄像机到 z=0 平面的距离
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -163,10 +163,13 @@
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
       // uPaper=3: 一体化。uv 落在 [0,1] 之外 = 【白边】；之内 = 照片。
       // 这样每张只有一个图元，后画的照片不可能盖住别人的白边。
+      '  float _ein = 1.0;',
       '  if (uPaper > 2.5) {',
-      '    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {',
-      '      gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return;',
-      '    }',
+      // soft band on the paper/photo boundary: kills the stair-stepping and reads as a feathered edge
+      '    float _e = 0.006;',
+      '    _ein = min(min(smoothstep(-_e, _e, uv.x), smoothstep(1.0 + _e, 1.0 - _e, uv.x)),',
+      '               min(smoothstep(-_e, _e, uv.y), smoothstep(1.0 + _e, 1.0 - _e, uv.y)));',
+      '    if (_ein <= 0.002) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  }',
       '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
@@ -174,7 +177,9 @@
       '  if (uPaper > 1.5 && uPaper < 2.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
-      '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
+      // blend the last stretch into the paper colour and fade the outer rim's alpha
+      '  vec3 _pc = uPaperRGB * (1.0 - uDim);',
+      '  gl_FragColor = vec4(mix(_pc, c * (1.0 - uDim), _ein), uAlpha * (0.25 + 0.75 * _ein));',
       '}'
     ].join('\n');
 
