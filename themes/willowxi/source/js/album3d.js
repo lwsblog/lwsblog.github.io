@@ -1642,7 +1642,7 @@
     function buildToggle() {
       var b = document.createElement('button');
       b.setAttribute('data-album-toggle', '');
-      b.textContent = '总览';
+      b.textContent = 'List';
       // 样式交给 CSS 类 .album-glass / .album-btn-toggle（液态玻璃）
       b.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -1666,7 +1666,7 @@
           viewTo.pan = 0;                 // 纵向回中
         }
         scrollV = 0; panV = 0;
-        b.textContent = mode ? '浏览' : '总览';
+        b.textContent = mode ? 'Soar' : 'List';
       });
       // 别让点击落到"跳过开屏"的处理上
       b.addEventListener('mousedown', function (e) { e.stopPropagation(); });
