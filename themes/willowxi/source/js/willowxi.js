@@ -2148,6 +2148,48 @@
     }
   }
 
+  // --- 3D album: boot and teardown that survive a PJAX navigation ---------------
+  // The album page's own inline script only runs on a real page load, so arriving
+  // via the site's links (PJAX swaps #main) used to show the OLD gallery, and
+  // leaving used to leave the album's canvas and capsule behind on the next page.
+  // This watches the DOM instead of relying on any internal PJAX event name.
+  (function () {
+    var inst = null, loading = false;
+    function onAlbumRoute() { return /^\/photos\/?$/.test(location.pathname); }
+    function boot() {
+      if (inst || loading) return;
+      if (window.WillowXIAlbum) {
+        document.documentElement.classList.add('is-album');
+        inst = window.WillowXIAlbum.create(document);
+        window.__albumInstance = inst;
+        inst.init();
+        return;
+      }
+      if (document.querySelector('script[data-album-script]')) return;
+      loading = true;
+      var sc = document.createElement('script');
+      sc.src = '/js/album3d.js';
+      sc.async = true;
+      sc.setAttribute('data-album-script', '1');
+      sc.onload = function () { loading = false; boot(); };
+      sc.onerror = function () { loading = false; };
+      document.body.appendChild(sc);
+    }
+    function teardown() {
+      document.documentElement.classList.remove('is-album');
+      if (!inst) return;
+      try { inst.destroy(); } catch (e) {}
+      inst = null;
+      window.__albumInstance = null;
+    }
+    function tick() { if (onAlbumRoute()) { boot(); } else { teardown(); } }
+    tick();
+    try { new MutationObserver(tick).observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+    window.addEventListener('popstate', tick);
+    window.addEventListener('pjax:end', tick);
+    window.addEventListener('pjax:complete', tick);
+  })();
+
   function setupGallery() {
     // the album page renders the 3D album instead; do not build the old gallery there
     if (document.documentElement.classList.contains('is-album')) return;
