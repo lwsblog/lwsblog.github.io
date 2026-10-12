@@ -1142,6 +1142,13 @@
       // 用着色器里的一个乘法实现，不增加任何几何 —— 不会像整屏四边形那样拖垮软件渲染。
       if (focusIdx >= 0) lastFocusNum = photos[focusIdx].num;
     var focusNum2 = (focusT > 0.001) ? lastFocusNum : -1;   // sticky through the exit, so the depth fade unwinds smoothly
+      // The focused card is painted last: its depth layer is faded to 0 while focusing,
+      // but order was sorted by the un-faded z, so other cards would draw on top of it.
+      if (focusNum2 >= 0) {
+        for (var _oi = 0; _oi < order.length; _oi++) {
+          if (order[_oi].num === focusNum2) { order.push(order.splice(_oi, 1)[0]); break; }
+        }
+      }
       for (var i = 0; i < order.length; i++) {
         var p = order[i];
         if (!p.ready) continue;
@@ -1771,7 +1778,10 @@
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
-        focusPan = py0 - dyNdc * (focusCamZ - z0n) / FOCAL;
+        // the card's radial depth is faded to 0 by the time the tween ends, so the
+        // distance is focusCamZ - fadedZ, not focusCamZ - z0n (z0n made front cards sit low).
+        var _zEnd = z0n - (ph.layerZ || 0) * Math.cos(ph.theta || 0);
+        focusPan = py0 - dyNdc * (focusCamZ - _zEnd) / FOCAL;
       }
     }
 
