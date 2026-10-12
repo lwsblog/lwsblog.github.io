@@ -1762,7 +1762,10 @@
       // radial layer offset remains, so that alone is where the card ends up.
       var _zEnd0 = (ph.layerZ || 0) * Math.cos(ph.theta || 0);
       var _req = Math.max(_sz.hh, _sz.hw * H / Math.max(1, W)) / FOCUS_FILL;
-      if (_req < CAM_DIST * 0.62) _req = CAM_DIST * 0.62;
+      // NO distance floor here. A floor pushes the camera back, the visible half-width
+      // grows with it (zc*(W/H)), and the neighbouring photos - only 2.35 apart - come
+      // into frame and loom. A close camera keeps them outside, which is exactly how it
+      // behaved before the cylinder.
       focusCamZ = _zEnd0 + _req;   // A: distance from the card's own size only.
       // The depth layer must not move the camera - it only affects depth of field,
       // otherwise every card would focus at a different distance.
