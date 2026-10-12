@@ -1485,10 +1485,12 @@
           var r = cv.getBoundingClientRect();
           var iw = Math.round(r.width), ih = Math.round(r.height);
           if (!iw || !ih) return;
-          if (Math.abs(iw * dpr - W) > 1 || Math.abs(ih * dpr - H) > 1 ||
-              Math.abs(iw - window.innerWidth) > 1) {
-            resize();
-          }
+          // 只用【后备缓冲】判断是否需要重算，而且要求明显偏差（避免每帧都触发）。
+          // 原来还比较 iw 和 innerWidth：那个条件可能长期为真 -> resize()/layout() 每帧跑
+          // -> 视图永远停在"切换中" -> 点击全被 if (modeFrom !== mode) 拒绝。
+          var needW = Math.abs(iw * dpr - W) > 2;
+          var needH = Math.abs(ih * dpr - H) > 2;
+          if (needW || needH) resize();
         };
         if (window.ResizeObserver) {
           var ro = new ResizeObserver(refit);
