@@ -5809,3 +5809,24 @@ html.is-album .photo-lightbox { display: none !important; }
   text-rendering: optimizeLegibility;
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45), 0 0 2px rgba(255, 255, 255, 0.06);
 }
+
+
+/* ===== ALBUM CJK FONT =====
+   原来按钮用的是 "Ubuntu Mono" —— 它【没有中文字形】，
+   所以"总览"两个字是浏览器临时回退到默认中文字体画的 -> 又生硬又没抗锯齿。
+   这里换成正经的中文栈（主题本来就有），并把字距松开一点让中文透气。 */
+[data-album] .album-btn-toggle {
+  font: 400 13.5px/1 "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+        "Noto Sans SC", "Ubuntu Mono", system-ui, sans-serif;
+  letter-spacing: .22em;
+  text-indent: .22em;          /* 抵消字距在末尾多出的空隙，保持视觉居中 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+/* 箭头那两个字（< >）继续用原来的等宽字体，保证几何形状不变 */
+[data-album] .album-nav-btn {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
