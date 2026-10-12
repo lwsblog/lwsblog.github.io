@@ -5831,3 +5831,16 @@ html.is-album .photo-lightbox { display: none !important; }
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+
+/* ---------------------------------------------------------------------------
+   相册页：3D 相册接管整个画面。
+   模板里仍然有旧相册的静态内容（22 张缩略图 + 底部那个 pill），它们自带主题的
+   入场动画，会和 3D 相册的卡片一起飞出来，看起来像"两份图片在飞"。
+   3D 相册是在 <body> 上自己建画布的，不依赖 #main，所以这里整体不显示最干净。
+   --------------------------------------------------------------------------- */
+html.is-album #main,
+html.is-album .gallery,
+html.is-album [data-gallery] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
