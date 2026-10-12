@@ -31,6 +31,8 @@
   // 并且下面所有以世界单位计的常量都改成 CAM_DIST 的倍数 ——
   // 以后只调 CAM_DIST，其他量自己跟着缩放，不会再出现量级错。
   var CAM_DIST = 3.2;          // 摄像机到 z=0 平面的距离
+    var REFL_ALPHA = 0.25;          // 倒影透明度（面板可调）
+    var REFL_H = 0.42;              // 倒影高度 = 照片高度的倍数
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -158,6 +160,13 @@
       '  vec4 a = texture2D(uTex, uv);',
       // 编号那一支：收窄到 < 2.5，否则会把 uPaper=3（一体化）也接住 -> 整张变白卡
       '  if (uPaper > 1.5 && uPaper < 2.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
+      // 倒影：uPaper=4。采【模糊图】所以自然柔化；
+      // vUV.y 从下(±0)到上(1)，乘上它 = 向下渐隐。
+      '  if (uPaper > 3.5) {',
+      '    vec4 rf = texture2D(uBlur, uv);',
+      '    gl_FragColor = vec4(rf.rgb * (1.0 - uDim), rf.a * uAlpha * vUV.y);',
+      '    return;',
+      '  }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
       '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
@@ -463,6 +472,7 @@
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
       'uniform float uFrostMix;',
       'uniform float uAlpha;',      // 每形状的透明度（倒影用）
+      'uniform float uAlpha;',      // 每形状的透明度（倒影用）
       // 平滑最小（流体并集的核心）
       'float smin(float a, float b, float k) {',
       '  if (k <= 0.0001) return min(a, b);',
@@ -563,7 +573,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix','uAlpha','uShapes','uRadii','uCountF','uSminK'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix','uAlpha','uAlpha','uShapes','uRadii','uCountF','uSminK'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -1172,6 +1182,21 @@
         gl.uniform1f(loc.uRot, rot);
         // 相纸那一遍已删除：白边和照片现在合成同一个四边形（见下面 uPaper=3）
         // 照片
+        // ★ 倒影：镜像的第二个四边形，贴在卡片下方（先画，在卡片后面）
+        if (REFL_ALPHA > 0.001) {
+          gl.uniform1f(loc.uPaper, 4);
+          gl.uniform2f(loc.uHalf, hw / pb, hh * REFL_H);
+          gl.uniform3f(loc.uCenter, x, y - hh - hh * REFL_H, z - 0.001);
+          gl.uniform1f(loc.uRot, rot);
+          gl.uniform1f(loc.uAlpha, alpha * fadeA * REFL_ALPHA);
+          gl.uniform4f(loc.uUVO, 0, 1, 1, -1);      // y 翻转 = 镜像
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, p.blurTex || p.tex);
+          gl.uniform1i(loc.uBlur, 1);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.uniform4f(loc.uUVO, 0, 0, 1, 1);        // 还原
+          gl.uniform1f(loc.uAlpha, 1);
+        }
         // 一体化：几何按【相纸】尺寸；UV 缩到内侧 = 照片，外侧 = 白边
         gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
         gl.uniform4f(loc.uUVO, -MATTE_BORDER, -MATTE_BORDER,
@@ -1977,7 +2002,7 @@
     var TUNE_KEY = 'album3d-tune-v10';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'REFL_ALPHA', 'REFL_H', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
@@ -1987,6 +2012,7 @@
         TOGGLE_BOTTOM: TOGGLE_BOTTOM, TOGGLE_LEFT: TOGGLE_LEFT,
         GLASS_DEPTH_PCT: GLASS_DEPTH_PCT, GLASS_FEATHER: GLASS_FEATHER, GLASS_CURVE: GLASS_CURVE,
         GLASS_CHROMA: GLASS_CHROMA, GLASS_FROST: GLASS_FROST, GLASS_SAT: GLASS_SAT,
+        REFL_ALPHA: REFL_ALPHA, REFL_H: REFL_H,
         GLASS_FROST_MIX: GLASS_FROST_MIX,
         GLASS_RIM_W: GLASS_RIM_W, GLASS_RIM_A: GLASS_RIM_A,
         GLASS_GLINT: GLASS_GLINT, GLASS_TINT: GLASS_TINT,
@@ -2007,6 +2033,7 @@
       else if (k === 'GLASS_CURVE') GLASS_CURVE = v; else if (k === 'GLASS_CHROMA') GLASS_CHROMA = v;
       else if (k === 'GLASS_FROST') GLASS_FROST = v; else if (k === 'GLASS_SAT') GLASS_SAT = v;
       else if (k === 'GLASS_FROST_MIX') GLASS_FROST_MIX = v;
+      else if (k === 'REFL_ALPHA') REFL_ALPHA = v; else if (k === 'REFL_H') REFL_H = v;
       else if (k === 'GLASS_RIM_W') GLASS_RIM_W = v; else if (k === 'GLASS_RIM_A') GLASS_RIM_A = v;
       else if (k === 'GLASS_GLINT') GLASS_GLINT = v; else if (k === 'GLASS_TINT') GLASS_TINT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
@@ -2120,6 +2147,8 @@
        ['磨砂 blur px','GLASS_FROST',0,24,0.5],
        ['聚光 saturate %','GLASS_SAT',100,300,5],
        ['磨砂混合 frostMix','GLASS_FROST_MIX',0,1,0.01],
+       ['倒影 透明度','REFL_ALPHA',0,1,0.01],
+       ['倒影 高度','REFL_H',0,1,0.02],
        ['环高光 宽 px','GLASS_RIM_W',0,70,1],
        ['环高光 强','GLASS_RIM_A',0,1.4,0.02],
        ['冷色内光 glint','GLASS_GLINT',0,1,0.02],
@@ -2161,7 +2190,7 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','CAM_DIST','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
-                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
+                    'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'REFL_ALPHA', 'REFL_H', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }
       out.textContent = dump();
