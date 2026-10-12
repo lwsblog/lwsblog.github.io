@@ -912,30 +912,29 @@
         // sp 很小时：画【一整颗胶囊】——两半各自圆角会在中间留缝，看着不像一颗
         // ★ 删掉硬切换（用户看到的"卡一下"）：
         // 现在始终只画两半，靠 smin 并集无缝融成一整颗。
-        // ★ 三块，但静止时【精确】合成一个完整胶囊（不需要任何平滑，所以没有鼓包/接缝）：
-        //   中间段(圆角=半高) + 左端帽圈 + 右端帽圈；两个端帽的内半边正好落在中间段里面。
-        //   分裂时：端帽飞出去，中间段【宽度连续收缩到 0】-> 自然成颈 -> 收成一点（不跳变）。
+        // ★ 始终只画【两半】。每半比一半【多出一个半高】的长度，
+        //   于是两者的内端圆帽互相埋进对方身体里：
+        //     静止时并集的轮廓是直边 -> 一个完整胶囊（不会出现腰）
+        //     分裂时重叠变少     -> 中间自然拉出黏连的颈，然后断开
+        //   全程只有两个形状，没有"第三块消失"的怪现象。
         var s1 = clamp01(sp);
-        var midW = Math.max(0, t.hw - t.hh);      // 中间直边的一半长度
-        var caps = [[navPrev, -1], [navNext, 1]];
-        caps.forEach(function (h5) {
+        var halves = [[navPrev, -1], [navNext, 1]];
+        halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
           var tg = rectOf(el5);
           var ps = pressScale(el5) * (1 + land);
-          var sx = t.cx + side * midW, sy = t.cy;            // 起点：胶囊端帽圆心
-          var ax = sx + (tg.cx - sx) * sPos;
-          var ay = sy + (tg.cy - sy) * sPos
-                   - Math.sin(Math.PI * s1) * H * 0.16;
-          var rS = t.hh, rE = Math.min(tg.hw, tg.hh);
-          var rr = (rS + (rE - rS) * s1) * ps;
-          if (rr > 0.5) shapes.push([ax, ay, rr, rr, rr, 1]);   // hw=hh=r -> 正圆
+          var hwS = t.hw * 0.5 + t.hh, hhS = t.hh;          // 加长版半颗
+          var cxS = t.cx + side * t.hw * 0.5;
+          var ax = cxS + (tg.cx - cxS) * sPos;
+          var ay = t.cy + (tg.cy - t.cy) * sPos
+                   - Math.sin(Math.PI * s1) * H * 0.16;     // 竖直拱起 -> 弧线
+          var hw = (hwS + (tg.hw - hwS) * s1) * ps;
+          var hh = (hhS + (tg.hh - hhS) * s1) * ps;
+          var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
+          var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
+          if (hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
         });
-        // 中间段：宽度随分裂线性收缩到 0；最后 15% 把半径也收到 0（收成一点，不突然消失）
-        var rw = midW * (1 - s1);
-        var rk = (s1 < 0.85) ? 1 : Math.max(0, 1 - (s1 - 0.85) / 0.15);
-        var mh = t.hh * rk * (1 + land);
-        if (rw > 0.2 && mh > 0.2) shapes.push([t.cx, t.cy, rw, Math.min(mh, rw), Math.min(mh, rw), 1]);
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
       // 原来它们在循环外、用光标球的半径 rpx 算，于是按钮（半高只有球的 1/3）
