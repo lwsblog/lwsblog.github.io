@@ -189,6 +189,7 @@
     var photos = [];        // {id, ratio, x, y, z, rot, startAt, dur, overshoot, tex, blurTex, ready}
     var scroll = 0, scrollTarget = 0, scrollMin = 0, scrollMax = 0;
     var capInAt = 0;          // when the opening's typing finished -> the capsule's fly-in starts
+    var lastFocusNum = -1;    // sticky: the last focused photo, kept until focusT reaches 0 (a snap here is a visible jump)
   var scrollV = 0;                 // 惯性速度（只衰减、不回拉 —— 与弹簧的区别）
   var gridTopY = 0, gridBottomY = 0;
   // 纵向平移（总览视图用）。一排视图下恒为 0。
@@ -1139,7 +1140,8 @@
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
       // 聚焦时被聚焦那张 uDim=0（保持原亮度），其余随聚焦进度变暗。
       // 用着色器里的一个乘法实现，不增加任何几何 —— 不会像整屏四边形那样拖垮软件渲染。
-      var focusNum2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
+      if (focusIdx >= 0) lastFocusNum = photos[focusIdx].num;
+    var focusNum2 = (focusT > 0.001) ? lastFocusNum : -1;   // sticky through the exit, so the depth fade unwinds smoothly
       for (var i = 0; i < order.length; i++) {
         var p = order[i];
         if (!p.ready) continue;
@@ -1677,7 +1679,7 @@
           var x = ph.x * (1 - mt) + ph.gx * mt;
           var y = ph.y * (1 - mt) + ph.gy * mt;
           var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
-          if (i === focusIdx && focusT > 0.001) {
+          if (ph.num === lastFocusNum && focusT > 0.001) {
             var _lf2 = (ph.layerZ || 0) * focusT;
             x -= _lf2 * Math.sin(ph.theta || 0);
             z -= _lf2 * Math.cos(ph.theta || 0);
