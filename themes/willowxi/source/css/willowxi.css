@@ -5760,3 +5760,44 @@ html.is-album .photo-lightbox { display: none !important; }
   border: 0 !important;
   outline: 0 !important;
 }
+
+
+/* ===== ALBUM TOPBAR BLUR + FONT SMOOTHING =====
+   顶栏渐变模糊：总高度 = 顶栏的两倍，越往上越糊。
+   做法：头部自身一层轻糊（覆盖 76px）+ ::before 一层重糊（覆盖 152px 并用渐变遮罩淡出）。
+   注意 ::after 已被 body.is-post 占用，所以这里只用 ::before，避免冲突。 */
+.site-header {
+  -webkit-backdrop-filter: blur(4px) saturate(1.05);
+  backdrop-filter: blur(4px) saturate(1.05);
+}
+.site-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--header-height) * 2);   /* 两倍高度 */
+  pointer-events: none;
+  z-index: -1;
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-mask-image: linear-gradient(to bottom,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0.85) 30%,
+      rgba(0, 0, 0, 0.35) 62%,
+      rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0.85) 30%,
+      rgba(0, 0, 0, 0.35) 62%,
+      rgba(0, 0, 0, 0) 100%);
+}
+
+/* 相册下方两个按钮的文字：开抗锯齿 + 一点柔光，别那么"贴上去"的生硬 */
+[data-album-toggle],
+[data-album-nav] {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45), 0 0 2px rgba(255, 255, 255, 0.06);
+}
