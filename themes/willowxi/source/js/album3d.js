@@ -1447,6 +1447,34 @@
       if (postProg && fbo) { makeFbo(); if (blurProg) makeBlurRt(); if (compProg) makeCompose(); }  // 尺寸变了，FBO 要重建
     }
 
+    // ★ 画布尺寸自愈：只要画布的 CSS 盒子变了（窗口缩放 / 浏览器 UI 收起 /
+    //   页面缩放变化 / 面板布局变化），立刻按当前视口重算。
+    //   以前只在 window.resize 时算一次 -> 尺寸后来变了就没人管，
+    //   于是出现"右边空出一条、按钮错位、底部胶囊跑到屏幕外"。
+    function watchSize() {
+      try {
+        var refit = function () {
+          var r = cv.getBoundingClientRect();
+          var iw = Math.round(r.width), ih = Math.round(r.height);
+          if (!iw || !ih) return;
+          if (Math.abs(iw * dpr - W) > 1 || Math.abs(ih * dpr - H) > 1 ||
+              Math.abs(iw - window.innerWidth) > 1) {
+            resize();
+      watchSize();
+          }
+        };
+        if (window.ResizeObserver) {
+          var ro = new ResizeObserver(refit);
+          ro.observe(cv);
+          if (cv.parentNode) ro.observe(cv.parentNode);
+        }
+        window.addEventListener('orientationchange', function () { setTimeout(refit, 120); });
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', refit);
+        // 初始化后再补几次：浏览器 UI 收起、缩放变化常常晚于 load
+        setTimeout(refit, 200); setTimeout(refit, 700); setTimeout(refit, 1600);
+      } catch (e) {}
+    }
+
     function init() {
       host = document.createElement('div');
       host.setAttribute('data-album', '');
