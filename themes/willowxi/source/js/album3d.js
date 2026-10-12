@@ -1817,7 +1817,7 @@
     var GLASS_DEPTH_PCT = 0.6;  // 折射位移 = 短边 * 此值
     var GLASS_FEATHER = 0.71;    // 折射带宽度：只有边缘 13% 的一圈
     var GLASS_CURVE = 2.15;       // 参考值
-    var GLASS_CHROMA = 0.2;     // 参考值
+    var GLASS_CHROMA = 0;     // 参考值
     var GLASS_FROST = 1;         // 磨砂模糊 px（越小边缘弯折越清楚）
     var GLASS_SAT = 120;
     var GLASS_FROST_MIX = 0.34;
