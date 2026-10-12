@@ -884,10 +884,19 @@
         sp = 1 - easeOutCubic(1 - splitT);
       }
       // 胶囊 DOM 的文字随分裂淡出
-      if (toggleEl) toggleEl.style.opacity = String(1 - Math.min(1, Math.max(0, sp)));
+      // 总览文字：分裂时立刻淡出；合并【完成之后】才开始渐显
+      if (toggleEl) {
+        var txtOp = 0;
+        if (splitTo < 1) {
+          var since = performance.now() - splitAt - SPLIT_IN_MS;   // 合并 tween 结束后才 > 0
+          txtOp = since <= 0 ? 0 : clamp01(since / 280);
+          if (sp > 0.98) txtOp = 0;                                 // 还没开始合并
+        }
+        toggleEl.style.opacity = String(txtOp);
+      }
 
-      function rectOf(el) {
-        var r = el.getBoundingClientRect();
+      function rectOf(el, cached) {
+        var r = cached || el.getBoundingClientRect();
         return { cx: (r.left + r.width * 0.5) * dpr,
                  cy: H - (r.top + r.height * 0.5) * dpr,
                  hw: r.width * dpr * 0.5, hh: r.height * dpr * 0.5 };
@@ -923,7 +932,9 @@
         halves.forEach(function (h5) {
           var el5 = h5[0], side = h5[1];
           if (!el5) return;
-          var tg = rectOf(el5);
+          // 缓存静止时的位置：否则移动 DOM 会改变 getBoundingClientRect，玻璃会跟着漂
+          if (!el5.__base || s1 <= 0.001) el5.__base = el5.getBoundingClientRect();
+          var tg = rectOf(el5, el5.__base);
           var ps = pressScale(el5) * (1 + land);
           var hwS = t.hw * 0.5 + t.hh, hhS = t.hh;          // 加长版半颗
           var cxS = t.cx + side * t.hw * 0.5;
@@ -935,6 +946,11 @@
           var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
           var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
           if (hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
+          // ★ 箭头跟着玻璃圆的中心走（并且分裂开始就渐显）
+          var offX = (ax - tg.cx) / dpr;          // CSS px
+          var offY = -(ay - tg.cy) / dpr;         // DOM 是自上而下，反一下
+          el5.style.transform = 'translate(' + offX.toFixed(2) + 'px,' + offY.toFixed(2) + 'px)';
+          el5.style.opacity = String(clamp01(sp * 2.2));
         });
       }
       // 注意：feather / depth 必须【按每个形状自己的尺寸】算（放进循环里）。
