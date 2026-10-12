@@ -319,6 +319,7 @@
         var layerZ = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
         // ★ 圆柱排列：沿半径 CYL_R 的圆弧摆开，卡片法线朝外（= 朝相机）
         var arcX = i * GAP - (n - 1) * GAP * 0.5;       // 沿弧的弧长坐标
+        p.arc = arcX;            // arc length along the cylinder = the scroll unit
         p.theta = arcX / CYL_R;
         p.yaw = -p.theta;   // convex: normal points outward, so a left card has its RIGHT border nearer (left short / right long)
         p.x = CYL_R * Math.sin(p.theta);
@@ -422,8 +423,8 @@
       panY = panTarget = panMax;
 
       // 滚动范围：让首尾都能到屏幕中央
-      scrollMin = photos[0].x;
-      scrollMax = photos[n - 1].x;
+      scrollMin = photos[0].arc;
+      scrollMax = photos[n - 1].arc;
       scroll = scrollTarget = (scrollMin + scrollMax) * 0.5;
     }
 
@@ -1694,7 +1695,7 @@
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
         preScroll = scroll; prePan = panY;             // 先记住原位
-        focusScroll = ph.x * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
+        focusScroll = (ph.arc !== undefined ? ph.arc : ph.x) * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
         // 上下定位：画布铺满整个视口，但页面上方有一条导航栏，
         // 所以要把照片对到**导航栏以下的可见区域**正中，而不是画布正中。
         var navEl = document.querySelector('.site-nav, .navbar, .top-nav, header, nav');
