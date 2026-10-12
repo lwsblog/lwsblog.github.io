@@ -1721,7 +1721,11 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        focusCamZ = hh0 / FOCUS_FILL;   // A: distance from the card's own size only.
+        // Fit BOTH dimensions: visible half-height at zc is zc, half-width is zc*(W/H).
+      // Fitting height alone makes a landscape card overflow sideways (looks very close)
+      // and a portrait card look small - which is exactly what the user saw.
+      var _sz = worldSize(ph, mt);
+      focusCamZ = Math.max(_sz.hh, _sz.hw * H / Math.max(1, W)) / FOCUS_FILL;   // A: distance from the card's own size only.
       // The depth layer must not move the camera - it only affects depth of field,
       // otherwise every card would focus at a different distance.
         // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
