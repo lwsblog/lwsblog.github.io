@@ -1369,6 +1369,7 @@
 
     function finishOpening() {
       openState = 'done';
+      setFocus(-1);   // the opening must always end UNFOCUSED, otherwise the first Esc runs a full un-focus animation and slams a photo into your face
       if (overlay) {
         overlay.style.opacity = '0';
         setTimeout(function () { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 460);
