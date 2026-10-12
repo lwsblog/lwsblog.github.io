@@ -1730,7 +1730,7 @@
       // On the cylinder z0 is the card's z BEFORE the spin, so an edge card looks
       // 3.5 units behind and focusCamZ goes negative - the camera ends up inside the
       // photo. Never let the focus camera come closer than a safe distance.
-      if (focusCamZ < CAM_DIST * 0.45) focusCamZ = CAM_DIST * 0.45;
+      if (focusCamZ < CAM_DIST * 0.8) focusCamZ = CAM_DIST * 0.8;
         // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
         // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
         // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
