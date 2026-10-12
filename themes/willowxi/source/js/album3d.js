@@ -30,10 +30,7 @@
   // 用户的要求：整体小一点 = 把摄像机拉远（卡片世界尺寸不变，视觉变小）。3.2 -> 4.9。
   // 并且下面所有以世界单位计的常量都改成 CAM_DIST 的倍数 ——
   // 以后只调 CAM_DIST，其他量自己跟着缩放，不会再出现量级错。
-  var CAM_DIST = 3;
-    // ★ 圆柱半径（虚拟圆柱：照片沿它的外表面摆开，法线朝外 = 朝相机）
-    // R=150 -> 两端偏角±1.66°，后退 0.36，缩小约 10%（用户选的 B）
-    var CYL_R = 85;          // 摄像机到 z=0 平面的距离
+  var CAM_DIST = 3;          // 摄像机到 z=0 平面的距离
   // 屏高 = 2*camZ = 6.4 世界单位。原来 CARD_H=0.62 -> 卡片只占屏高 9.7%，太小。
   // 1.9 -> 约占屏高 30%（再乘每张 0.8~1.3 的 scale）。
   var CARD_H = 1.25;           // 相纸短边（世界单位）
@@ -117,25 +114,14 @@
       'uniform vec3 uCenter;',    // 卡片中心（世界坐标：x=横, y=纵, z=深度, 越大越近）
       'uniform vec2 uHalf;',      // 卡片半宽半高（世界单位）
       'uniform float uRot;',      // 卡片自身倾角
-      'uniform float uYaw;',      // ★ 绕 Y 轴的旋转（圆柱排列：让卡片朝外）
       'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY, uCamZoom;',
-      'uniform float uSpin;',
-      'uniform float uCylR;',
       'varying vec2 vUV;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
       'void main() {',
       '  vec2 p = aXY * uHalf;',
       '  float c = cos(uRot), s = sin(uRot);',
       '  p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);',
-      // 把本地偏移绕 Y 轴转 uYaw：这样卡片平面会倾斜，
-      // 法线变成 (-sin(uYaw), 0, cos(uYaw))，且每个顶点的 z 不同
-      // -> 真正的透视（而不是现在这种永远平行屏幕的公告板）。
-      '  vec3 l = vec3(p.x * cos(uYaw), p.y, p.x * sin(uYaw));',
-      '  vec3 w = uCenter + l;',
-      '  { float cs = cos(uSpin), sn = sin(uSpin);',
-      '    float rx = w.x, rz = w.z + uCylR;',
-      '    w.x = rx * cs + rz * sn;',
-      '    w.z = -rx * sn + rz * cs - uCylR; }',
+      '  vec3 w = vec3(uCenter.xy + p, uCenter.z);',
             // uCamZoom 由 JS 每帧上传（原来那次误放在编号块里、SHOW_NUM=false 从不执行，
       // 所以值恒为 0 -> zc = -z -> 整排照片消失。根因是上传位置，不是编译器优化。）
       '  float zc = uCamZ * uCamZoom - w.z;',
@@ -163,13 +149,10 @@
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
       // uPaper=3: 一体化。uv 落在 [0,1] 之外 = 【白边】；之内 = 照片。
       // 这样每张只有一个图元，后画的照片不可能盖住别人的白边。
-      '  float _ein = 1.0;',
       '  if (uPaper > 2.5) {',
-      // soft band on the paper/photo boundary: kills the stair-stepping and reads as a feathered edge
-      '    float _e = 0.006;',
-      '    _ein = min(min(smoothstep(-_e, _e, uv.x), smoothstep(1.0 + _e, 1.0 - _e, uv.x)),',
-      '               min(smoothstep(-_e, _e, uv.y), smoothstep(1.0 + _e, 1.0 - _e, uv.y)));',
-      '    if (_ein <= 0.002) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
+      '    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {',
+      '      gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return;',
+      '    }',
       '  }',
       '  if (uPaper > 0.5 && uPaper < 1.5) { gl_FragColor = vec4(uPaperRGB * (1.0 - uDim), uAlpha); return; }',
       '  vec4 a = texture2D(uTex, uv);',
@@ -177,9 +160,7 @@
       '  if (uPaper > 1.5 && uPaper < 2.5) { gl_FragColor = vec4(uPaperRGB, a.a * uAlpha); return; }',
       '  vec4 bb = texture2D(uBlur, uv);',
       '  vec3 c = mix(a.rgb, bb.rgb, uMix);',
-      // blend the last stretch into the paper colour and fade the outer rim's alpha
-      '  vec3 _pc = uPaperRGB * (1.0 - uDim);',
-      '  gl_FragColor = vec4(mix(_pc, c * (1.0 - uDim), _ein), uAlpha * (0.25 + 0.75 * _ein));',
+      '  gl_FragColor = vec4(c * (1.0 - uDim), uAlpha);',
       '}'
     ].join('\n');
 
@@ -188,8 +169,6 @@
     // ---------- 状态 ----------
     var photos = [];        // {id, ratio, x, y, z, rot, startAt, dur, overshoot, tex, blurTex, ready}
     var scroll = 0, scrollTarget = 0, scrollMin = 0, scrollMax = 0;
-    var capInAt = 0;          // when the opening's typing finished -> the capsule's fly-in starts
-    var lastFocusNum = -1;    // sticky: the last focused photo, kept until focusT reaches 0 (a snap here is a visible jump)
   var scrollV = 0;                 // 惯性速度（只衰减、不回拉 —— 与弹簧的区别）
   var gridTopY = 0, gridBottomY = 0;
   // 纵向平移（总览视图用）。一排视图下恒为 0。
@@ -323,18 +302,8 @@
       for (var i = 0; i < n; i++) {
         var p = photos[i];
         var layer = i % Z_COUNT;                        // 轮流分层，保证前后都有
-        var layerZ = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
-        p.layerZ = layerZ;      // radial depth offset; after the spin a centred card sits exactly here
-        // ★ 圆柱排列：沿半径 CYL_R 的圆弧摆开，卡片法线朝外（= 朝相机）
-        var arcX = i * GAP - (n - 1) * GAP * 0.5;       // 沿弧的弧长坐标
-        p.arc = arcX;            // arc length along the cylinder = the scroll unit
-        p.theta = arcX / CYL_R;
-        p.yaw = -p.theta;   // convex: normal points outward, so a left card has its RIGHT border nearer (left short / right long)
-        p.x = CYL_R * Math.sin(p.theta);
-        p.z = CYL_R * Math.cos(p.theta) - CYL_R;        // ≤ 0：两端退到后面
-        // 深度层沿【各自的法线】偏（不是沿世界 z）
-        p.x += layerZ * Math.sin(p.theta);
-        p.z += layerZ * Math.cos(p.theta);
+        p.z = (layer / (Z_COUNT - 1) - 0.5) * Z_SPREAD;
+        p.x = i * GAP - (n - 1) * GAP * 0.5;
         p.y = (rnd() * 2 - 1) * JITTER * 0.5 * 2;       // ±JITTER
         p.rot = (rnd() * 2 - 1) * TILT;
         p.scale = 0.78 + rnd() * 0.58;      // 大小不一（0.78~1.36），参考图就是这样
@@ -431,9 +400,9 @@
       panY = panTarget = panMax;
 
       // 滚动范围：让首尾都能到屏幕中央
-      scrollMin = photos[0].arc;
-      scrollMax = photos[n - 1].arc;
-      scroll = scrollTarget = scrollMin;   // opening ends at the LEFT end (was the middle)
+      scrollMin = photos[0].x;
+      scrollMax = photos[n - 1].x;
+      scroll = scrollTarget = (scrollMin + scrollMax) * 0.5;
     }
 
     // ---------- 缓动 ----------
@@ -978,15 +947,7 @@
           txtOp = since <= 0 ? 0 : clamp01(since / 280);
           if (sp > 0.98) txtOp = 0;                                 // 还没开始合并
         }
-        // capsule: hidden until the typing finishes, then it flies up from below with
-        // a single overshoot-and-settle. The transform is written every frame, so the
-        // CSS transition must be off for it - otherwise the two animations stack and it
-        // reads as two separate rises.
-        var _tin = capInAt ? clamp01((performance.now() - capInAt) / 620) : 0;
-        var _ty = (1 - easeOutBack(_tin, 1.3)) * 90;
-        toggleEl.style.transition = 'none';
-        toggleEl.style.transform = 'translate(-50%, ' + _ty.toFixed(1) + 'px)';
-        toggleEl.style.opacity = String(capInAt ? txtOp * clamp01(_tin * 2.5) : 0);
+        toggleEl.style.opacity = String(txtOp);
       }
 
       function rectOf(el, cached) {
@@ -1140,15 +1101,7 @@
       var order = photos.slice().sort(function (a, b) { return a.z - b.z; });
       // 聚焦时被聚焦那张 uDim=0（保持原亮度），其余随聚焦进度变暗。
       // 用着色器里的一个乘法实现，不增加任何几何 —— 不会像整屏四边形那样拖垮软件渲染。
-      if (focusIdx >= 0) lastFocusNum = photos[focusIdx].num;
-    var focusNum2 = (focusT > 0.001) ? lastFocusNum : -1;   // sticky through the exit, so the depth fade unwinds smoothly
-      // The focused card is painted last: its depth layer is faded to 0 while focusing,
-      // but order was sorted by the un-faded z, so other cards would draw on top of it.
-      if (focusNum2 >= 0) {
-        for (var _oi = 0; _oi < order.length; _oi++) {
-          if (order[_oi].num === focusNum2) { order.push(order.splice(_oi, 1)[0]); break; }
-        }
-      }
+      var focusNum2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
       for (var i = 0; i < order.length; i++) {
         var p = order[i];
         if (!p.ready) continue;
@@ -1199,9 +1152,7 @@
           }
         }
 
-        gl.uniform1f(loc.uScroll, 0);
-      gl.uniform1f(loc.uSpin, -scroll / CYL_R);
-      gl.uniform1f(loc.uCylR, CYL_R);
+        gl.uniform1f(loc.uScroll, scroll);
         gl.uniform1f(loc.uCamZoom, camZoom);
         // 🔴🔴 uPanY 必须在这里上传！
         // 原来它只出现在下面那个 if (SHOW_NUM && ...) 编号块里，
@@ -1215,16 +1166,9 @@
         gl.uniform1f(loc.uDim, dimK);
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
-        if (p.num === focusNum2 && focusT > 0.001) {
-          var _lf = (p.layerZ || 0) * focusT;
-          x -= _lf * Math.sin(p.theta || 0);
-          z -= _lf * Math.cos(p.theta || 0);
-        }
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform1f(loc.uRot, rot);
-        // cylinder: per-card Y rotation. multiplied by (1-mt) so the grid stays flat.
-        gl.uniform1f(loc.uYaw, (p.yaw || 0) * (1 - mt));
         // 相纸那一遍已删除：白边和照片现在合成同一个四边形（见下面 uPaper=3）
         // 照片
         // 一体化：几何按【相纸】尺寸；UV 缩到内侧 = 照片，外侧 = 白边
@@ -1392,8 +1336,6 @@
 
     function finishOpening() {
       openState = 'done';
-      capInAt = performance.now();   // capsule starts flying in now
-      setFocus(-1);   // the opening must always end UNFOCUSED, otherwise the first Esc runs a full un-focus animation and slams a photo into your face
       if (overlay) {
         overlay.style.opacity = '0';
         setTimeout(function () { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 460);
@@ -1548,7 +1490,7 @@
       if (!gl) { host.remove(); return; }
 
       prog = program(VS, FS);
-      ['uCenter','uHalf','uRot','uYaw','uSpin','uCylR','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
+      ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
        'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
@@ -1620,7 +1562,7 @@
         mouseIn = true; mouseX = window.innerWidth * 0.5; mouseY = window.innerHeight * 0.55;
       }
 
-      var wantTuner = false;   // closed again: it covers the right-hand nav button    // 默认打开（用 ?tune=0 关掉）
+      var wantTuner = false;   // keep the panel closed: it covers the right-hand nav button    // 默认打开（用 ?tune=0 关掉）
       try { if (localStorage.getItem('album3d-tuner-open') === '0') wantTuner = false; } catch (e) {}
       if (/[?&]tune=1/.test(q)) { wantTuner = true; try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
@@ -1649,15 +1591,10 @@
     // CPU 侧投影：必须与顶点着色器完全一致，否则点击会偏。
     // VS: scr = (w - (scroll,panY)) * k;  k = focal/(camZ - w.z);  ndc = scr/(half*0.5)
     function projRect(px, py, pz, hw, hh) {
-    var _sp = -scroll / CYL_R, _cs = Math.cos(_sp), _sn = Math.sin(_sp);
-    var _rx = px, _rz = pz + CYL_R;
-    px = _rx * _cs + _rz * _sn;
-    pz = -_rx * _sn + _rz * _cs - CYL_R;
-    var _scr = 0;
       var zc = Math.max(0.12, camZ * camZoom - pz);
       var k = (FOCAL * H * 0.5) / zc;
       return {
-        cx: (px - _scr) * k / (W * 0.5),
+        cx: (px - scroll) * k / (W * 0.5),
         cy: (py - panY) * k / (H * 0.5),
         hx: hw * k / (W * 0.5),
         hy: hh * k / (H * 0.5)
@@ -1686,11 +1623,6 @@
           var x = ph.x * (1 - mt) + ph.gx * mt;
           var y = ph.y * (1 - mt) + ph.gy * mt;
           var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
-          if (ph.num === lastFocusNum && focusT > 0.001) {
-            var _lf2 = (ph.layerZ || 0) * focusT;
-            x -= _lf2 * Math.sin(ph.theta || 0);
-            z -= _lf2 * Math.cos(ph.theta || 0);
-          }
           var sz = worldSize(ph, mt);
           var r = projRect(x, y, z, sz.hw * scale, sz.hh * scale);
           if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
@@ -1731,7 +1663,7 @@
       if (i >= 0) {
         var ph = photos[i], mt = (ph.mt === undefined) ? modeT : ph.mt;
         preScroll = scroll; prePan = panY;             // 先记住原位
-        focusScroll = (ph.arc !== undefined ? ph.arc : ph.x) * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
+        focusScroll = ph.x * (1 - mt) + ph.gx * mt;   // 把这页移到画面中心
         // 上下定位：画布铺满整个视口，但页面上方有一条导航栏，
         // 所以要把照片对到**导航栏以下的可见区域**正中，而不是画布正中。
         var navEl = document.querySelector('.site-nav, .navbar, .top-nav, header, nav');
@@ -1741,7 +1673,7 @@
         var navH = navEl ? navEl.getBoundingClientRect().height : 0;
         navH = Math.max(0, Math.min(navH, window.innerHeight * 0.14));
         navHLast = navH;
-        var dyNdc = -(navH / Math.max(1, window.innerHeight)) * 0.6;   // was 1.67x too strong   // 负 = 画面中心偏下
+        var dyNdc = -(navH / Math.max(1, window.innerHeight));   // 负 = 画面中心偏下
         // z0 必须在这里先算出来：原来我在 var z0 之前用了它，
         // 得到 camZ - undefined = NaN，panY 整条变成 NaN（画面直接乱掉）。
         var z0n = ph.z * (1 - mt) + (ph.gz || 0) * mt;
@@ -1751,48 +1683,24 @@
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
         var hh0 = worldSize(ph, mt).hh;
         // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        // Fit BOTH dimensions: visible half-height at zc is zc, half-width is zc*(W/H).
-      // Fitting height alone makes a landscape card overflow sideways (looks very close)
-      // and a portrait card look small - which is exactly what the user saw.
-      var _sz = worldSize(ph, mt);
-      // FOCUS_FILL gives the DISTANCE from the camera to the card. Floor that distance,
-      // never the camera position: flooring the camera is what made it sit on a near card
-      // and pull the neighbouring photos into frame.
-      // Once the spin centres the card, the arc's z (R*cos(theta)-R) is gone; only the
-      // radial layer offset remains, so that alone is where the card ends up.
-      var _zEnd0 = (ph.layerZ || 0) * Math.cos(ph.theta || 0);
-      var _req = Math.max(_sz.hh, _sz.hw * H / Math.max(1, W)) / FOCUS_FILL;
-      // NO distance floor here. A floor pushes the camera back, the visible half-width
-      // grows with it (zc*(W/H)), and the neighbouring photos - only 2.35 apart - come
-      // into frame and loom. A close camera keeps them outside, which is exactly how it
-      // behaved before the cylinder.
-      focusCamZ = _zEnd0 + _req;   // A: distance from the card's own size only.
-      // The depth layer must not move the camera - it only affects depth of field,
-      // otherwise every card would focus at a different distance.
+        focusCamZ = z0 + hh0 / FOCUS_FILL;
         // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
         //    focusCamZ = z0 + hh0/0.72 可能 <= 0，摄像机直接跑到照片后面，
         //    于是 camZoom 为负 -> zc = camZ*camZoom - z 为负 -> 投影彻底退化：
         //    照片被推到画面外（实测 camZoom = -0.162、panY = -0.498、照片低了 420px），
         //    严重时就是之前那个 GPU 卡死。这里保证摄像机始终在照片前面。
         if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
-      // On the cylinder z0 is the card's z BEFORE the spin, so an edge card looks
-      // 3.5 units behind and focusCamZ goes negative - the camera ends up inside the
-      // photo. Never let the focus camera come closer than a safe distance.
-      if (focusCamZ < CAM_DIST * 0.06) focusCamZ = CAM_DIST * 0.06;   // only keeps it positive
         // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
         // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
         // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
         // 表现就是**放大幅度被砍**（用户：不会写上下位移就不位移只减小放大幅度了）。
         // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
         // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
-        // _req alone is exact now: the focused card's whole radial offset is faded to 0 while focusing.
+        focusCamZ = Math.max(z0n + 0.35, focusCamZ);
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
-        // the card's radial depth is faded to 0 by the time the tween ends, so the
-        // distance is focusCamZ - fadedZ, not focusCamZ - z0n (z0n made front cards sit low).
-        var _zEnd = z0n - (ph.layerZ || 0) * Math.cos(ph.theta || 0);
-        focusPan = py0 - dyNdc * (focusCamZ - _zEnd) / FOCAL;
+        focusPan = py0 - dyNdc * (focusCamZ - z0n) / FOCAL;
       }
     }
 
