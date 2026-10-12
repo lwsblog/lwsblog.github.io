@@ -690,6 +690,8 @@
       // 壁纸的 CSS 平移/缩放（从 DOM 读来，和外面那层完全一致）
       'uniform vec2 uWallP;',
       'uniform float uWallS;',
+      // 网格在【动态背景 canvas】上，它也被 CSS 推着走
+      'uniform vec2 uBgP;',
       'uniform float uWallGain;',
       'varying vec2 vUV;',
       'void main() {',
@@ -698,7 +700,7 @@
       //   而贴图里只有原图 -> 这里把同一个变换重做一遍。
       '  vec2 wuv = (vUV - 0.5) / uWallS + 0.5 - uWallP;',
       '  if (uWallOn > 0.5) col = mix(col, texture2D(uWall, wuv).rgb * uWallGain, uWallAmt);',
-      '  vec4 bg = texture2D(uBg, vUV);',
+      '  vec4 bg = texture2D(uBg, vUV - uBgP);',
       '  col = bg.rgb * bg.a + col * (1.0 - bg.a);',
       '  vec4 s4 = texture2D(uScene, vUV);',
       '  gl_FragColor = vec4(s4.rgb * s4.a + col * (1.0 - s4.a), 1.0);',
@@ -722,7 +724,7 @@
       if (!gl.getProgramParameter(compProg, gl.LINK_STATUS)) {
         console.error('[album3d] compose link: ' + gl.getProgramInfoLog(compProg)); return false;
       }
-      ['uScene','uBg','uWall','uWallOn','uBase','uWallAmt','uWallGain','uWallP','uWallS'].forEach(function (n) {
+      ['uScene','uBg','uWall','uWallOn','uBase','uWallAmt','uWallGain','uWallP','uWallS','uBgP'].forEach(function (n) {
         compLoc[n] = gl.getUniformLocation(compProg, n);
       });
       bgCanvas = document.querySelector('[data-scene-canvas]');
@@ -841,6 +843,24 @@
         }
       } catch (e) {}
       gl.uniform2f(compLoc.uWallP, plx * GLASS_PARALLAX_GAIN, ply * GLASS_PARALLAX_GAIN);
+      // 网格那层（动态背景 canvas）也一样处理
+      var bpx = 0, bpy = 0;
+      try {
+        var cel = document.querySelector('.scene-background__canvas') ||
+                  document.querySelector('canvas[data-scene-canvas]');
+        if (cel) {
+          var ct = getComputedStyle(cel).transform;
+          if (ct && ct !== 'none') {
+            var cm = ct.match(/matrix\(([^)]+)\)/);
+            if (cm) {
+              var cn = cm[1].split(',').map(parseFloat);
+              bpx = (cn[4] || 0) / W * GLASS_PARALLAX_GAIN;
+              bpy = -(cn[5] || 0) / H * GLASS_PARALLAX_GAIN;
+            }
+          }
+        }
+      } catch (e) {}
+      gl.uniform2f(compLoc.uBgP, bpx, bpy);
       gl.uniform1f(compLoc.uWallS, pls);
       gl.uniform1f(compLoc.uWallAmt, 0.36);
       gl.uniform1f(compLoc.uWallGain, 0.86);
