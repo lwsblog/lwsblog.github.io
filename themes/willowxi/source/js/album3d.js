@@ -462,7 +462,6 @@
       'uniform vec2 uRim;',       // x=环宽 px, y=环强度
       'uniform vec3 uExtra;',     // x=glint, y=tint, z=frost(px)
       'uniform float uFrostMix;',
-      'uniform float uAlpha;',      // 每形状的透明度（倒影用）
       // 平滑最小（流体并集的核心）
       'float smin(float a, float b, float k) {',
       '  if (k <= 0.0001) return min(a, b);',
@@ -543,7 +542,7 @@
       '  col = mix(col, col * (1.0 + uExtra.y), 1.0);',   // 底色（tint，仅微调）
       '  col += vec3(rim * uRim.y) * 0.55;',
       '  col += vec3(uExtra.x) * pow(max(0.0, nrm.y * 0.5 + 0.5), 2.0) * 0.35;',
-      '  gl_FragColor = vec4(col, max(ca, rim * 0.9) * uAlpha);',
+      '  gl_FragColor = vec4(col, max(ca, rim * 0.9));',
       '}'
     ].join('\n');
 
@@ -563,7 +562,7 @@
       if (!gl.getProgramParameter(postProg, gl.LINK_STATUS)) {
         console.error('[album3d] post link: ' + gl.getProgramInfoLog(postProg)); return false;
       }
-      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix','uAlpha','uAlpha','uShapes','uRadii','uCountF','uSminK'].forEach(function (n) {
+      ['uScene','uFrostTex','uComp','uRes','uSh','uShR','uG','uRim','uExtra','uMode','uFrostMix','uAlpha','uShapes','uRadii','uCountF','uSminK'].forEach(function (n) {
         postLoc[n] = gl.getUniformLocation(postProg, n);
       });
       // 全屏四边形（自己的 buffer，和场景的 quad 分开，免得互相影响）
@@ -1051,7 +1050,6 @@
         gl.uniform4f(postLoc.uG, GLASS_FEATHER * rad3, GLASS_DEPTH_PCT * 2 * rad3, GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
-        gl.uniform1f(postLoc.uAlpha, 1);   // 后处理的 uAlpha 必须上传，否则玻璃全透明
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
       for (var si = 0; si < 0; si++) {
@@ -1064,7 +1062,6 @@
                      GLASS_CURVE, GLASS_CHROMA);
         gl.uniform2f(postLoc.uRim, GLASS_RIM_W * dpr, GLASS_RIM_A);
         gl.uniform3f(postLoc.uExtra, GLASS_GLINT, GLASS_TINT, GLASS_FROST * dpr);
-        gl.uniform1f(postLoc.uAlpha, 1);   // 后处理的 uAlpha 必须上传，否则玻璃全透明
         gl.uniform1f(postLoc.uFrostMix, GLASS_FROST_MIX);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
