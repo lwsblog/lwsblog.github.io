@@ -1197,6 +1197,9 @@
         gl.uniform1f(loc.uDim, dimK);
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
+        if (p.num === focusNum2 && focusT > 0.001) {
+          z -= (p.layerZ || 0) * Math.cos(p.theta || 0) * focusT;
+        }
         gl.uniform3f(loc.uCenter, x, y, z);
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform1f(loc.uRot, rot);
@@ -1661,6 +1664,7 @@
           var x = ph.x * (1 - mt) + ph.gx * mt;
           var y = ph.y * (1 - mt) + ph.gy * mt;
           var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+          if (ph.num === focusNum2 && focusT > 0.001) z -= (ph.layerZ || 0) * Math.cos(ph.theta || 0) * focusT;
           var sz = worldSize(ph, mt);
           var r = projRect(x, y, z, sz.hw * scale, sz.hh * scale);
           if (Math.abs(nx - r.cx) <= r.hx && Math.abs(ny - r.cy) <= r.hy) {
@@ -1744,7 +1748,7 @@
         // 表现就是**放大幅度被砍**（用户：不会写上下位移就不位移只减小放大幅度了）。
         // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
         // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
-        focusCamZ = Math.max(z0n + 0.35, focusCamZ);
+        // focusCamZ alone is exact now: the focused card's radial depth is faded to 0 while focusing.
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
