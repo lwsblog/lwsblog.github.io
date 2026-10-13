@@ -5852,3 +5852,15 @@ html.is-album .intro__skip,
 html.is-album [data-intro] {
   display: none !important;
 }
+
+
+/* 相册页：站点页脚不属于相册画面。
+   它挂在 </main> 之后、在 #main 外面，所以 html.is-album #main 藏不到它；
+   以前 #main 里那 809 行旧内容把页脚顶到屏幕外，把旧内容删掉后它就挤进可视区了。 */
+html.is-album .site-footer,
+html.is-album .site-footer__line {
+  display: none !important;
+}
+html.is-album {
+  overflow: hidden !important;
+}
