@@ -34,7 +34,7 @@ step() { echo; echo "${B}${CYN}▸ $*${RST}"; }
 find_wrangler() {
   if [ -n "${WRANGLER_BIN:-}" ]; then echo "$WRANGLER_BIN"; return; fi
   local managed="C:/Users/29537/.workbuddy/binaries/node/workspace/node_modules/wrangler/wrangler-dist/cli.js"
-  local nodeexe="C:/Users/29537/.workbuddy/binaries/node/versions/22.22.2-3/node.exe"
+  local nodeexe="C:/Users/29537/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
   if [ -f "$managed" ] && [ -f "$nodeexe" ]; then echo "$nodeexe $managed"; return; fi
   if [ -x node_modules/.bin/wrangler ]; then echo "node_modules/.bin/wrangler"; return; fi
   echo ""

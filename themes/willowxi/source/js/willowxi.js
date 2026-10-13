@@ -2216,53 +2216,8 @@
     }
   }, true);
 
-  function setupGallery() {
-    // the album page renders the 3D album instead; do not build the old gallery there
-    // Route check, not a class check: on a hard load of /photos/ this runs BEFORE the
-  // album page's inline script can add is-album, so the old gallery used to build its own
-  // JS-created nodes (the bottom-left pill) and those survived into the 3D album.
-  if (/^\/photos\/?$/.test(location.pathname)) return;
-  if (document.documentElement.classList.contains('is-album')) return;
-    var root = document.querySelector('[data-gallery]');
-    if (!root) return;
 
-    if (window.WillowXIGallery) {
-      mountGallery(root);
-      return;
-    }
 
-    // First visit in this session. The grid is already on screen; the script
-    // only adds the screen animation, the lightbox and the drag on top.
-    loadGalleryScript(function () { mountGallery(root); });
-  }
-
-  function mountGallery(root) {
-    // The node can be swapped out by a PJAX navigation while the script is in
-    // flight, so re-read it rather than closing over the stale one.
-    var live = document.querySelector('[data-gallery]');
-    if (!live || galleryInstance) return;
-    galleryInstance = window.WillowXIGallery.create(live, {});
-    galleryInstance.init();
-  }
-
-  function loadGalleryScript(onready) {
-    var existing = document.querySelector('script[data-gallery-script]');
-    if (existing) {
-      if (window.WillowXIGallery) onready();
-      else existing.addEventListener('load', onready, { once: true });
-      return;
-    }
-
-    var script = document.createElement('script');
-    script.src = config.galleryScript;
-    script.async = true;
-    script.setAttribute('data-gallery-script', '');
-    script.onload = onready;
-    // A gallery with no script is still a gallery: the grid is server-rendered
-    // and every frame stays clickable-to-nothing rather than blanking the page.
-    script.onerror = function () { script.remove(); };
-    document.head.appendChild(script);
-  }
 
   // Comments (Waline). The widget mounts inside the PJAX container, so it is
   // created on page setup and destroyed on teardown. Assets are self-hosted

@@ -1718,6 +1718,13 @@
         // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
         // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
         focusCamZ = Math.max(z0n + 0.35, focusCamZ);
+        // The camera must stay in FRONT of the z=0 plane. z0 is the card's real depth
+        // (+-1.25), so a far-layer card can make the sum negative - the camera then sits
+        // behind the plane, camZoom goes negative and the whole projection inverts, which
+        // is the 'slams into your face' the user reported. 0.30*CAM_DIST (0.9) keeps the
+        // camera in front while the visible half-width at that depth (0.9*W/H = 1.67) stays
+        // below the 2.35 gap, so the neighbouring photos remain outside the frame.
+        if (focusCamZ < CAM_DIST * 0.30) focusCamZ = CAM_DIST * 0.30;
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
