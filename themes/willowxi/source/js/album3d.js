@@ -368,6 +368,7 @@
       cellW *= gScale;
       cellH *= gScale;
       var gp = 1 + GRID_GAPX, gpH = 1 + GRID_GAPY;
+      var maxGHH = 0;
       for (var m = 0; m < n; m++) {
         var phm = photos[m];
         var spm = phm.gspan || 1;
@@ -385,6 +386,7 @@
         var hhG = hwG / phm.ratio;
         phm.ghw = hwG; phm.ghh = hhG;
         phm.gs = 1;                       // 尺寸改用 ghw/ghh，不再用统一缩放
+        if (hhG > maxGHH) maxGHH = hhG;   // 网格卡片的最高半高：上面一行的留白要用到它
       }
       gridTopY = ((rows - 1) / 2) * cellH;
       gridBottomY = -((rows - 1) / 2) * cellH;
@@ -397,7 +399,14 @@
       rowDur = MODE_MS / Math.max(1, rows);
       var vis = camZ * 0.72;
       panMin = gridBottomY + vis;
-      panMax = gridTopY - vis;
+      // Rows are placed by their CENTRE, so the top row's cards stick out above gridTopY
+      // by their own half height - and the pane keeps a fixed 76px header on top of that.
+      // Measured before this: the top card's top edge landed at y=39px, i.e. 37px under the
+      // header. panMax is the camera's highest position, and raising it moves the grid DOWN
+      // on screen, which is the direction needed here (lowering it moved the grid up).
+      var GRID_TOP_PX = 96;                       // header 76 + 20px breathing room
+      var pxToWorld = camZ / (H * 0.5);           // at zc = camZ, how much world one pixel is
+      panMax = gridTopY + maxGHH - (H * 0.5 - GRID_TOP_PX) * pxToWorld;
       if (panMin > panMax) { var mid = (panMin + panMax) / 2; panMin = panMax = mid; }
       panY = panTarget = panMax;
 
