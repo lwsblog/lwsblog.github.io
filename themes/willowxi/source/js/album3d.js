@@ -67,10 +67,10 @@
   // 间隙为负就是相邻重叠（挤着排）。
   // 用户要求：不重叠；太宽的图**占两格**（跨列）来换取更大的显示面积。
   var GRID_GAPX = 0.03;        // 横向间隙（正值 = 不重叠）
-  var GRID_GAPY = 0.06;        // 纵向间隙
+  var GRID_GAPY = 0.13;        // 纵向间隙
   var GRID_WIDE = 1.90;        // 宽高比 >= 这个值的照片占 2 格
   // 1.95：可见宽度 = camZ*(W/H)*2，取 1.95 基本铺满但不溢出（相纸也不会被裁）。
-  var GRID_FIT = 1.95;         // 适配系数：越大整块网格越大
+  var GRID_FIT = 1.32;         // 适配系数：越大整块网格越大
   var MODE_MS = 1500;          // 两个视图之间的补间总时长（用户指定 1.5 秒）
   // 进列表时按**行**逐行扫描：每行错开 MODE_MS/rows，行内同时到达。
   var ROW_STAGGER = true;
@@ -1601,7 +1601,7 @@
         mouseIn = true; mouseX = window.innerWidth * 0.5; mouseY = window.innerHeight * 0.55;
       }
 
-      var wantTuner = false;   // keep the panel closed: it covers the right-hand nav button    // 默认打开（用 ?tune=0 关掉）
+      var wantTuner = false;   // closed for visitors; a browser that opened it keeps it open (album3d-tuner-open)
       try { if (localStorage.getItem('album3d-tuner-open') === '0') wantTuner = false; } catch (e) {}
       if (/[?&]tune=1/.test(q)) { wantTuner = true; try { localStorage.setItem('album3d-tuner-open', '1'); } catch (e) {} }
       if (/[?&]tune=0/.test(q)) { wantTuner = false; try { localStorage.setItem('album3d-tuner-open', '0'); } catch (e) {} }
@@ -2021,7 +2021,7 @@
     // ---------- 调参变量读写（模块级，供面板与持久化共用）----------
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
-    var TUNE_KEY = 'album3d-tune-v10';
+    var TUNE_KEY = 'album3d-tune-v11';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
@@ -2088,7 +2088,6 @@
         ['上下幅度 JITTER', 'JITTER', 0, 2.0, 0.02],
         ['深度跨度 Z_SPREAD', 'Z_SPREAD', 0.5, 4.0, 0.05],
         ['卡片大小 CARD_H', 'CARD_H', 0.6, 3.0, 0.05],
-        ['摄像机距离 CAM_DIST', 2.0, 8.0, 0.1],
         ['聚焦填充 FOCUS_FILL', 'FOCUS_FILL', 0.30, 1.20, 0.02],
         ['压暗上限 DIM_MAX', 'DIM_MAX', 0, 0.90, 0.01],
         ['聚焦时长 FOCUS_MS', 'FOCUS_MS', 200, 2500, 50],
