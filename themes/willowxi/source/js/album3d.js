@@ -48,6 +48,7 @@
   var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
   var DIM_MAX = 0.55;          // 聚焦时整屏压暗的上限
+  var DIM_FADE_MS = 260;        // 明暗渐变的时长（切换聚焦照片时用，避免瞬间翻转）
   // 构建戳：写在页面属性 + 底部按钮上，方便一眼确认浏览器跑的是哪一版。
   // 必须定义在模块级 —— 放到 init 里会导致 buildToggle() 拿不到它而抛
   // ReferenceError，整个初始化挂掉（我刚踩过）。
@@ -1190,7 +1191,15 @@
         // 相纸
         // 变暗系数：被聚焦那张为 0（保持原亮度），其余按聚焦进度变暗。
         // 只是在片元着色器里乘一下，不增加任何几何。
-        var dimK = (focusNum2 >= 0 && p.num !== focusNum2) ? DIM_MAX * focusT : 0;
+        // Crossfade the dim: when the focus moves from one photo to the next, the old
+        // one must fade down and the new one fade up. focusT stays at 1 across such a
+        // switch, so a value derived from it alone flips in a single frame.
+        var dimTarget = (focusNum2 >= 0 && p.num !== focusNum2) ? DIM_MAX * focusT : 0;
+        if (p.dimNow === undefined) p.dimNow = dimTarget;
+        var _dimDt = Math.min(64, now - (p.dimAt === undefined ? now : p.dimAt));
+        p.dimAt = now;
+        p.dimNow += (dimTarget - p.dimNow) * (1 - Math.exp(-_dimDt / DIM_FADE_MS));
+        var dimK = p.dimNow;
         gl.uniform1f(loc.uDim, dimK);
         gl.uniform4f(loc.uUVO, 0, 0, 1, 1);
         gl.uniform3f(loc.uPaperRGB, 0.957, 0.957, 0.945);
