@@ -1020,8 +1020,8 @@
           if (!el5.__base) el5.__base = el5.getBoundingClientRect();   // 只取一次！
           var tg = rectOf(el5, el5.__base);
           var ps = pressScale(el5) * (1 + land);
-          var hwS = t.hw * 0.5 + t.hh, hhS = t.hh;          // 加长版半颗
-          var cxS = t.cx + side * t.hw * 0.5;
+          var hwS = t.hw, hhS = t.hh;
+          var cxS = t.cx;
           var ax = cxS + (tg.cx - cxS) * sPos;
           var ay = t.cy + (tg.cy - t.cy) * sPos
                    - Math.sin(Math.PI * s1) * H * 0.16;     // 竖直拱起 -> 弧线
