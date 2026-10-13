@@ -4597,30 +4597,6 @@ html.js body.route-leaving .site-header {
   position: relative;
 }
 
-/* The backboard. It is a child of .photo-main with inset:0, so its bounds
-   ARE the column's bounds — it is mounted on the column rather than floating
-   over the viewport. Before this it was `position:fixed; width:200px` down
-   the middle of the screen, which read as a shaft of light rather than as a
-   board with the photos on it. The negative inline inset gives the column a
-   margin to sit in, and the top inset lets it run under the column header. */
-.gallery-board {
-  position: absolute;
-  z-index: 0;
-  inset: -18px -30px 0;
-  border-right: 1px solid var(--line);
-  border-left: 1px solid var(--line);
-  background: linear-gradient(
-    90deg,
-    rgba(20, 25, 34, 0.42),
-    rgba(20, 25, 34, 0.7) 14%,
-    rgba(20, 25, 34, 0.7) 86%,
-    rgba(20, 25, 34, 0.42)
-  );
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-
 html[data-theme="light"] .gallery-board {
   background: linear-gradient(
     90deg,
@@ -4636,50 +4612,6 @@ html[data-theme="light"] .gallery-board {
 .photo-grid {
   position: relative;
   z-index: 1;
-}
-
-/* --- the global acrylic: one plate between the grid and the print --------
-   This is not the backboard above and it is not the print's own veil. It is
-   a full-viewport layer that exists only for the travel: it blurs and dims
-   everything under the print, so the grid is never naked while the print is
-   still shrinking off it. Without it the cell the print is flying towards —
-   which is the print's own photograph, sitting at its own landing site —
-   shows through beside the print and the whole travel reads as two copies of
-   one image instead of one image moving.
-
-   It fades by animating --acrylic-k, written by JS every frame. NOT opacity:
-   any element below opacity 1 becomes a backdrop root, and its own
-   backdrop-filter then has nothing to sample (the .stream-picker trap on the
-   home page). Writing the factor into the colour's alpha *and* the blur
-   radius keeps the filter live for the whole fade, and at --acrylic-k: 0 it
-   is fully transparent over blur(0px) — exactly "not there", reached without
-   ever taking the element off the compositor mid-fade. */
-.photo-acrylic {
-  position: fixed;
-  z-index: 20;
-  inset: 0;
-  /* Defaults to 0, not 1: with no JS (or before the first frame lands) this
-     layer must be invisible. A grid that is briefly bare is a much smaller
-     failure than a permanent full-page blur over content nobody can un-blur.
-     JS takes it to full strength early in the travel — by the time the print
-     has shrunk enough to uncover anything (see ACRYLIC_FROM/TO in photos.js) —
-     and back to 0 in the tail once the print has landed. */
-  --acrylic-k: 0;
-  /* 22px of blur, not 13. Reported as "the acrylic blur is too weak on the
-     screen": over a 1440px grid the 13px plate left the photographs under it
-     still readable as pictures, which is the opposite of what a plate between
-     the print and the grid is for. At 22px what is under it is only colour and
-     light. The alpha went up with it (0.66 → 0.74) because the two work as one
-     wash and blur alone leaves the grid's contrast intact. Both still scale
-     with --acrylic-k, so the plate reaches exactly "not there" at 0. */
-  background: rgba(9, 11, 15, calc(0.74 * var(--acrylic-k)));
-  /* The radius follows --acrylic-blur, NOT --acrylic-k: see the note in
-     photos.js. At a large radius over a full-viewport backdrop Chromium
-     degrades the backdrop to the page background (paper white), which read as
-     "半程变黑然后变白最后又变黑" on the way up. */
-  -webkit-backdrop-filter: blur(calc(22px * var(--acrylic-blur, 0)));
-  backdrop-filter: blur(calc(22px * var(--acrylic-blur, 0)));
-  pointer-events: none;
 }
 
 /* The plate is always the scene's own wash: dark under the dark theme's
@@ -4754,16 +4686,6 @@ html[data-theme="light"] .photo-acrylic {
   --mast-s: 1;
 }
 
-.photo-masthead__label {
-  display: block;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.34em;
-  opacity: 0.82;
-}
-
 /* 🔴 Keep the title INVISIBLE until the typewriter owns it.
    --
    `photos.js` is injected LATE (the gallery waits for the screen image, measured 3-4s
@@ -4800,34 +4722,11 @@ html.js body:has(.photo-masthead) .photo-masthead.is-ready .photo-masthead__titl
   text-shadow: 0 0 calc(20px / var(--mast-s, 1)) rgba(9, 11, 15, 0.8);
 }
 
-/* The typewriter's caret. A real underscore glyph rather than a CSS border, at the
-   user's request ("光标采用下划线闪动"), sized to one character of the same monospace
-   face so the line does not jog as it types.
-
-   🎛️ 1s, not the shared 1.5s: "光标闪动速度稍微快一点". The keyframes are reused but the
-   DURATION is set here rather than by editing `blink-mark`, because that keyframe is
-   shared with `.home-hero__name::after` on the home page and shortening it globally
-   would change a surface the user did not ask about. */
-.photo-masthead__caret {
-  display: inline-block;
-  width: 0.6em;
-  color: var(--paper);
-  animation: blink-mark 1s steps(1, end) infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .photo-masthead__caret {
     animation: none;
     opacity: 1;
   }
-}
-
-.photo-masthead__sub {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.22em;
 }
 
 html[data-theme="light"] .photo-masthead__title {
@@ -4856,99 +4755,10 @@ body.is-gallery-screen .photo-screen__hint {
   color: #b8bec8;
 }
 
-.photo-screen__hint {
-  position: fixed;
-  z-index: 31;
-  bottom: 28px;
-  left: 50%;
-  margin: 0;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.28em;
-  transform: translateX(-50%);
-}
-
-/* --- the screen: a print, scaled as one box -------------------------------
-   Same aspect ratio as the grid cell it lands on, and scaled with a single
-   `transform: scale()` from the start size down to 1. Nothing about the crop
-   changes along the way, so the travel is one continuous shrink of one
-   photograph. The previous build scaled a full-bleed viewport box (a
-   different aspect ratio) and then handed off to a second <img> created by
-   JS, which read as one photo being replaced by another.
-
-   The paper and the mat are always there — a print has a border — and they
-   scale with the box, so the border is 11px at the end because 11px × 1 is
-   11px, not because anything was re-measured.
-
-   --screen-s is the current scale, written by JS every frame. The shadow
-   divides by it so its blur is divided by 4 at the start of the travel
-   instead of being multiplied by it: a transform scales a box-shadow along
-   with the box, and 80px of blur at 3.9× is a 315px halo that swallows the
-   whole gallery. Divided, the shadow lands on exactly .photo-frame's
-   14px/44px at scale 1 — which is what makes the hand-off seamless. */
-.photo-screen {
-  position: fixed;
-  z-index: 30;
-  top: 0;
-  left: 0;
-  width: var(--screen-w, 50vw);
-  height: var(--screen-h, 50vh);
-  /* 🔴 `margin: 0` is load-bearing, not tidiness. The UA stylesheet gives a
-     `<figure>` `margin: 16px 40px`, and this element is `position: fixed` with
-     `top/left: 0` — so the margin shifts it 40px right and 16px down from the
-     viewport origin, and the transform JS writes is a TRANSLATION from that
-     origin, not an absolute viewport position. Without this the print lands 40px
-     right of and 16px below the cell it is supposed to become (measured at the
-     hand-off frame: print [170,393.5] against cell [130,377.5]), which reads as
-     "the print does not line up when it shrinks". */
-  margin: 0;
-  /* The mat is rewritten every frame as `rest / scale` so that its DRAWN
-     thickness (`padding × scale`) is the same on the first frame as on the last.
-     A fixed 11px mat is drawn 82px thick at the opening scale of 7.45, and the
-     photograph's centre then slides 498px sideways in the last 40px of scroll as
-     the mat snaps back to 11px — reported as "the print sticks and jumps to the
-     left". At scale 1 this rule's own values are what JS writes, so the hand-off
-     is exact. */
-  padding: 11px 11px 38px;
-  background: #f4f4f1;
-  box-shadow: 0 calc(14px / var(--screen-s, 1)) calc(44px / var(--screen-s, 1)) rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-  transform-origin: 0 0;
-  will-change: transform;
-  pointer-events: none;
-}
-
 html[data-theme="light"] .photo-screen {
   box-shadow:
     0 calc(12px / var(--screen-s, 1)) calc(34px / var(--screen-s, 1)) rgba(13, 27, 36, 0.2),
     0 calc(2px / var(--screen-s, 1)) calc(6px / var(--screen-s, 1)) rgba(13, 27, 36, 0.12);
-}
-
-.photo-screen__img {
-  display: block;
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  /* 🔴 `cover`, NOT `fill`. This is the ONLY element that was stretching the
-     user's photographs.
-
-     `fill` forces the source into whatever shape the content box happens to be.
-     The print's mat is counter-scaled (`rest / scale`, and 11px on the sides
-     against 11/38 top/bottom is not proportional), so the content box runs from
-     1.24 at the opening to 1.45 just before the landing and only reaches the
-     source's own 1.502 AT scale 1. Every other frame was therefore a vertical
-     stretch of 17-21% — measured: `11-screen.webp` is 1.502 and was being drawn
-     at 1.241 / 1.248 / 1.275 / 1.452.
-
-     The grid cells were never affected (their `--ratio` is the source's own, and
-     they already use `cover` with a 0.000 error on all 22 photographs).
-
-     `cover` cannot distort. It crops instead, and the crop drifts as the box's
-     ratio changes — which is the lesser of the two evils by a wide margin, and it
-     is exact at scale 1 (content box 193.2 x 128.6 = the cell's own content box),
-     which is the frame the hand-off happens on. */
-  object-fit: cover;
 }
 
 /* 🔴 The print has its OWN acrylic, and it is a different layer from
@@ -4997,70 +4807,8 @@ html {
   scrollbar-gutter: stable;
 }
 
-
-.photo-screen__veil {
-  position: absolute;
-  inset: 0;
-  background: rgba(9, 11, 15, 0.30);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  will-change: opacity;
-}
-
-/* The caption is part of the print, so it is never faded: at the start of
-   the travel the veil is what dims it, and the veil is going to lift anyway.
-   Fading it independently left the wide bottom mat blank while the photo
-   still filled the frame above it. */
-.photo-screen__cap {
-  position: absolute;
-  right: 11px;
-  bottom: 11px;
-  left: 11px;
-  display: flex;
-  justify-content: space-between;
-  color: #5a5f66;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-}
-
-/* The screen needs scroll distance of its own; without it the gallery below
-   only offers a couple of hundred pixels of travel and the animation is over
-   before it starts. */
-.gallery-spacer {
-  height: 240vh;
-}
-
-.photo-main {
-  position: relative;
-  z-index: 2;
-  width: min(1180px, calc(100% - 40px));
-  margin: 0 auto;
-  padding: 0 0 150px;
-}
-
-.photo-main__header {
-  max-width: 900px;
-  margin: 0 auto 44px;
-  padding-top: 40px;
-  text-align: center;
-}
-
 .photo-main__header .micro-label {
   justify-content: center;
-}
-
-.photo-main__header p {
-  margin: 18px 0 0;
-  color: var(--paper-dim);
-  font-size: 14px;
-}
-
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 26px;
-  align-items: start;
 }
 
 /* Zero radius: rounded corners belong to prose only, and a print pinned to a
@@ -5104,28 +4852,6 @@ html[data-theme="light"] .photo-frame.is-dragging {
   box-shadow: 0 26px 56px rgba(13, 27, 36, 0.3), 0 0 24px rgba(13, 27, 36, 0.16);
 }
 
-.photo-frame__hit {
-  display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: #0d1117;
-  cursor: zoom-in;
-  line-height: 0;
-}
-
-.photo-frame__img {
-  display: block;
-  width: 100%;
-  max-width: none;
-  height: auto;
-  /* The ratio comes from the data file, so the frame holds its shape before
-     the bytes land and the grid does not jump. */
-  aspect-ratio: var(--ratio);
-  object-fit: cover;
-}
-
 /* --- captions are not text, and photographs are not drag sources ---------
    Two separate browser behaviours, both hit by the same gesture:
 
@@ -5158,25 +4884,6 @@ html[data-theme="light"] .photo-frame.is-dragging {
   -webkit-user-select: none;
 }
 
-.photo-frame__cap {
-  position: absolute;
-  right: 11px;
-  bottom: 11px;
-  left: 11px;
-  display: flex;
-  justify-content: space-between;
-  color: #5a5f66;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-}
-
-/* #08 is a 2.70 panorama. Left in a 210px column it is 78px tall and reads as
-   a glitch, so it takes the full row instead. */
-.photo-frame--wide {
-  grid-column: 1 / -1;
-}
-
 /* The cell the print lands on is EMPTY until the print arrives. Seeing the
    destination show the same photograph the print is carrying — the print
    shrinking across the screen while its own cell sits there legible, one
@@ -5194,66 +4901,9 @@ html[data-theme="light"] .photo-frame.is-dragging {
   visibility: hidden;
 }
 
-/* The lightbox is reparented to <body> while it is open (see photos.js):
-   .app-shell is a stacking context at z-index 1, so a layer left inside it can
-   never climb over the frozen bar at 261 no matter what z-index it carries.
-   As a child of the body it only has to outrank the bar, which is why its
-   z-index here is 280. */
-.photo-lightbox {
-  position: fixed;
-  z-index: 280;
-  inset: 0;
-}
-
-.photo-lightbox[hidden] {
-  display: none;
-}
-
-.photo-lightbox__veil {
-  position: absolute;
-  inset: 0;
-  background: rgba(9, 11, 15, 0.9);
-  animation: photo-lightbox-veil 240ms var(--ease-out) both;
-}
-
 @keyframes photo-lightbox-veil {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-/* The frame grows out of its own cell rather than popping in as an overlay:
-   the stage starts at the thumbnail's box and settles to the fitted size. */
-.photo-lightbox__stage {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  margin: 0;
-  padding: 11px 11px 38px;
-  background: #f4f4f1;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.75);
-  transform: translate(-50%, -50%);
-}
-
-.photo-lightbox__img {
-  display: block;
-  width: 100%;
-  max-width: none;
-  height: auto;
-  background: #0d1117;
-  object-fit: contain;
-}
-
-.photo-lightbox__cap {
-  position: absolute;
-  right: 11px;
-  bottom: 11px;
-  left: 11px;
-  display: flex;
-  justify-content: space-between;
-  color: #5a5f66;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
 }
 
 /* The bar is themed, the screen is not. In light mode the bar's text is dark
@@ -5316,37 +4966,6 @@ body.is-gallery-screen .site-header.is-scrolled {
 .photo-lightbox__close:hover {
   border-color: #d6f0ff;
   color: #d6f0ff;
-}
-
-.photo-lightbox__nav--prev {
-  top: 50%;
-  left: 24px;
-  transform: translateY(-50%);
-}
-
-.photo-lightbox__nav--next {
-  top: 50%;
-  right: 24px;
-  transform: translateY(-50%);
-}
-
-/* Below the bar, not under it. The bar is z-index 261 and frozen above every
-   overlay by design, so a close button at 22px would be unreachable. */
-.photo-lightbox__close {
-  top: calc(var(--header-height) + 22px);
-  right: 22px;
-}
-
-.photo-lightbox__hint {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  margin: 0;
-  color: #7e8794;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.2em;
-  transform: translateX(-50%);
 }
 
 /* Reduced motion: no travel, no layers. The screen is dropped and the
@@ -5508,54 +5127,6 @@ html.is-dome body {
   scrollbar-width: none;
   overscroll-behavior: none;
 }
-/* WebKit：连占位都不要留，否则整页会被挤窄 */
-html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
-
-[data-dome] {
-  position: fixed;
-  inset: 0;
-  z-index: 900;              /* 必须高于顶栏，否则导航条会压在穹顶上 */
-  /* 背景必须**透明**：主题自己的 [data-scene-background] 就在下面，用的是同一份
-     willowxi.js 画的主页场景。这里一旦有不透明底色，就把那层一模一样的背景挡掉了。 */
-  background: transparent;
-  overflow: hidden;
-}
-[data-dome-wall] {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  z-index: 0;                /* WebGL 壁纸层在下 */
-}
-[data-dome-canvas] {
-  z-index: 1;                /* 2D 网格与扫光在上，本身透明 */
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* 穹顶内壁上的相纸层。定位由 dome3d.js 每帧按与 WebGL 相同的投影公式写入，
-   所以 DOM 相纸与 canvas 网格永远同步。 */
-[data-dome-photos] {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-[data-dome-matte] {
-  position: absolute;
-  left: 0;
-  top: 0;
-  background: #f4f4f1;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
-  transform-origin: 50% 50%;
-  will-change: transform;
-  pointer-events: auto;
-  cursor: pointer;
-}
 [data-dome-matte] .win {
   position: absolute;
   /* 🔴 四边必须均匀。原来底部留 14%（放角标），而 zoomToFill 是按均匀白边
@@ -5566,11 +5137,6 @@ html.is-dome body::-webkit-scrollbar { width: 0; height: 0; display: none; }
   display: grid;
   place-items: center;
   overflow: hidden;
-}
-[data-dome-matte] img {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
 }
 [data-dome-matte] .cap {
   position: absolute;
@@ -5590,19 +5156,6 @@ html.is-dome .photo-acrylic,
 html.is-dome .photo-lightbox {
   display: none !important;
 }
-
-/* 开屏序列：随机照片铺满 → 打字 → 停留 3s 或被滚轮打断 → 尾字倒放删除 */
-[data-dome-open] {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  /* 🔴 必须透明。开场是"镜头怼着墙上那张照片拍"，照片由 WebGL 画在下面；
-     这里一旦有不透明底色，整个穹顶就被盖住 —— 用户看到的"开屏一片黑"。 */
-  background: transparent;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
 [data-dome-open] .shot {
   position: absolute;
   inset: 0;
@@ -5614,19 +5167,6 @@ html.is-dome .photo-lightbox {
   position: absolute;
   inset: 0;
   background: rgba(9, 11, 15, 0.72);
-}
-[data-dome-open] h1 {
-  position: relative;
-  z-index: 2;
-  margin: 0;
-  color: var(--paper);
-  font-family: var(--font-mono);
-  font-size: clamp(30px, 7vw, 96px);
-  font-weight: 400;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  white-space: nowrap;
-  text-shadow: 0 0 20px rgba(9, 11, 15, 0.8);
 }
 [data-dome-open] .caret {
   display: inline-block;
@@ -5642,13 +5182,6 @@ html.is-dome .photo-lightbox {
   font-size: 11px;
   letter-spacing: 0.34em;
 }
-/* 相纸现在由 WebGL 画在球面上（跟随球面曲率）；DOM 这层只保留点击命中，
-   视觉上完全透明 —— 否则又会盖上一层"贴在墙前的卡片"。 */
-[data-dome-matte] {
-  opacity: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
 
 /* 穹顶内一律不接受浏览器手势：滚轮、拖动、双指全部由脚本接管。
    缺了这条，浏览器会把双指当成页面缩放/滚动，pointer 事件会被 cancel 掉。 */
@@ -5656,29 +5189,6 @@ html.is-dome .photo-lightbox {
   touch-action: none !important;
   -webkit-user-select: none;
   user-select: none;
-}
-
-/* ===== 全局放射状模糊层 =====
-   用户要求：不要在照片上算模糊，而是**在全局套一层放射状模糊**，
-   所有可见元素（背景 + 照片）都被模糊。
-
-   做法：backdrop-filter 模糊身后的一切；径向 mask 让它只在"从中心向外"逐渐生效
-   —— 中心透明（完全清晰），四周完全模糊。一层 DOM，纯 CSS，与内容无关。
-   指针事件穿透，不影响点击/拖动。 */
-[data-dome-blur] {
-  position: fixed;
-  inset: 0;
-  z-index: 950;                 /* 高于穹顶画布(900)，低于顶栏交互提示 */
-  pointer-events: none;         /* 不挡点击与拖动 */
-  /* 用户："模糊太多了、再向边角靠一点、看得头晕" —— 减轻强度、把清晰区扩大，
-     让模糊只压在四个角上。 */
-  backdrop-filter: blur(13px) saturate(1.02);
-  -webkit-backdrop-filter: blur(13px) saturate(1.02);
-  /* 中心 52% 完全不模糊，到 96% 才达到最大模糊（几乎只在角上） */
-  mask-image: radial-gradient(circle at 50% 50%,
-      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 96%, rgba(0,0,0,1) 100%);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%,
-      rgba(0,0,0,0) 0%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 96%, rgba(0,0,0,1) 100%);
 }
 
 /* ===== 3D 相册（?album=1）=====
