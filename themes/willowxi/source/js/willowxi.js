@@ -2157,6 +2157,11 @@
     function onAlbumRoute() { return /^\/photos\/?$/.test(location.pathname); }
     function boot() {
       if (inst || loading) return;
+      // Adopt whatever is already running: the album page used to boot it too, and the
+      // two owners each built their own [data-album] host, which is the 'two copies' the
+      // user sees - two canvases rendering the same album at once.
+      if (window.__albumInstance) { inst = window.__albumInstance; return; }
+      if (document.querySelector('[data-album]')) return;
       if (window.WillowXIAlbum) {
         document.documentElement.classList.add('is-album');
         inst = window.WillowXIAlbum.create(document);
