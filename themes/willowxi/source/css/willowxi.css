@@ -5844,3 +5844,11 @@ html.is-album [data-gallery] {
   visibility: hidden !important;
   pointer-events: none !important;
 }
+
+/* 相册页：主题自带的 .intro 打字开场与 3D 相册自己的打字开场会同时播放，
+   看起来就是"两份打字动画"。相册页只保留 3D 相册那一套。 */
+html.is-album .intro,
+html.is-album .intro__skip,
+html.is-album [data-intro] {
+  display: none !important;
+}
