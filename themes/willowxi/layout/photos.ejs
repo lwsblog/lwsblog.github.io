@@ -22,165 +22,20 @@
   };
   const landscape = photos.filter(function (p) { return Number(p.w) > Number(p.h); }).length;
 %>
-<!-- The masthead is a page-level fixed layer, NOT part of the screen. It is
-     the one element that carries the title from the middle of the screen to
-     the top-left corner and then stays there for the rest of the session —
-     it is never faded out and re-shown, because that reads as a blink. The
-     screen below it can be display:none once it lands and the title is
-     untouched. -->
-<div class="photo-masthead" data-photo-masthead>
-  <span class="photo-masthead__label" data-photo-mast-label>CONTACT SHEET</span>
-  <!-- 🔴 `style="visibility:hidden"` is INLINE on purpose, and it is not the same job as
-       the CSS rule that hides this title (see willowxi.css).
 
-       The CSS rule covers the window after the stylesheet loads but BEFORE photos.js is
-       injected — the gallery waits for the screen image, measured 3-4s on a cold load,
-       and without it the server-rendered title sat on screen in its plain resting state
-       (left-aligned, top-left) and then vanished and re-typed. This inline attribute
-       covers the earlier window still: the gap between the HTML being PARSED and the
-       stylesheet being APPLIED, during which the title would otherwise paint with
-       default styles (measured: visible at centre x=135 at 400ms).
-
-       With JS off nothing would ever clear it, so `noscript` in the head puts it back. -->
-  <h1 class="photo-masthead__title" data-photo-mast-title style="visibility:hidden"><%= page.title %></h1>
-  <p class="photo-masthead__sub" data-photo-mast-sub>
-    <%= photos.length %> FRAMES / <%= landscape %> LANDSCAPE / <%= photos.length - landscape %> PORTRAIT
-  </p>
-</div>
-
-<div class="gallery" data-gallery>
-  <!-- The global acrylic. One full-viewport plate that sits BETWEEN the grid
-       and the print: it blurs and dims the whole column while the print is
-       still travelling, and fades out as the print lands. Without it the grid
-       is naked the moment the print shrinks off it, and the cell the print is
-       flying towards — the same photograph, its own landing site — shows
-       through beside it, so one travel reads as two copies of one photo.
-       The plate fades by animating --acrylic-k (see willowxi.css); it is
-       never taken to opacity < 1, which would make it its own backdrop root
-       and kill its own blur. -->
-  <div class="photo-acrylic" data-photo-acrylic aria-hidden="true"></div>
-
-
-  <!-- The screen is a print the size of the viewport, not a full-bleed
-       photograph. It holds the SAME aspect ratio as the grid cell it lands
-       on, so the whole travel is one continuous scale of one box: the crop
-       never changes, nothing is re-cropped, and no second image is ever
-       created. That is what makes it read as one print shrinking rather than
-       one photo being replaced by another. -->
-  <figure class="photo-screen" data-photo-screen>
-    <% if (cover) { %>
-      <img class="photo-screen__img" data-photo-screen-img
-        src="<%- photoUrl(cover.id, 'screen') %>" alt="" decoding="async" draggable="false">
-    <% } %>
-    <div class="photo-screen__veil" data-photo-screen-veil></div>
-    <figcaption class="photo-screen__cap" data-photo-screen-cap>
-      <span><%= stamp(cover ? cover.date : '') %></span>
-      <!-- The print IS the head of the grid (see the `ordered` list above),
-           so its tally has to be the tally that cell shows — "01", not the
-           collection total. With the total here the arrival swapped 22 -> 01
-           on the one frame where the print hands over to its own cell, which
-           is a visible edit in the middle of a transition that is supposed to
-           have no seam. The collection total lives in the masthead's sub. -->
-      <span>01</span>
-    </figcaption>
-  </figure>
-
-  <p class="photo-screen__hint" data-photo-screen-hint>SCROLL</p>
-
-  <div class="gallery-spacer" data-gallery-spacer></div>
-
-  <div class="photo-main" data-photo-main>
-    <!-- The backboard. It is the first child of the column and absolutely
-         positioned against it, so the column is mounted ON it rather than the
-         board floating over the viewport. -->
-    <div class="gallery-board" aria-hidden="true"></div>
-
-    <header class="photo-main__header">
-      <span class="micro-label">ALBUM / <%= page.title %></span>
-      <% if (page.description) { %><p><%= page.description %></p><% } %>
-    </header>
-
-    <div class="photo-grid" data-photo-grid>
-      <% ordered.forEach(function (photo, index) { %>
-        <%
-          const ratio = (Number(photo.w) / Number(photo.h)).toFixed(4);
-          const wide = Number(photo.w) / Number(photo.h) > 2;
-        %>
-        <figure class="photo-frame<%= wide ? ' photo-frame--wide' : '' %>" data-photo-frame
-          data-index="<%= index %>" data-id="<%= photo.id %>"
-          data-tally="<%= String(index + 1).padStart(2, '0') %>"
-          style="--ratio: <%= ratio %>">
-          <button class="photo-frame__hit" type="button"
-            aria-label="放大第 <%= index + 1 %> 帧：<%= stamp(photo.date) %>">
-            <img class="photo-frame__img" data-photo-frame-img
-              src="<%- photoUrl(photo.id, 'thumb') %>"
-              alt="<%= stamp(photo.date) %>" loading="lazy" decoding="async"
-              width="<%= photo.w %>" height="<%= photo.h %>" draggable="false"
-              data-light-src="<%- photoUrl(photo.id, 'light') %>"
-              data-screen-src="<%- photoUrl(photo.id, 'screen') %>">
-          </button>
-          <figcaption class="photo-frame__cap">
-            <span><%= stamp(photo.date) %></span>
-            <span><%= String(index + 1).padStart(2, '0') %></span>
-          </figcaption>
-        </figure>
-      <% }) %>
-    </div>
-  </div>
-
-  <div class="photo-lightbox" data-photo-lightbox hidden>
-    <div class="photo-lightbox__veil" data-photo-lightbox-veil></div>
-    <figure class="photo-lightbox__stage" data-photo-lightbox-stage>
-      <img class="photo-lightbox__img" data-photo-lightbox-img alt="" decoding="async">
-      <figcaption class="photo-lightbox__cap">
-        <span data-photo-lightbox-label></span>
-        <span data-photo-lightbox-index></span>
-      </figcaption>
-    </figure>
-    <button class="photo-lightbox__nav photo-lightbox__nav--prev" type="button"
-      data-photo-lightbox-prev aria-label="上一帧">
-      <%- partial('_partial/icons', {name: 'arrow-left', size: 22}) %>
-    </button>
-    <button class="photo-lightbox__nav photo-lightbox__nav--next" type="button"
-      data-photo-lightbox-next aria-label="下一帧">
-      <%- partial('_partial/icons', {name: 'arrow-right', size: 22}) %>
-    </button>
-    <button class="photo-lightbox__close" type="button" data-photo-lightbox-close aria-label="关闭">
-      <%- partial('_partial/icons', {name: 'x', size: 20}) %>
-    </button>
-    <p class="photo-lightbox__hint" data-photo-lightbox-hint>&larr; &rarr; 切换 · ESC 关闭</p>
-  </div>
-
-  <%# 穹顶相册：只在 ?dome=1 时挂载，线上默认路径完全不受影响。 %>
-  <div data-dome hidden>
-    <canvas data-dome-canvas
-      data-dome-wallpaper="<%- url_for('/images/wallpaper/wallpaper-default.webp') %>"
-      aria-hidden="true"></canvas>
-  </div>
-  <script>
-    (function () {
-      if (!/[?&]dome=1/.test(location.search)) return;
-      var host = document.querySelector('[data-dome]');
-      if (!host) return;
-      // 🔴 必须挪到 body 直属。
-      //
-      // 留在 photos.ejs 的位置时，它被包在页面内容容器里，那个容器自己带
-      // z-index/position 形成层叠上下文 —— 于是穹顶的 z-index:900 只在容器内部
-      // 比较，顶栏（在 body 层，z-index 265）照样压在穹顶上面。挂到 body 下才
-      // 和顶栏在同一层，900 > 265 才生效。
-      document.body.appendChild(host);
-      host.hidden = false;
-      var s = document.createElement('script');
-      s.src = '<%- url_for("/js/dome3d.js") %>';
-      s.async = true;
-      s.onload = function () {
-        if (!window.WillowXIDome) return;
-        window.__domeInstance = window.WillowXIDome.create(document);
-        window.__domeInstance.init();
-      };
-      document.head.appendChild(s);
-    })();
-  </script>
+<!-- 相册的数据源：3D 相册用 collect() 读这些 [data-photo-frame] 取图片清单
+     （data-id / --ratio / data-screen-src / data-light-src）。
+     这里是【纯数据】：没有 <img>、没有按钮、没有说明文字，也整块隐藏，
+     所以旧的列表/网格视图不会出现在页面上，也不会播任何入场动画。 -->
+<div class="album-data" hidden aria-hidden="true">
+  <% ordered.forEach(function (photo, index) { %>
+    <figure data-photo-frame
+            data-id="<%= photo.id %>"
+            data-index="<%= index + 1 %>"
+            data-screen-src="<%= photoUrl(photo.id, 'screen') %>"
+            data-light-src="<%= photoUrl(photo.id, 'light') %>"
+            style="--ratio:<%= (Number(photo.w) / Number(photo.h)).toFixed(5) %>"></figure>
+  <% }) %>
 </div>
 
 <%

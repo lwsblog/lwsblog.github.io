@@ -2131,7 +2131,6 @@
     setupCopyButtons();
     setupStreamPickers();
     setupComments();
-    setupGallery();
   }
 
   // Gallery (/photos/). photos.js is a separate file because it is the only
