@@ -27,6 +27,11 @@
      （data-id / --ratio / data-screen-src / data-light-src）。
      这里是【纯数据】：没有 <img>、没有按钮、没有说明文字，也整块隐藏，
      所以旧的列表/网格视图不会出现在页面上，也不会播任何入场动画。 -->
+<!-- 开屏打字的内容来源：3D 相册读 [data-photo-masthead] h1 或 [data-photo-mast-title] 的
+     文字来逐字打出。旧页眉删掉之后它取不到、只能回退成写死的 WillowXI（8 字）✓
+     于是打字时长减半、开场显得"急"✓。这里只补一个隐藏的数据节点，不产生任何视觉。 -->
+<h1 data-photo-mast-title hidden><%= page.title %></h1>
+
 <div class="album-data" hidden aria-hidden="true">
   <% ordered.forEach(function (photo, index) { %>
     <figure data-photo-frame

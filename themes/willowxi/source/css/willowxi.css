@@ -5376,10 +5376,3 @@ html.is-album {
 }
 
 
-/* 相册页：主题自己的背景场景（scene-background 里那张会动的网格）不显示。
-   3D 相册会画自己的背景，两层叠着就是"两份画面"。 */
-html.is-album .scene-background,
-html.is-album .scene-background__canvas,
-html.is-album .scene-background__plate {
-  display: none !important;
-}
