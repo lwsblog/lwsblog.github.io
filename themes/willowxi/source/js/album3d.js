@@ -191,6 +191,8 @@
     var camZ = CAM_DIST, focusZ = 0;
     var openState = 'idle', openAt = 0, openText = '', overlay = null, h1 = null;
     var startedAt = 0, ready = false, raf = 0;
+    // cached theme surface colour for the glass base (see composePass)
+    var baseThemeSeen = '__none__', baseRgb = [9 / 255, 11 / 255, 15 / 255];
   // 双视图：row = 横向一排（浏览）；grid = 网格总览
   var mode = 0, modeT = 0, modeAt = 0, modeFrom = 0;   // modeT: 0=row 1=grid
   var numTex = null, numCell = [0, 0];                 // 数字图集
@@ -835,7 +837,37 @@
       gl.uniform1i(compLoc.uWall, 2);
       gl.uniform1f(compLoc.uWallOn, wallOn ? 1.0 : 0.0);
       // 实测公式的参数：底色 rgb(9,11,15)、壁纸占 36%、亮度 0.86
-      gl.uniform3f(compLoc.uBase, 9 / 255, 11 / 255, 15 / 255);
+      // The glass base must match the page, not a fixed near-black. Over an empty
+    // background the glass has nothing to refract, so this is all you see - which is why
+    // the pill looked black on the light theme while looking like glass over a photo.
+    // --ink is the page surface (dark in dark mode, light in light mode); we re-read it
+    // whenever data-theme changes, and cache the parsed value.
+    var _th = document.documentElement.getAttribute('data-theme') || '';
+    if (_th !== baseThemeSeen) {
+      baseThemeSeen = _th;
+      var _inkStr = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
+      var _mm = _inkStr.match(/#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})/);
+      if (_mm) {
+        baseRgb[0] = parseInt(_mm[1], 16) / 255;
+        baseRgb[1] = parseInt(_mm[2], 16) / 255;
+        baseRgb[2] = parseInt(_mm[3], 16) / 255;
+      }
+    }
+    // Focus dims the page with dimEl (DIM_MAX*focusT), but dimEl sits UNDER the canvas, so
+    // the glass kept its full brightness and looked far too light on the light theme.
+    // Darken the glass base by the same amount; on the dark theme the base is already
+    // almost black so this is imperceptible there.
+    // Blend the page colour towards the SAME colour and amount the focus veil uses
+    // (dimEl is #05070b at opacity DIM_MAX*focusT). Multiplying by a factor instead left
+    // the glass a different tone from the background, so in the light theme it read as a
+    // dark blob while the user wants it to blend in.
+    var _dt = DIM_MAX * focusT;
+    var _br = baseRgb[0] * (1 - _dt) + (5 / 255) * _dt;
+    var _bg2 = baseRgb[1] * (1 - _dt) + (7 / 255) * _dt;
+    var _bb = baseRgb[2] * (1 - _dt) + (11 / 255) * _dt;
+    gl.uniform3f(compLoc.uBase, _br, _bg2, _bb);
+    // The label follows the theme foreground via CSS (color: var(--paper)): black on the
+    // light theme, white on the dark one. Do not second-guess it from the glass brightness.
       // 每帧从 DOM 读壁纸那层的 transform（鼠标平移就在这里）
       var plx = 0, ply = 0, pls = 1;
       try {
@@ -874,7 +906,10 @@
       } catch (e) {}
       gl.uniform2f(compLoc.uBgP, bpx, bpy);
       gl.uniform1f(compLoc.uWallS, pls);
-      gl.uniform1f(compLoc.uWallAmt, 0.36);
+      // Fade the wallpaper/background mixing out while focused: uBase alone is then exactly
+    // the page colour blended with the focus veil, so the glass matches its background
+    // instead of drifting to a different tone.
+    gl.uniform1f(compLoc.uWallAmt, 0.36 * (1 - focusT));
       gl.uniform1f(compLoc.uWallGain, 0.86);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
@@ -1029,7 +1064,10 @@
           var hh = (hhS + (tg.hh - hhS) * s1) * ps;
           var rad = (hhS + (Math.min(tg.hw, tg.hh) - hhS) * s1) * ps;
           var hw2 = Math.max(hw, 0.6), hh2 = Math.min(Math.max(hh, 0.6), hw2);
-          if (_rest <= 0.9995 && hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), 1]);
+          // The user wants the arrows to show no disc at all while focused - the glass colour
+          // kept drifting away from the background. Fade the disc out with focusT and leave
+          // only the chevron, which follows the theme foreground via CSS.
+          if (_rest <= 0.9995 && hw2 > 0.6) shapes.push([ax, ay, hw2, hh2, Math.min(rad, hw2), (1 - focusT)]);
           // ★ 箭头跟着玻璃圆的中心走（并且分裂开始就渐显）
           // 箭头：不跟随、不动位置；等玻璃圆【到位之后】才渐显
           if (el5.style.transform) el5.style.transform = '';

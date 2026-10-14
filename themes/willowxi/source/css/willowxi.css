@@ -5214,7 +5214,9 @@ html.is-album .photo-lightbox { display: none !important; }
   cursor: pointer;
   border: 0;
   background: rgba(255, 255, 255, .07);
-  color: #eaf2fb;
+  /* --paper is the theme foreground: light in dark mode, dark in light mode. The
+     hard-coded #eaf2fb was white text on the light theme's near-white glass. */
+  color: var(--paper);
   -webkit-backdrop-filter: blur(14px) saturate(180%);
   backdrop-filter: blur(14px) saturate(180%);
   box-shadow:
