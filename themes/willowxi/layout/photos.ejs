@@ -36,6 +36,7 @@
   <% ordered.forEach(function (photo, index) { %>
     <figure data-photo-frame
             data-id="<%= photo.id %>"
+            data-title="<%= photo.title || '' %>"
             data-index="<%= index + 1 %>"
             data-screen-src="<%= photoUrl(photo.id, 'screen') %>"
             data-light-src="<%= photoUrl(photo.id, 'light') %>"

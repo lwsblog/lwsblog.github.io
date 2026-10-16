@@ -47,6 +47,14 @@
   var FOCUS_MS = 900;          // 聚焦/退出聚焦的补间时长
   var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
+  var NAME_GAP = 0;             // 名称与卡片上沿的间距 px（0 = 紧贴照片上沿，从背后钻出）
+  var NAME_DELAY = 120;         // 悬停多久后出现 ms
+  var NAME_IN_MS = 800;         // 钻出时长 ms（慢慢浮现）
+  var NAME_OUT_MS = 120;        // 收起时长 ms
+  var NAME_SHADOW = 0;          // 文字阴影强度（0 = 关闭；之前 0.55 的阴影在浅底上看着像字里有渐变）       // 文字阴影强度
+  var NAME_MAXW = 2.0;          // 名称最大宽度 = 卡片宽 x 此值
+  var NAME_H = 20;              // 名称单行高度 px
+  var NAME_FOC_PX = 64;         // 聚焦时名称字号 px（固定值，保证每张照片大小一致）              // 名称单行高度 px（用于定位与裁剪）
   var DIM_MAX = 0.55;          // 聚焦时整屏压暗的上限
   var DIM_FADE_MS = 260;        // 明暗渐变的时长（切换聚焦照片时用，避免瞬间翻转）
   // 构建戳：写在页面属性 + 底部按钮上，方便一眼确认浏览器跑的是哪一版。
@@ -191,6 +199,7 @@
     var camZ = CAM_DIST, focusZ = 0;
     var openState = 'idle', openAt = 0, openText = '', overlay = null, h1 = null;
     var startedAt = 0, ready = false, raf = 0;
+    var nameWrap = null, nameEl = null, nameIdx = -1, nameSince = 0, nameShown = '', nameHPx = 24, nameOutUntil = 0;
     // cached theme surface colour for the glass base (see composePass)
     var baseThemeSeen = '__none__', baseRgb = [9 / 255, 11 / 255, 15 / 255];
   // 双视图：row = 横向一排（浏览）；grid = 网格总览
@@ -204,6 +213,7 @@
       for (var i = 0; i < frames.length; i++) {
         var f = frames[i];
         var id = f.getAttribute('data-id');
+        var name = f.getAttribute('data-title') || '';   // 名称；为空则完全不显示
         var ratio = parseFloat(f.style.getPropertyValue('--ratio')) || 1.5;
         var img = f.querySelector('img');
         // 🔴 data-screen-src / data-light-src 挂在 **<img>** 上，不在 <figure> 上！
@@ -216,7 +226,7 @@
         var hiSrc = (img && img.getAttribute('data-light-src')) ||
                     f.getAttribute('data-light-src') || '';
         if (!id || !src) continue;
-        list.push({ id: id, ratio: ratio, src: src, lightSrc: hiSrc });
+        list.push({ id: id, title: name, ratio: ratio, src: src, lightSrc: hiSrc });
       }
       return list;
     }
@@ -1423,6 +1433,83 @@
 
     // ---------- 主循环 ----------
     var last = 0;
+
+      // 名称：网格停稳后悬停触发（延迟 NAME_DELAY），聚焦时直接显示。
+      function nameTarget() {
+        if (!nameWrap) return -1;
+        // 视图切换（网格<->一排）进行中不显示名称：否则会先以网格字号(13px)出现，
+        // 切到一排时跳到聚焦字号(64px)，看起来就是一次缩放。
+        if (modeT > 0.01 && modeT < 0.99) return -1;
+        // 聚焦动画进行中一律不显示；走完之后才从照片背后浮现。
+        if (focusIdx >= 0 && focusT < 0.999) return -1;
+        if (focusT >= 0.999 && focusIdx >= 0) return focusIdx;
+        if (mode === 1 && modeT > 0.99) {
+          var nx = (mouseX * dpr / W) * 2 - 1;
+          var ny = 1 - (mouseY * dpr / H) * 2;
+          return pickPhoto(nx, ny);
+        }
+        return -1;
+      }
+      function updateName(now) {
+        if (!nameWrap) return;
+        var idx = nameTarget();
+        if (idx !== nameIdx) {
+          // 从一张聚焦照片切到另一张：先把名称收起，再重新播放一次飞出动画
+          if (nameIdx >= 0 && idx >= 0) nameOutUntil = now + NAME_OUT_MS;
+          nameIdx = idx; nameSince = now;
+        }
+        if (now < nameOutUntil) {
+          nameEl.style.transitionDuration = NAME_OUT_MS + 'ms';
+          nameEl.style.transform = 'translateY(' + nameHPx + 'px)';
+          nameEl.style.opacity = '0';
+          nameShown = '';
+          return;
+        }
+        var need = (focusIdx >= 0 && idx === focusIdx) ? 0 : NAME_DELAY;
+        if (idx >= 0 && (now - nameSince) >= need) {
+          var ph = photos[idx];
+          if (!ph || !ph.title) { nameEl.style.opacity = '0'; nameEl.style.transform = 'translateY(' + nameHPx + 'px)'; nameShown = ''; return; }
+          var mt = (ph.mt === undefined) ? modeT : ph.mt;
+          var x = ph.x * (1 - mt) + ph.gx * mt;
+          var y = ph.y * (1 - mt) + ph.gy * mt;
+          var z = ph.z * (1 - mt) + (ph.gz || 0) * mt;
+          var sz = worldSize(ph, mt);
+          var pb = 1 / (1 + 2 * MATTE_BORDER);
+          var r = projRect(x, y, z, sz.hw / pb, sz.hh / pb);
+          var cw = r.hx * W / dpr;
+          var cxPx = (r.cx + 1) * 0.5 * W / dpr;
+          var topPx = (1 - (r.cy + r.hy)) * 0.5 * H / dpr;
+          if (ph.title !== nameShown) { nameEl.textContent = ph.title; nameShown = ph.title; }
+          var maxW = Math.max(60, cw * NAME_MAXW);
+          // 字号固定：聚焦与网格各一个固定值，任何情况下都不做放大/缩小动画。
+          // 名称唯一的动作是"从卡片底下滑出来 + 淡入"。
+          var isFoc = (focusT >= 0.999 && focusIdx >= 0 && idx === focusIdx);
+          var fs = isFoc ? NAME_FOC_PX : 13;
+          if (isFoc) maxW = Math.max(maxW, W / dpr * 0.6);
+          nameEl.style.fontSize = fs.toFixed(1) + 'px';
+          nameEl.style.background = 'none';
+          nameEl.style.webkitBackgroundClip = 'border-box';
+          nameEl.style.webkitTextFillColor = '#fff';   // 清掉主题的渐变文字
+          nameEl.style.maxWidth = maxW.toFixed(0) + 'px';
+          nameEl.style.textShadow = '0 1px 3px rgba(0,0,0,' + NAME_SHADOW.toFixed(2) + '),' +
+                                    '0 0 14px rgba(0,0,0,' + (NAME_SHADOW * 0.7).toFixed(2) + ')';
+          nameWrap.style.left = (cxPx - maxW / 2).toFixed(1) + 'px';
+          nameWrap.style.width = maxW.toFixed(0) + 'px';
+          var hPx = Math.round(fs * 1.5);
+          nameHPx = hPx;
+          nameWrap.style.top = (topPx - NAME_GAP - hPx).toFixed(1) + 'px';
+          nameWrap.style.height = hPx + 'px';
+          nameEl.style.transitionDuration = NAME_IN_MS + 'ms';
+          nameEl.style.transform = 'translateY(0px)';
+          nameEl.style.opacity = '1';
+        } else {
+          nameEl.style.transitionDuration = NAME_OUT_MS + 'ms';
+          nameEl.style.transform = 'translateY(' + nameHPx + 'px)';
+          nameEl.style.opacity = '0';
+          nameShown = '';
+        }
+      }
+
     function frame(now) {
       raf = requestAnimationFrame(frame);
       var dt = last ? Math.min(64, now - last) : 16;
@@ -1512,6 +1599,7 @@
         for (var q3 = 0; q3 < photos.length; q3++) photos[q3].mt = modeT;
       }
       draw();
+      updateName(now);
     }
 
     function resize() {
@@ -1662,6 +1750,21 @@
       dimEl.style.cssText = 'position:absolute;inset:0;z-index:0;pointer-events:none;' +
         'background:#05070b;opacity:0;';
       host.insertBefore(dimEl, host.firstChild);
+
+        // 名称：裁剪容器 + 一行文字。容器压在卡片上沿之上，文字从 translateY(100%) 滑到 0
+        // —— 视觉上就是从卡片底下钻出来。
+        nameWrap = document.createElement('div');
+        nameWrap.setAttribute('data-album-name', '');
+        nameWrap.style.cssText = 'position:fixed;overflow:hidden;pointer-events:none;z-index:42;';
+        nameEl = document.createElement('div');
+        nameEl.style.cssText = 'font:400 13px/1.35 "Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace;' +
+          'letter-spacing:.14em;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+          'color:#fff;background:none;background-image:none;-webkit-background-clip:border-box;' +
+          'background-clip:border-box;-webkit-text-fill-color:#fff;transform:translateY(24px);opacity:0;' +
+          'transition:transform ' + NAME_IN_MS + 'ms cubic-bezier(.2,.8,.3,1), opacity ' + NAME_IN_MS + 'ms ease;' +
+          'font-size 0s linear;';
+        nameWrap.appendChild(nameEl);
+        host.appendChild(nameWrap);
       raf = requestAnimationFrame(frame);
     }
 
@@ -2062,6 +2165,8 @@
     var TUNE_KEY = 'album3d-tune-v11';
     var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                     'NAME_FOC_PX',
+                     'NAME_GAP','NAME_DELAY','NAME_IN_MS','NAME_OUT_MS','NAME_SHADOW','NAME_MAXW',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
       return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
@@ -2075,7 +2180,10 @@
         GLASS_FROST_MIX: GLASS_FROST_MIX,
         GLASS_RIM_W: GLASS_RIM_W, GLASS_RIM_A: GLASS_RIM_A,
         GLASS_GLINT: GLASS_GLINT, GLASS_TINT: GLASS_TINT,
-        GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT })[k];
+        GRID_COLS: GRID_COLS, GRID_GAPX: GRID_GAPX, GRID_GAPY: GRID_GAPY, GRID_FIT: GRID_FIT,
+        NAME_GAP: NAME_GAP, NAME_DELAY: NAME_DELAY, NAME_IN_MS: NAME_IN_MS,
+        NAME_OUT_MS: NAME_OUT_MS, NAME_SHADOW: NAME_SHADOW, NAME_MAXW: NAME_MAXW,
+        NAME_FOC_PX: NAME_FOC_PX })[k];
     }
     function setVar(k, v) {
       if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
@@ -2096,6 +2204,10 @@
       else if (k === 'GLASS_GLINT') GLASS_GLINT = v; else if (k === 'GLASS_TINT') GLASS_TINT = v;
       else if (k === 'GRID_COLS') GRID_COLS = v; else if (k === 'GRID_GAPX') GRID_GAPX = v;
       else if (k === 'GRID_GAPY') GRID_GAPY = v; else if (k === 'GRID_FIT') GRID_FIT = v;
+      else if (k === 'NAME_GAP') NAME_GAP = v; else if (k === 'NAME_DELAY') NAME_DELAY = v;
+      else if (k === 'NAME_IN_MS') NAME_IN_MS = v; else if (k === 'NAME_OUT_MS') NAME_OUT_MS = v;
+      else if (k === 'NAME_SHADOW') NAME_SHADOW = v; else if (k === 'NAME_MAXW') NAME_MAXW = v;
+      else if (k === 'NAME_FOC_PX') NAME_FOC_PX = v;
     }
     function saveTune() {
       try {
@@ -2131,6 +2243,13 @@
         ['聚焦时长 FOCUS_MS', 'FOCUS_MS', 200, 2500, 50],
         ['滚轮冲量 WHEEL_IMPULSE', 'WHEEL_IMPULSE', 0.02, 1.00, 0.01],
         ['惯性时间 INERTIA_TAU', 'INERTIA_TAU', 80, 1500, 20],
+        ['名称 间距 px', 'NAME_GAP', 0, 60, 1],
+        ['名称 悬停 ms', 'NAME_DELAY', 0, 600, 10],
+        ['名称 钻出 ms', 'NAME_IN_MS', 60, 800, 10],
+        ['名称 收起 ms', 'NAME_OUT_MS', 60, 800, 10],
+        ['名称 阴影', 'NAME_SHADOW', 0, 1, 0.05],
+        ['名称 最大宽倍', 'NAME_MAXW', 1, 4, 0.1],
+        ['名称 聚焦字号 px', 'NAME_FOC_PX', 13, 140, 1],
       ];
       var posRows = [
         ['左右按钮 边距 px', 'NAV_INSET', 0, 220, 2],
@@ -2245,6 +2364,8 @@
       function dump() {
         var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
+                    'NAME_FOC_PX',
+                    'NAME_GAP','NAME_DELAY','NAME_IN_MS','NAME_OUT_MS','NAME_SHADOW','NAME_MAXW',
                     'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
         return keys.map(function (k) { return k + '=' + getVar(k); }).join('  ');
       }

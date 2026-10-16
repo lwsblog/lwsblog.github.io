@@ -5,90 +5,112 @@
 # w/h 是 thumb 档的真实像素，用来算 aspect-ratio 占位，避免布局抖动。
 # 宽 > 高 = 横图，进屏风随机池。
 - id: '22'
+  title: 'PHOTO 22'
   date: '2026-06-15'
   w: 640
   h: 853
 - id: '08'
+  title: 'PHOTO 08'
   date: '2026-06-14'
   w: 640
   h: 236
 - id: '04'
+  title: 'PHOTO 04'
   date: '2026-05-16'
   w: 640
   h: 426
 - id: '21'
+  title: 'PHOTO 21'
   date: '2026-04-18'
   w: 640
   h: 426
 - id: '07'
+  title: 'PHOTO 07'
   date: '2026-04-18'
   w: 640
   h: 426
 - id: '20'
+  title: 'PHOTO 20'
   date: '2025-12-31'
   w: 640
   h: 426
 - id: '19'
+  title: 'PHOTO 19'
   date: '2025-12-31'
   w: 640
   h: 426
 - id: '06'
+  title: 'PHOTO 06'
   date: '2025-09-12'
   w: 640
   h: 853
 - id: '18'
+  title: 'PHOTO 18'
   date: '2025-04-18'
   w: 640
   h: 960
 - id: '14'
+  title: 'PHOTO 14'
   date: '2025-01-01'
   w: 640
   h: 426
 - id: '13'
+  title: 'PHOTO 13'
   date: '2025-01-01'
   w: 640
   h: 426
 - id: '12'
+  title: 'PHOTO 12'
   date: '2025-01-01'
   w: 640
   h: 426
 - id: '11'
+  title: 'PHOTO 11'
   date: '2025-01-01'
   w: 640
   h: 426
 - id: '09'
+  title: 'PHOTO 09'
   date: '2025-01-01'
   w: 640
   h: 426
 - id: '10'
+  title: 'PHOTO 10'
   date: '2025-01-01'
   w: 640
   h: 960
 - id: '01'
+  title: 'PHOTO 01'
   date: '2024-11-10'
   w: 640
   h: 426
 - id: '15'
+  title: 'PHOTO 15'
   date: '2024-09-29'
   w: 640
   h: 426
 - id: '16'
+  title: 'PHOTO 16'
   date: '2024-09-29'
   w: 640
   h: 426
 - id: '17'
+  title: 'PHOTO 17'
   date: '2024-09-29'
   w: 640
   h: 426
 - id: '03'
+  title: 'PHOTO 03'
   date: '2023-12-03'
   w: 640
   h: 426
 - id: '02'
+  title: 'PHOTO 02'
   date: '2023-11-25'
   w: 640
   h: 426
 - id: '05'
+  title: 'PHOTO 05'
   date: ''
   w: 640
   h: 480
