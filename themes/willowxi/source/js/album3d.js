@@ -42,10 +42,13 @@
   // 原来把 JITTER 当"屏高比例"用却只给了 0.14 世界单位 —— 小了 3 倍，看不出上下分布。
   // 现在 ±1.55 世界单位 ≈ 半屏高的 48%，照片墙的高度感就出来了。
   var JITTER = 0.62;           // 上下幅度（世界单位）
+  // Diffuse light below the focused photo, separated by a screen-space gap.
+  var GLOW_ALPHA = 1.00, GLOW_WIDTH = 1.35, GLOW_DEPTH = 0.24;
+  var GLOW_GAP_PX = 12;        // 照片与光晕之间的留白（CSS px），羽化全部位于留白下方
   var MATTE_BORDER = 0.085;    // 相纸白边（相对相纸短边）
   // 用户定的两项：
   var FOCUS_MS = 900;          // 聚焦/退出聚焦的补间时长
-  var FOCUS_FILL = 0.72;       // 聚焦后目标照片占屏高的比例
+  var FOCUS_FILL = 0.52;       // 聚焦后目标照片占屏高的比例
   var focusCamZ = 3.2;         // 聚焦时摄像机应到的 camZ（按目标深度算，不是固定倍数）
   var NAME_GAP = 0;             // 名称与卡片上沿的间距 px（0 = 紧贴照片上沿，从背后钻出）
   var NAME_DELAY = 120;         // 悬停多久后出现 ms
@@ -122,22 +125,26 @@
       'attribute vec2 aUV;',
       'uniform vec3 uCenter;',    // 卡片中心（世界坐标：x=横, y=纵, z=深度, 越大越近）
       'uniform vec2 uHalf;',      // 卡片半宽半高（世界单位）
-      'uniform float uRot;',      // 卡片自身倾角
+      'uniform float uRot, uPaper, uGlowWidth;',      // 卡片自身倾角
       'uniform float uFocal, uCamZ, uHalfW, uHalfH, uScroll, uPanY, uCamZoom;',
-      'varying vec2 vUV;',
+      'varying vec2 vUV, vGlowLocal;',
       'varying float vFade;',     // 太远就淡出，避免远处糊成一片墙
       'void main() {',
       '  vec2 p = aXY * uHalf;',
+      // Pad the sides around a paper-width core; the upper feather stays inside
+      // the light quad so no colour can bleed into the empty gap above it.
+      '  float glowD = 1.0-aUV.y;',
+      '  if (uPaper > 3.5) p.x *= 1.15 * mix(1.0,uGlowWidth,glowD);',
+      '  vGlowLocal = vec2(p.x/uHalf.x,glowD);',
       '  float c = cos(uRot), s = sin(uRot);',
       '  p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);',
       '  vec3 w = vec3(uCenter.xy + p, uCenter.z);',
             // uCamZoom 由 JS 每帧上传（原来那次误放在编号块里、SHOW_NUM=false 从不执行，
       // 所以值恒为 0 -> zc = -z -> 整排照片消失。根因是上传位置，不是编译器优化。）
+      // Signed camera-to-card distance, also used by CPU picking below.
+      // Never project cards behind/at the camera onto the near plane.
       '  float zc = uCamZ * uCamZoom - w.z;',
-      // 剔除越过摄像机的（聚焦到后排时前排会飞过去）。
-      // 注意：阈值要小，且 zc 用的是 camZ*camZoom —— 阈值太大会把正常画面整片剔掉。
-      '  zc = max(zc, 0.12);',
-      '  if (uCamZ * uCamZoom - w.z < -0.35) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }',
+      '  if (zc <= 0.12) { gl_Position = vec4(2.0,2.0,2.0,1.0); vUV = aUV; vFade = 0.0; return; }',
       '  float k = uFocal / zc;',
       '  vec2 scr = vec2(w.x - uScroll, w.y - uPanY) * k;',// uScroll 走 uniform
       '  gl_Position = vec4(scr.x / (uHalfW * 0.5), scr.y / (uHalfH * 0.5), 0.0, 1.0);',
@@ -149,13 +156,37 @@
     var FS = [
       'precision highp float;',
       'uniform sampler2D uTex, uBlur;',
-      'uniform float uMix, uAlpha, uPaper, uTint, uDim;',
+      'uniform float uMix, uAlpha, uPaper, uTint, uDim, uGlowWidth;',
     'uniform vec4 uUVO;',        // xy = uv 偏移, zw = uv 缩放
     'uniform vec3 uPaperRGB;',   // 相纸/数字的颜色
-      'varying vec2 vUV;',
+      'varying vec2 vUV, vGlowLocal;',
       'varying float vFade;',
       'void main() {',
       '  vec2 uv = vUV * uUVO.zw + uUVO.xy;',
+      // Broad colour from the bottom of the photo, with no readable mirror image.
+      '  if (uPaper > 3.5) {',
+      // Reconstruct local position instead of interpolating rectangular UVs across
+      // two non-parallel triangles, which creates an asymmetric seam in a trapezoid.
+      '    float d = vGlowLocal.y;',
+      '    float x = vGlowLocal.x / (1.15 * mix(1.0,uGlowWidth,d));',
+      // One continuous field. Start and finish transparent inside the quad;
+      // the upper edge fades in entirely below the empty gap. Wider inward
+      // feathers soften all boundaries without increasing the footprint. The
+      // gain keeps the broader feather from dulling the brighter core.
+      '    float side = 1.0-smoothstep(0.72,1.0,abs(x));',
+      '    float mask = side * smoothstep(0.0,0.26,d) * exp(-2.2*d);',
+      '    mask *= 1.0-smoothstep(0.50,1.0,d);',
+      '    vec2 st = vec2(mix(0.22,0.78,x*0.5+0.5),0.18);',
+      '    vec3 glow = texture2D(uBlur,st).rgb * 0.20;',
+      '    glow += texture2D(uBlur,st+vec2(-0.20,0.0)).rgb * 0.15;',
+      '    glow += texture2D(uBlur,st+vec2(0.20,0.0)).rgb * 0.15;',
+      '    glow += texture2D(uBlur,st+vec2(-0.10,0.12)).rgb * 0.15;',
+      '    glow += texture2D(uBlur,st+vec2(0.10,0.12)).rgb * 0.15;',
+      '    glow += texture2D(uBlur,st+vec2(-0.10,-0.12)).rgb * 0.10;',
+      '    glow += texture2D(uBlur,st+vec2(0.10,-0.12)).rgb * 0.10;',
+      '    glow = pow(max(glow,vec3(0.0)),vec3(0.55));',
+      '    gl_FragColor = vec4(glow,mask*1.25*uAlpha); return;',
+      '  }',
       // uPaper=3: 一体化。uv 落在 [0,1] 之外 = 【白边】；之内 = 照片。
       // 这样每张只有一个图元，后画的照片不可能盖住别人的白边。
       '  if (uPaper > 2.5) {',
@@ -190,6 +221,8 @@
   var seqDur = 600, seqGap = 40;     // 逐个飞入：单张时长 / 相邻错峰
   // 聚焦：focusIdx = 第几张（-1 无）；focusT 0->1 补间；相机推近用 camZoom
   var focusIdx = -1, focusT = 0, focusFrom = 0, focusAt = 0, focusTo = 0;
+  // One presentation clock, restarted even when switching focused photos (focusT stays 1).
+  var focusRevealAt = 0, focusRevealT = 0;
   var focusScroll = 0, focusPan = 0, camZoom = 1, dimEl = null;
   var focusFromScroll = 0, focusFromPan = 0, focusFromZoom = 1;
   var navHLast = 0;   // 聚焦补间的起始镜头位置
@@ -1179,6 +1212,15 @@
       // 聚焦时被聚焦那张 uDim=0（保持原亮度），其余随聚焦进度变暗。
       // 用着色器里的一个乘法实现，不增加任何几何 —— 不会像整屏四边形那样拖垮软件渲染。
       var focusNum2 = (focusT > 0.001 && focusIdx >= 0) ? photos[focusIdx].num : -1;
+      // A light ground needs a much softer colour wash than a dark ground.
+      var glowStrength = GLOW_ALPHA * (document.documentElement.getAttribute('data-theme') === 'light' ? 0.32 : 1);
+      // Once the camera settles, present the selected photo/light above the dimmed
+      // neighbours. Pulling the camera back must not let a closer card cover it.
+      if (focusTo === 1 && focusRevealAt > 0 && focusIdx >= 0) {
+        var selected = photos[focusIdx];
+        order = order.filter(function (item) { return item !== selected; });
+        order.push(selected);
+      }
       for (var i = 0; i < order.length; i++) {
         var p = order[i];
         if (!p.ready) continue;
@@ -1255,6 +1297,33 @@
         var pb = 1 / (1 + 2 * MATTE_BORDER);
         gl.uniform1f(loc.uRot, rot);
         // 相纸那一遍已删除：白边和照片现在合成同一个四边形（见下面 uPaper=3）
+        if (focusTo === 1 && focusIdx >= 0 && p === photos[focusIdx] && focusRevealT > 0.001) {
+          var glowA = alpha * glowStrength * focusRevealT;
+          if (glowA > 0.001) {
+            var baseHalf = hh / pb, glowHalf = hw / pb * GLOW_DEPTH * focusRevealT;
+            // Convert CSS pixels through this photo's projection, keeping the gap
+            // constant across photo depths and device pixel ratios.
+            var gapWorld = GLOW_GAP_PX * dpr * (camZ * camZoom - z) / focal;
+            var offset = baseHalf + gapWorld + glowHalf;
+            gl.uniform3f(loc.uCenter, x + Math.sin(rot)*offset, y - Math.cos(rot)*offset, z);
+            gl.uniform2f(loc.uHalf, hw / pb, glowHalf);
+            gl.uniform1f(loc.uGlowWidth, 1 + (GLOW_WIDTH - 1) * focusRevealT);
+            gl.uniform1f(loc.uPaper, 4);
+            gl.uniform1f(loc.uAlpha, glowA);
+            gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+            // The post pass leaves fboTex on unit 0. Bind a photo here too:
+            // WebGL rejects framebuffer feedback even in an untaken shader branch.
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, p.tex);
+            gl.uniform1i(loc.uTex, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, p.blurTex || p.tex);
+            gl.uniform1i(loc.uBlur, 1);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+          }
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.uniform3f(loc.uCenter, x, y, z);
+        }
         // 照片
         // 一体化：几何按【相纸】尺寸；UV 缩到内侧 = 照片，外侧 = 白边
         gl.uniform2f(loc.uHalf, hw / pb, hh / pb);
@@ -1440,9 +1509,11 @@
         // 视图切换（网格<->一排）进行中不显示名称：否则会先以网格字号(13px)出现，
         // 切到一排时跳到聚焦字号(64px)，看起来就是一次缩放。
         if (modeT > 0.01 && modeT < 0.99) return -1;
-        // 聚焦动画进行中一律不显示；走完之后才从照片背后浮现。
-        if (focusIdx >= 0 && focusT < 0.999) return -1;
-        if (focusT >= 0.999 && focusIdx >= 0) return focusIdx;
+        // focusT is already 1 during a photo-to-photo camera move, so it is not
+        // a completion signal. Title and reflection share the settled-camera clock.
+        if (focusIdx >= 0 || focusTo === 1) {
+          return focusTo === 1 && focusRevealAt > 0 ? focusIdx : -1;
+        }
         if (mode === 1 && modeT > 0.99) {
           var nx = (mouseX * dpr / W) * 2 - 1;
           var ny = 1 - (mouseY * dpr / H) * 2;
@@ -1483,7 +1554,7 @@
           var maxW = Math.max(60, cw * NAME_MAXW);
           // 字号固定：聚焦与网格各一个固定值，任何情况下都不做放大/缩小动画。
           // 名称唯一的动作是"从卡片底下滑出来 + 淡入"。
-          var isFoc = (focusT >= 0.999 && focusIdx >= 0 && idx === focusIdx);
+          var isFoc = (focusTo === 1 && focusRevealAt > 0 && idx === focusIdx);
           var fs = isFoc ? NAME_FOC_PX : 13;
           if (isFoc) maxW = Math.max(maxW, W / dpr * 0.6);
           nameEl.style.fontSize = fs.toFixed(1) + 'px';
@@ -1499,9 +1570,11 @@
           nameHPx = hPx;
           nameWrap.style.top = (topPx - NAME_GAP - hPx).toFixed(1) + 'px';
           nameWrap.style.height = hPx + 'px';
-          nameEl.style.transitionDuration = NAME_IN_MS + 'ms';
-          nameEl.style.transform = 'translateY(0px)';
-          nameEl.style.opacity = '1';
+          // Focus presentation uses the same progress as the light below the card.
+          // Grid hover retains its existing CSS transition.
+          nameEl.style.transitionDuration = isFoc ? '0ms' : NAME_IN_MS + 'ms';
+          nameEl.style.transform = 'translateY(' + (isFoc ? hPx * (1 - focusRevealT) : 0).toFixed(2) + 'px)';
+          nameEl.style.opacity = isFoc ? String(focusRevealT) : '1';
         } else {
           nameEl.style.transitionDuration = NAME_OUT_MS + 'ms';
           nameEl.style.transform = 'translateY(' + nameHPx + 'px)';
@@ -1509,6 +1582,16 @@
           nameShown = '';
         }
       }
+
+    function updateFocusReveal(now) {
+      var settled = focusTo === 1 && focusIdx >= 0 && modeFrom === mode &&
+        now - focusAt >= FOCUS_MS &&
+        Math.abs(camZoom - focusCamZ / CAM_DIST) < 0.0001 &&
+        Math.abs(scroll - focusScroll) < 0.0001 && Math.abs(panY - focusPan) < 0.0001;
+      if (!settled) { focusRevealAt = 0; focusRevealT = 0; return; }
+      if (!focusRevealAt) focusRevealAt = now;
+      focusRevealT = easeOutCubic(clamp01((now - focusRevealAt) / Math.max(1, NAME_IN_MS)));
+    }
 
     function frame(now) {
       raf = requestAnimationFrame(frame);
@@ -1543,11 +1626,12 @@
       } else {
         camZoom += (wantZoom - camZoom) * (1 - Math.exp(-dt / 140));
       }
-      // 硬夹：任何情况下 camZoom 都不能为 0 / 负数 / NaN（都会让投影爆掉）
+      // Only a non-finite camera coordinate is invalid; zero/negative world z can be valid.
       if (!isFinite(camZoom)) camZoom = 1;
       // 允许小值甚至负值：远处照片要求摄像机越过原点，只要目标照片的 zc>0 就合法。
       // （屏幕上会消失的是 zc<0.9 的那些近处照片 —— 那是它们从镜头旁掠过，符合预期。）
-      camZoom = Math.max(-2, Math.min(1, camZoom));
+      // Portraits may require pulling back as well as pushing in.
+      camZoom = Math.max(-2, Math.min(4, camZoom));
       // 🔴 不能只在 focusIdx>=0 时才送 —— 退出时 focusIdx 已置 -1，
       // 镜头就没人送回去了（实测：压暗退了、镜头还停在照片上）。
       // 用聚焦补间自己的缓动进度来插值镜头位置 —— 精确落位。
@@ -1598,8 +1682,9 @@
       } else {
         for (var q3 = 0; q3 < photos.length; q3++) photos[q3].mt = modeT;
       }
-      draw();
+      updateFocusReveal(now);
       updateName(now);
+      draw();
     }
 
     function resize() {
@@ -1656,7 +1741,7 @@
 
       prog = program(VS, FS);
       ['uCenter','uHalf','uRot','uFocal','uCamZ','uHalfW','uHalfH','uScroll','uDim',
-       'uTex','uBlur','uMix','uAlpha','uPaper','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
+       'uTex','uBlur','uMix','uAlpha','uPaper','uGlowWidth','uTint','uUVO','uPaperRGB','uPanY','uCamZoom'].forEach(function (n) {
         loc[n] = gl.getUniformLocation(prog, n);
       });
       quad = gl.createBuffer();
@@ -1771,7 +1856,8 @@
     // CPU 侧投影：必须与顶点着色器完全一致，否则点击会偏。
     // VS: scr = (w - (scroll,panY)) * k;  k = focal/(camZ - w.z);  ndc = scr/(half*0.5)
     function projRect(px, py, pz, hw, hh) {
-      var zc = Math.max(0.12, camZ * camZoom - pz);
+      var zc = camZ * camZoom - pz;
+      if (zc <= 0.12) return { cx: 1e6, cy: 1e6, hx: 0, hy: 0 };
       var k = (FOCAL * H * 0.5) / zc;
       return {
         cx: (px - scroll) * k / (W * 0.5),
@@ -1791,6 +1877,16 @@
     }
     // 拾取：命中则返回最近的（z 最大）那张的下标
     function pickPhoto(nx, ny) {
+      // Match the selected presentation layer's painter order after the camera settles.
+      if (focusTo === 1 && focusRevealAt > 0 && focusIdx >= 0) {
+        var front = photos[focusIdx], frontMt = (front.mt === undefined) ? modeT : front.mt;
+        var frontSize = worldSize(front, frontMt), frontPb = 1 + 2 * MATTE_BORDER;
+        var frontRect = projRect(front.x * (1 - frontMt) + front.gx * frontMt,
+          front.y * (1 - frontMt) + front.gy * frontMt,
+          front.z * (1 - frontMt) + (front.gz || 0) * frontMt,
+          frontSize.hw * frontPb, frontSize.hh * frontPb);
+        if (Math.abs(nx - frontRect.cx) <= frontRect.hx && Math.abs(ny - frontRect.cy) <= frontRect.hy) return focusIdx;
+      }
       // ★ 两遍拾取：
       //   第一遍用【照片】尺寸 -> 两张叠在一起时，
       //     点后面那张的【可见部分】不会被前面那张的白边抢走。
@@ -1822,6 +1918,14 @@
       focusFrom = focusT;
       focusTo = (i < 0) ? 0 : 1;
       focusAt = performance.now();
+      focusRevealAt = 0; focusRevealT = 0;
+      nameOutUntil = 0; nameIdx = -1; nameShown = '';
+      // Remove the previous title before moving the camera, including a hovered label.
+      if (nameEl) {
+        nameEl.style.transitionDuration = '0ms';
+        nameEl.style.transform = 'translateY(' + nameHPx + 'px)';
+        nameEl.style.opacity = '0';
+      }
       focusFromScroll = scroll;      // 记录起点，供补间按进度精确插值
       focusFromPan = panY;
       focusFromZoom = camZoom;       // 退出时要从这里插值回 1，否则拉远动画会消失
@@ -1861,29 +1965,30 @@
         // focusPan 留到 focusCamZ 算出之后再定（见下面）——
         // 补偿量必须用**推近之后**的深度，否则会差 camZ*zc 那个倍数。
         var z0 = ph.z * (1 - mt) + (ph.gz || 0) * mt;
-        var hh0 = worldSize(ph, mt).hh;
-        // 屏高占比 = hh / zc -> 想要 FOCUS_FILL，则 zc = hh/FOCUS_FILL
-        focusCamZ = z0 + hh0 / FOCUS_FILL;
-        // 🔴 必须夹住！聚焦**远处那一层**（z0 为负）时，
-        //    focusCamZ = z0 + hh0/0.72 可能 <= 0，摄像机直接跑到照片后面，
-        //    于是 camZoom 为负 -> zc = camZ*camZoom - z 为负 -> 投影彻底退化：
-        //    照片被推到画面外（实测 camZoom = -0.162、panY = -0.498、照片低了 420px），
-        //    严重时就是之前那个 GPU 卡死。这里保证摄像机始终在照片前面。
-        if (!isFinite(focusCamZ)) focusCamZ = CAM_DIST;
-        // 🔴 只需要保证摄像机在**目标照片之前**：zc = focusCamZ - z0n >= 0.35。
-        // 我上一版写成 Math.max(CAM_DIST*0.5, ...)（摄像机离原点至少 1.6），
-        // 对远处那层（z0 为负）来说摄像机永远到不了近处 ——
-        // 表现就是**放大幅度被砍**（用户：不会写上下位移就不位移只减小放大幅度了）。
-        // 注意 focusCamZ 本身可以为负：远处照片 z0=-1.25 时 focusCamZ=-0.07，
-        // zc = -0.07-(-1.25) = 1.18 > 0，完全合法。
+        var size0 = worldSize(ph, mt);
+        // Solve perspective for this card's depth AND dimensions. A wide panorama
+        // also needs a width bound, including its paper border.
+        var pb0 = 1 / (1 + 2 * MATTE_BORDER);
+        var titlePx = Math.round(NAME_FOC_PX * 1.5) + NAME_GAP;
+        var contentRoom = Math.max(window.innerHeight * 0.25, window.innerHeight - navH - 36);
+        var imageRoom = Math.max(window.innerHeight * 0.20, contentRoom - titlePx - GLOW_GAP_PX);
+        // Fit the entire stack: title ABOVE the photo and reflection BELOW it.
+        var focusDistance = Math.max(0.35, FOCAL * size0.hh / FOCUS_FILL,
+          FOCAL * size0.hw * H / (W * 0.90 * pb0),
+          FOCAL * (size0.hh + size0.hw * GLOW_DEPTH) * window.innerHeight / (pb0 * imageRoom));
+        var photoPx = FOCAL * size0.hh * window.innerHeight / (pb0 * focusDistance);
+        var lightPx = FOCAL * size0.hw * GLOW_DEPTH * window.innerHeight / (pb0 * focusDistance);
+        var stackPx = titlePx + photoPx + GLOW_GAP_PX + lightPx;
+        var centerPx = navH + 18 + Math.max(0, (contentRoom - stackPx) * 0.5) + titlePx + photoPx * 0.5;
+        dyNdc = 1 - 2 * centerPx / Math.max(1, window.innerHeight);
+        focusCamZ = z0 + focusDistance;
+        if (!isFinite(focusCamZ)) focusCamZ = camZ;
+        // The safety bound is relative to the target, not the world origin.
+        // A negative camera coordinate is valid for a farther negative-z card.
+        // The previous absolute CAM_DIST*0.30 floor cut those cards down to 29%.
+        // GPU and CPU now reject cards behind the camera instead of projecting
+        // them onto zc=0.12; their depth separation is otherwise unchanged.
         focusCamZ = Math.max(z0n + 0.35, focusCamZ);
-        // The camera must stay in FRONT of the z=0 plane. z0 is the card's real depth
-        // (+-1.25), so a far-layer card can make the sum negative - the camera then sits
-        // behind the plane, camZoom goes negative and the whole projection inverts, which
-        // is the 'slams into your face' the user reported. 0.30*CAM_DIST (0.9) keeps the
-        // camera in front while the visible half-width at that depth (0.9*W/H = 1.67) stays
-        // below the 2.35 gap, so the neighbouring photos remain outside the frame.
-        if (focusCamZ < CAM_DIST * 0.30) focusCamZ = CAM_DIST * 0.30;
         // 上下定位的补偿量必须用**推近之后**的深度（focusCamZ - z0n）。
         // 之前用的是推近前的 camZ - z0n，实测差 1.67 倍（camZoom 0.756 时），
         // 照片被多推下去 1.67 倍：量出 focusNdcY = -0.1725，而目标只有 -0.1035。
@@ -1979,7 +2084,7 @@
 
 
     // ---------- 液态玻璃：DOM 版真实折射 ----------
-    // 老 GL 版（dome3d.js 的 FS_POST）的折射算法照搬过来：
+    // 老 GL 版（已删除的旧脚本 的 FS_POST）的折射算法照搬过来：
     //   在圆角矩形上求 SDF，取外法线，edge = clamp((d-(1-feather))/feather)，
     //   位移量 = pow(edge, curve) * 强度，方向 = 外法线。
     // DOM 上的做法：把上面算出的 (法线*强度) 编码成一张位移图（R/G 通道，128 为 0），
@@ -2163,13 +2268,13 @@
     // v2：材质回退了一次，旧存档里的玻璃数值会盖住回退后的默认值，所以升版作废。
     // v3：玻璃参数换过量纲（改为绝对像素），旧存档作废。
     var TUNE_KEY = 'album3d-tune-v11';
-    var TUNE_KEYS = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
+    var TUNE_KEYS = ['GLOW_ALPHA','GLOW_WIDTH','GLOW_DEPTH','HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                      'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                      'NAME_FOC_PX',
                      'NAME_GAP','NAME_DELAY','NAME_IN_MS','NAME_OUT_MS','NAME_SHADOW','NAME_MAXW',
                      'NAV_INSET','NAV_TOP','NAV_SIZE','TOGGLE_BOTTOM','TOGGLE_LEFT', 'GLASS_DEPTH_PCT', 'GLASS_FEATHER', 'GLASS_CURVE', 'GLASS_CHROMA', 'GLASS_FROST', 'GLASS_SAT', 'GLASS_FROST_MIX', 'GRID_COLS', 'GRID_GAPX', 'GRID_GAPY', 'GRID_FIT'];
     function getVar(k) {
-      return ({ HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
+      return ({ GLOW_ALPHA:GLOW_ALPHA, GLOW_WIDTH:GLOW_WIDTH, GLOW_DEPTH:GLOW_DEPTH, HOLD_MS: HOLD_MS, TYPE_MS: TYPE_MS, DEL_MS: DEL_MS, FLY_MS: FLY_MS,
         FLY_STAGGER: FLY_STAGGER, GAP: GAP, JITTER: JITTER, Z_SPREAD: Z_SPREAD,
         CARD_H: CARD_H, CAM_DIST: CAM_DIST, FOCUS_FILL: FOCUS_FILL, DIM_MAX: DIM_MAX,
         FOCUS_MS: FOCUS_MS, WHEEL_IMPULSE: WHEEL_IMPULSE, INERTIA_TAU: INERTIA_TAU,
@@ -2186,7 +2291,8 @@
         NAME_FOC_PX: NAME_FOC_PX })[k];
     }
     function setVar(k, v) {
-      if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
+      if (k === 'GLOW_ALPHA') GLOW_ALPHA = v; else if (k === 'GLOW_WIDTH') GLOW_WIDTH = v;
+      else if (k === 'GLOW_DEPTH') GLOW_DEPTH = v; else if (k === 'HOLD_MS') HOLD_MS = v; else if (k === 'TYPE_MS') TYPE_MS = v;
       else if (k === 'DEL_MS') DEL_MS = v; else if (k === 'FLY_MS') FLY_MS = v;
       else if (k === 'FLY_STAGGER') FLY_STAGGER = v; else if (k === 'GAP') GAP = v;
       else if (k === 'JITTER') JITTER = v; else if (k === 'Z_SPREAD') Z_SPREAD = v;
@@ -2218,6 +2324,9 @@
     function loadTune() {
       try {
         var j = JSON.parse(localStorage.getItem(TUNE_KEY) || '{}');
+        // Adopt revised glow defaults without resetting other saved settings.
+        if (j.GLOW_WIDTH === 1.80) j.GLOW_WIDTH = GLOW_WIDTH;
+        if (j.GLOW_ALPHA === 0.85) j.GLOW_ALPHA = GLOW_ALPHA;
         TUNE_KEYS.forEach(function (k) { if (typeof j[k] === 'number') setVar(k, j[k]); });
       } catch (e) {}
     }
@@ -2229,6 +2338,9 @@
     var tunerEl = null;
     function buildTuner() {
       var rows = [
+        ['底部光晕 强度','GLOW_ALPHA',0,1,0.01],
+        ['底部光晕 宽度','GLOW_WIDTH',1,2.5,0.05],
+        ['底部光晕 深度','GLOW_DEPTH',0.1,0.8,0.02],
         ['开屏 停留 ms', 'HOLD_MS', 0, 4000, 50],
         ['开屏 打字 ms', 'TYPE_MS', 20, 200, 5],
         ['开屏 删除 ms', 'DEL_MS', 15, 150, 5],
@@ -2362,7 +2474,7 @@
         'font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-all;user-select:all';
       panel.appendChild(out);
       function dump() {
-        var keys = ['HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
+        var keys = ['GLOW_ALPHA','GLOW_WIDTH','GLOW_DEPTH','HOLD_MS','TYPE_MS','DEL_MS','FLY_MS','FLY_STAGGER','GAP','JITTER','Z_SPREAD',
                     'CARD_H','FOCUS_FILL','DIM_MAX','FOCUS_MS','WHEEL_IMPULSE','INERTIA_TAU',
                     'NAME_FOC_PX',
                     'NAME_GAP','NAME_DELAY','NAME_IN_MS','NAME_OUT_MS','NAME_SHADOW','NAME_MAXW',
@@ -2469,6 +2581,7 @@
                         // 聚焦相关的量：用于核对上下定位（panY 是否落到照片的 y 上）
                         panY: panY, focusPan: focusPan, focusScroll: focusScroll,
                         focusIdx: focusIdx, focusT: focusT, focusTo: focusTo,
+                        focusAt: focusAt, focusRevealAt: focusRevealAt, focusRevealT: focusRevealT,
                         camZoom: camZoom, mode: mode, modeT: modeT,
                         // 聚焦那张当前在屏幕上的实际纵向位置（NDC，0 = 正中，正 = 偏上）
                         focusNdcY: (focusIdx >= 0) ? (function () {

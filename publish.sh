@@ -37,6 +37,11 @@ find_wrangler() {
   local nodeexe="C:/Users/29537/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
   if [ -f "$managed" ] && [ -f "$nodeexe" ]; then echo "$nodeexe $managed"; return; fi
   if [ -x node_modules/.bin/wrangler ]; then echo "node_modules/.bin/wrangler"; return; fi
+  # 2026-11-06：.workbuddy 里那份 node/wrangler 已被清理，本机改用
+  # D:/blogwork/wrtools 下的一份（npm i wrangler@4 + 复制 node.exe，目的是路径无空格）。
+  local alt="D:/blogwork/wrtools/node_modules/wrangler/wrangler-dist/cli.js"
+  local altnode="D:/blogwork/wrtools/node.exe"
+  if [ -f "$alt" ] && [ -f "$altnode" ]; then echo "$altnode $alt"; return; fi
   echo ""
 }
 
