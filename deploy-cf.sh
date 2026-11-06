@@ -69,6 +69,9 @@ echo "    CNAME：[$(cat public/CNAME 2>/dev/null)]"
 
 # ---------- 发布 ----------
 echo "==> 发布到 Cloudflare Pages（项目 $PROJECT / 分支 $BRANCH）"
-$WR pages deploy public --project-name "$PROJECT" --branch "$BRANCH" --commit-dirty=true
+# 2026-11-06：wrangler 会在当前目录建 `.wrangler/tmp`；在仓库里这个建目录动作会被拦截
+# （EPERM）。所以切到一个可写临时目录里发布，产物用绝对路径。
+WRKD="$(mktemp -d 2>/dev/null || echo /tmp)"
+cd "$WRKD" && $WR pages deploy "$REPO/public" --project-name "$PROJECT" --branch "$BRANCH" --commit-dirty=true
 
 echo "==> 完成。生产地址：https://$PROJECT.pages.dev"
